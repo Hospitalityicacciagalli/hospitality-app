@@ -12,6 +12,7 @@ function CustomerForm() {
   const [saving, setSaving] = useState(false)
   const [allergens, setAllergens] = useState([])
 
+  // Dati del form
   const [formData, setFormData] = useState({
     first_name: '',
     last_name: '',
@@ -27,14 +28,17 @@ function CustomerForm() {
     source: 'manual',
   })
 
+  // Allergeni selezionati: { allergen_id: { selected: bool, severity: string, notes: string } }
   const [selectedAllergens, setSelectedAllergens] = useState({})
 
+  // Consensi GDPR
   const [consents, setConsents] = useState({
     data_processing: false,
     health_data: false,
     marketing: false,
   })
 
+  // Carica la lista allergeni al mount
   useEffect(() => {
     loadAllergens()
     if (isEditing) {
@@ -58,6 +62,7 @@ function CustomerForm() {
   async function loadCustomer() {
     setLoading(true)
     try {
+      // Carica dati cliente
       const { data: customer, error: customerError } = await supabase
         .from('customers')
         .select('*')
@@ -81,6 +86,7 @@ function CustomerForm() {
         source: customer.source || 'manual',
       })
 
+      // Carica allergeni del cliente
       const { data: customerAllergens, error: allergensError } = await supabase
         .from('customer_allergens')
         .select('*')
@@ -98,6 +104,7 @@ function CustomerForm() {
       })
       setSelectedAllergens(selected)
 
+      // Carica consensi
       const { data: gdprData, error: gdprError } = await supabase
         .from('gdpr_consents')
         .select('*')
@@ -153,6 +160,7 @@ function CustomerForm() {
   async function handleSubmit(e) {
     e.preventDefault()
 
+    // Validazione base
     if (!formData.first_name.trim() || !formData.last_name.trim()) {
       alert('Nome e cognome sono obbligatori.')
       return
@@ -168,6 +176,7 @@ function CustomerForm() {
       return
     }
 
+    // Se ci sono allergeni selezionati, serve il consenso dati salute
     const hasAllergens = Object.keys(selectedAllergens).length > 0
     if (hasAllergens && !consents.health_data) {
       alert('Per registrare gli allergeni è necessario il consenso al trattamento dei dati sulla salute.')
@@ -176,6 +185,7 @@ function CustomerForm() {
 
     setSaving(true)
     try {
+      // Prepara i dati (campi vuoti → null per evitare errori di unicità)
       const customerData = {
         ...formData,
         phone: formData.phone.trim() || null,
@@ -185,6 +195,7 @@ function CustomerForm() {
       let customerId = id
 
       if (isEditing) {
+        // Aggiorna cliente esistente
         const { error } = await supabase
           .from('customers')
           .update(customerData)
@@ -199,6 +210,7 @@ function CustomerForm() {
           throw error
         }
       } else {
+        // Crea nuovo cliente
         const { data, error } = await supabase
           .from('customers')
           .insert(customerData)
@@ -216,6 +228,7 @@ function CustomerForm() {
         customerId = data.id
       }
 
+      // Gestione allergeni: cancella tutti e reinserisci
       await supabase
         .from('customer_allergens')
         .delete()
@@ -238,6 +251,7 @@ function CustomerForm() {
         if (allergenError) throw allergenError
       }
 
+      // Gestione consensi GDPR
       for (const [consentType, granted] of Object.entries(consents)) {
         const { error: consentError } = await supabase
           .from('gdpr_consents')
@@ -274,6 +288,7 @@ function CustomerForm() {
 
   return (
     <div className="max-w-3xl mx-auto">
+      {/* Intestazione */}
       <div className="flex items-center gap-4 mb-6">
         <button
           onClick={() => navigate(-1)}
@@ -287,6 +302,7 @@ function CustomerForm() {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-6">
+        {/* Dati anagrafici */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Dati Anagrafici</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -319,7 +335,9 @@ function CustomerForm() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Telefono</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Telefono
+              </label>
               <input
                 type="tel"
                 name="phone"
@@ -330,7 +348,9 @@ function CustomerForm() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Email
+              </label>
               <input
                 type="email"
                 name="email"
@@ -343,7 +363,9 @@ function CustomerForm() {
           </div>
 
           <div className="mt-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Categoria</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Categoria
+            </label>
             <select
               name="category"
               value={formData.category}
@@ -359,7 +381,9 @@ function CustomerForm() {
           </div>
 
           <div className="mt-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">Note</label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Note
+            </label>
             <textarea
               name="notes"
               value={formData.notes}
@@ -371,6 +395,7 @@ function CustomerForm() {
           </div>
         </div>
 
+        {/* Indirizzo (collassabile) */}
         <details className="bg-white rounded-xl shadow-sm border border-gray-200">
           <summary className="p-6 cursor-pointer text-lg font-semibold text-gray-900 hover:text-wine-700">
             Indirizzo (opzionale)
@@ -423,6 +448,7 @@ function CustomerForm() {
           </div>
         </details>
 
+        {/* Allergeni */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <div className="flex items-center gap-2 mb-4">
             <AlertTriangle size={20} className="text-orange-500" />
@@ -455,6 +481,7 @@ function CustomerForm() {
                     <span className="font-medium text-gray-900">{allergen.name}</span>
                   </label>
 
+                  {/* Selettore severità visibile solo se allergene selezionato */}
                   {isSelected && (
                     <div className="mt-2 ml-8">
                       <select
@@ -474,6 +501,7 @@ function CustomerForm() {
           </div>
         </div>
 
+        {/* Consensi GDPR */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Consensi Privacy (GDPR)</h2>
 
@@ -529,6 +557,7 @@ function CustomerForm() {
           </div>
         </div>
 
+        {/* Pulsanti azione */}
         <div className="flex flex-col sm:flex-row gap-3 pb-8">
           <button
             type="submit"

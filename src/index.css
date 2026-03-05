@@ -2,6 +2,7 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Stili base per l'app */
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -9,6 +10,7 @@ body {
   background-color: #f9fafb;
 }
 
+/* Nasconde scrollbar su iPad per aspetto più pulito */
 .no-scrollbar::-webkit-scrollbar {
   display: none;
 }

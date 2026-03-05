@@ -10,6 +10,7 @@ function CustomerList() {
   const [categoryFilter, setCategoryFilter] = useState('all')
   const navigate = useNavigate()
 
+  // Carica i clienti dal database
   useEffect(() => {
     loadCustomers()
   }, [])
@@ -17,6 +18,7 @@ function CustomerList() {
   async function loadCustomers() {
     setLoading(true)
     try {
+      // Carica clienti con i loro allergeni
       const { data: customersData, error: customersError } = await supabase
         .from('customers')
         .select('*')
@@ -25,6 +27,7 @@ function CustomerList() {
 
       if (customersError) throw customersError
 
+      // Carica gli allergeni per tutti i clienti
       const { data: allergensData, error: allergensError } = await supabase
         .from('customer_allergens')
         .select(`
@@ -40,6 +43,7 @@ function CustomerList() {
 
       if (allergensError) throw allergensError
 
+      // Combina clienti con i loro allergeni
       const customersWithAllergens = customersData.map(customer => ({
         ...customer,
         allergens: allergensData
@@ -59,6 +63,7 @@ function CustomerList() {
     }
   }
 
+  // Filtra clienti in base alla ricerca e alla categoria
   const filteredCustomers = customers.filter(customer => {
     const matchesSearch =
       searchTerm === '' ||
@@ -99,6 +104,7 @@ function CustomerList() {
 
   return (
     <div>
+      {/* Intestazione */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Clienti</h1>
@@ -113,8 +119,10 @@ function CustomerList() {
         </Link>
       </div>
 
+      {/* Barra ricerca e filtri */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-6">
         <div className="flex flex-col sm:flex-row gap-3">
+          {/* Campo ricerca */}
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
             <input
@@ -125,6 +133,8 @@ function CustomerList() {
               className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 focus:border-transparent text-base"
             />
           </div>
+
+          {/* Filtro categoria */}
           <select
             value={categoryFilter}
             onChange={(e) => setCategoryFilter(e.target.value)}
@@ -140,8 +150,10 @@ function CustomerList() {
         </div>
       </div>
 
+      {/* Lista clienti */}
       {filteredCustomers.length === 0 ? (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+          <Users className="mx-auto text-gray-300 mb-4" size={48} />
           <p className="text-gray-500 text-lg">
             {searchTerm || categoryFilter !== 'all'
               ? 'Nessun cliente trovato con questi criteri'
@@ -157,10 +169,12 @@ function CustomerList() {
               className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:border-wine-300 hover:shadow-md transition-all cursor-pointer active:bg-gray-50"
             >
               <div className="flex items-center gap-4">
+                {/* Avatar con iniziali */}
                 <div className="w-12 h-12 rounded-full bg-wine-100 text-wine-700 flex items-center justify-center font-bold text-lg flex-shrink-0">
                   {customer.first_name[0]}{customer.last_name[0]}
                 </div>
 
+                {/* Info cliente */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="font-semibold text-gray-900">
@@ -186,6 +200,7 @@ function CustomerList() {
                     )}
                   </div>
 
+                  {/* Allergeni */}
                   {customer.allergens.length > 0 && (
                     <div className="flex items-center gap-1 mt-2 flex-wrap">
                       <AlertTriangle size={14} className="text-red-500 flex-shrink-0" />
@@ -202,6 +217,7 @@ function CustomerList() {
                   )}
                 </div>
 
+                {/* Freccia */}
                 <ChevronRight size={20} className="text-gray-400 flex-shrink-0" />
               </div>
             </div>
@@ -209,6 +225,18 @@ function CustomerList() {
         </div>
       )}
     </div>
+  )
+}
+
+// Necessario per l'icona quando la lista è vuota
+function Users(props) {
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={props.size || 24} height={props.size || 24} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className}>
+      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+      <circle cx="9" cy="7" r="4" />
+      <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+    </svg>
   )
 }
 
