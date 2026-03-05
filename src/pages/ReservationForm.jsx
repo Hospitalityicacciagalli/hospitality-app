@@ -1,7 +1,11 @@
 import { useState, useEffect } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Save, Search, AlertTriangle, UserPlus, Check } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+
+function pad(n) {
+  return n < 10 ? '0' + n : '' + n
+}
 
 function formatDateISO(date) {
   var y = date.getFullYear()
@@ -10,9 +14,25 @@ function formatDateISO(date) {
   return y + '-' + m + '-' + d
 }
 
+// Determina il turno dall'orario
+function detectMealFromTime(hour) {
+  if (hour >= 11 && hour < 16) return 'lunch'
+  if (hour >= 16 || hour < 4) return 'dinner'
+  return null
+}
+
+var HOURS = []
+for (var h = 11; h <= 23; h++) {
+  HOURS.push(h)
+}
+
+var MINUTES = ['00', '15', '30', '45']
+
 function ReservationForm() {
   var params = useParams()
   var id = params.id
+  var searchParamsResult = useSearchParams()
+  var searchParams = searchParamsResult[0]
   var navigate = useNavigate()
   var isEditing = Boolean(id)
 
@@ -24,7 +44,6 @@ function ReservationForm() {
   var saving = savingState[0]
   var setSaving = savingState[1]
 
-  // Ricerca cliente
   var searchState = useState('')
   var customerSearch = searchState[0]
   var setCustomerSearch = searchState[1]
@@ -45,17 +64,28 @@ function ReservationForm() {
   var showSearch = showSearchState[0]
   var setShowSearch = showSearchState[1]
 
-  // Disponibilita
   var availabilityState = useState(null)
   var availability = availabilityState[0]
   var setAvailability = availabilityState[1]
 
-  // Dati prenotazione
+  // Orario separato in ore e minuti
+  var hourState = useState('')
+  var selectedHour = hourState[0]
+  var setSelectedHour = hourState[1]
+
+  var minuteState = useState('00')
+  var selectedMinute = minuteState[0]
+  var setSelectedMinute = minuteState[1]
+
+  // Data e turno iniziali dai parametri URL
+  var initialDate = searchParams.get('date') || formatDateISO(new Date())
+  var initialMeal = searchParams.get('meal') || 'dinner'
+
   var formState = useState({
-    reservation_date: formatDateISO(new Date()),
-    meal_type: 'dinner',
-    requested_time: '',
-    guests_count: 2,
+    reservation_date: initialDate,
+    meal_type: initialMeal,
+    adults_count: 2,
+    children_count: 0,
     table_info: '',
     notes: '',
     special_requests: '',
@@ -63,6 +93,8 @@ function ReservationForm() {
   })
   var formData = formState[0]
   var setFormData = formState[1]
+
+  var totalGuests = formData.adults_count + formData.children_count
 
   useEffect(function() {
     if (isEditing) {
@@ -74,7 +106,23 @@ function ReservationForm() {
     if (formData.reservation_date && formData.meal_type) {
       checkAvailability()
     }
-  }, [formData.reservation_date, formData.meal_type, formData.guests_count])
+  }, [formData.reservation_date, formData.meal_type, totalGuests])
+
+  // Auto-detect turno quando cambia l'ora
+  useEffect(function() {
+    if (selectedHour !== '') {
+      var hourNum = parseInt(selectedHour)
+      var detected = detectMealFromTime(hourNum)
+      if (detected) {
+        setFormData(function(prev) {
+          var updated = {}
+          for (var key in prev) { updated[key] = prev[key] }
+          updated.meal_type = detected
+          return updated
+        })
+      }
+    }
+  }, [selectedHour])
 
   function loadReservation() {
     setLoading(true)
@@ -93,13 +141,28 @@ function ReservationForm() {
         setFormData({
           reservation_date: res.reservation_date,
           meal_type: res.meal_type,
-          requested_time: res.requested_time || '',
-          guests_count: res.guests_count,
+          adults_count: res.adults_count || res.guests_count,
+          children_count: res.children_count || 0,
           table_info: res.table_info || '',
           notes: res.notes || '',
           special_requests: res.special_requests || '',
           source: res.source || 'manual'
         })
+
+        // Imposta orario
+        if (res.requested_time) {
+          var timeParts = res.requested_time.split(':')
+          setSelectedHour(timeParts[0])
+          // Trova il minuto più vicino tra 00, 15, 30, 45
+          var mins = parseInt(timeParts[1])
+          var closest = '00'
+          if (mins >= 8 && mins < 23) closest = '15'
+          else if (mins >= 23 && mins < 38) closest = '30'
+          else if (mins >= 38 && mins < 53) closest = '45'
+          else if (mins >= 53) closest = '00'
+          setSelectedMinute(closest)
+        }
+
         setSelectedCustomer(res.customers)
         setShowSearch(false)
         loadCustomerAllergens(res.customers.id)
@@ -153,7 +216,7 @@ function ReservationForm() {
       .rpc('check_availability', {
         p_date: formData.reservation_date,
         p_meal_type: formData.meal_type,
-        p_guests: formData.guests_count
+        p_guests: totalGuests
       })
       .then(function(result) {
         if (!result.error && result.data && result.data.length > 0) {
@@ -165,14 +228,13 @@ function ReservationForm() {
   function handleInputChange(e) {
     var name = e.target.name
     var value = e.target.value
-    if (name === 'guests_count') {
-      value = parseInt(value) || 1
+    if (name === 'adults_count' || name === 'children_count') {
+      value = parseInt(value) || 0
+      if (value < 0) value = 0
     }
     setFormData(function(prev) {
       var updated = {}
-      for (var key in prev) {
-        updated[key] = prev[key]
-      }
+      for (var key in prev) { updated[key] = prev[key] }
       updated[name] = value
       return updated
     })
@@ -191,26 +253,34 @@ function ReservationForm() {
       return
     }
 
-    if (formData.guests_count < 1) {
-      alert('Il numero di persone deve essere almeno 1.')
+    if (formData.adults_count < 1) {
+      alert('Il numero di adulti deve essere almeno 1.')
       return
     }
 
     if (availability && !availability.is_available) {
       var conferma = window.confirm(
-        'Attenzione: i coperti disponibili (' + availability.remaining_covers + ') non sono sufficienti per ' + formData.guests_count + ' persone. Vuoi procedere comunque?'
+        'Attenzione: i coperti disponibili (' + availability.remaining_covers + ') non sono sufficienti per ' + totalGuests + ' ospiti. Vuoi procedere comunque?'
       )
       if (!conferma) return
     }
 
     setSaving(true)
 
+    // Componi l'orario
+    var requestedTime = null
+    if (selectedHour !== '') {
+      requestedTime = pad(parseInt(selectedHour)) + ':' + selectedMinute + ':00'
+    }
+
     var reservationData = {
       customer_id: selectedCustomer.id,
       reservation_date: formData.reservation_date,
       meal_type: formData.meal_type,
-      requested_time: formData.requested_time || null,
-      guests_count: formData.guests_count,
+      requested_time: requestedTime,
+      guests_count: totalGuests,
+      adults_count: formData.adults_count,
+      children_count: formData.children_count,
       table_info: formData.table_info || null,
       notes: formData.notes || null,
       special_requests: formData.special_requests || null,
@@ -253,7 +323,6 @@ function ReservationForm() {
 
   return (
     <div className="max-w-3xl mx-auto">
-      {/* Intestazione */}
       <div className="flex items-center gap-4 mb-6">
         <button
           onClick={function() { navigate(-1) }}
@@ -299,7 +368,6 @@ function ReservationForm() {
                 )}
               </div>
 
-              {/* Allergeni del cliente */}
               {customerAllergens.length > 0 && (
                 <div className="mt-3 p-3 bg-red-50 rounded-lg border border-red-200">
                   <div className="flex items-center gap-2 mb-2">
@@ -332,7 +400,6 @@ function ReservationForm() {
                 />
               </div>
 
-              {/* Risultati ricerca */}
               {searchResults.length > 0 && (
                 <div className="mt-2 border border-gray-200 rounded-lg overflow-hidden">
                   {searchResults.map(function(customer) {
@@ -399,6 +466,9 @@ function ReservationForm() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Turno <span className="text-red-500">*</span>
+                {selectedHour !== '' && (
+                  <span className="text-xs text-wine-600 ml-1">(rilevato dall'orario)</span>
+                )}
               </label>
               <select
                 name="meal_type"
@@ -411,47 +481,34 @@ function ReservationForm() {
               </select>
             </div>
 
+            {/* Orario con ore e minuti separati */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                Orario richiesto
+                Orario di arrivo
               </label>
-              <input
-                type="time"
-                name="requested_time"
-                value={formData.requested_time}
-                onChange={handleInputChange}
-                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Numero persone <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="number"
-                name="guests_count"
-                value={formData.guests_count}
-                onChange={handleInputChange}
-                min="1"
-                max="200"
-                required
-                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base"
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Tavolo
-              </label>
-              <input
-                type="text"
-                name="table_info"
-                value={formData.table_info}
-                onChange={handleInputChange}
-                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base"
-                placeholder="Es: Tavolo 5, Terrazza"
-              />
+              <div className="flex items-center gap-2">
+                <select
+                  value={selectedHour}
+                  onChange={function(e) { setSelectedHour(e.target.value) }}
+                  className="flex-1 px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 bg-white text-base"
+                >
+                  <option value="">Ore</option>
+                  {HOURS.map(function(h) {
+                    return <option key={h} value={h}>{pad(h)}</option>
+                  })}
+                </select>
+                <span className="text-xl font-bold text-gray-400">:</span>
+                <select
+                  value={selectedMinute}
+                  onChange={function(e) { setSelectedMinute(e.target.value) }}
+                  className="flex-1 px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 bg-white text-base"
+                  disabled={selectedHour === ''}
+                >
+                  {MINUTES.map(function(m) {
+                    return <option key={m} value={m}>{m}</option>
+                  })}
+                </select>
+              </div>
             </div>
 
             <div>
@@ -473,21 +530,75 @@ function ReservationForm() {
             </div>
           </div>
 
+          {/* Adulti e Bambini */}
+          <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <h3 className="text-sm font-semibold text-gray-700 mb-3">Numero ospiti</h3>
+            <div className="grid grid-cols-3 gap-4 items-end">
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">
+                  Adulti <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="number"
+                  name="adults_count"
+                  value={formData.adults_count}
+                  onChange={handleInputChange}
+                  min="1"
+                  max="200"
+                  required
+                  className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base text-center"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">
+                  Bambini
+                </label>
+                <input
+                  type="number"
+                  name="children_count"
+                  value={formData.children_count}
+                  onChange={handleInputChange}
+                  min="0"
+                  max="200"
+                  className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base text-center"
+                />
+              </div>
+              <div className="text-center">
+                <label className="block text-sm text-gray-600 mb-1">Totale</label>
+                <div className="px-4 py-3 bg-wine-100 text-wine-800 rounded-lg font-bold text-lg">
+                  {totalGuests}
+                </div>
+              </div>
+            </div>
+          </div>
+
           {/* Disponibilita */}
           {availability && (
             <div className={"mt-4 p-3 rounded-lg border " + (availability.is_available ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200")}>
               <p className={"text-sm font-medium " + (availability.is_available ? "text-green-800" : "text-red-800")}>
                 {availability.is_available
                   ? mealLabel + ": " + availability.remaining_covers + " coperti ancora disponibili su " + availability.max_covers
-                  : "Attenzione: solo " + availability.remaining_covers + " coperti disponibili su " + availability.max_covers + " per " + formData.guests_count + " persone richieste"}
+                  : "Attenzione: solo " + availability.remaining_covers + " coperti disponibili su " + availability.max_covers + " per " + totalGuests + " ospiti richiesti"}
               </p>
             </div>
           )}
 
           <div className="mt-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Note
+              Tavolo
             </label>
+            <input
+              type="text"
+              name="table_info"
+              value={formData.table_info}
+              onChange={handleInputChange}
+              className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base"
+              placeholder="Es: Tavolo 5, Terrazza"
+            />
+          </div>
+
+          <div className="mt-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Note</label>
             <textarea
               name="notes"
               value={formData.notes}
@@ -499,9 +610,7 @@ function ReservationForm() {
           </div>
 
           <div className="mt-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Richieste speciali
-            </label>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Richieste speciali</label>
             <textarea
               name="special_requests"
               value={formData.special_requests}

@@ -1,24 +1,19 @@
 import { useState, useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
-import { Plus, ChevronLeft, ChevronRight, Users, Clock, Phone, AlertTriangle, CalendarDays } from 'lucide-react'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { Plus, ArrowLeft, Users, Clock, Phone, AlertTriangle, CalendarDays, Baby, User } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
-function formatDateISO(date) {
-  var y = date.getFullYear()
-  var m = String(date.getMonth() + 1).padStart(2, '0')
-  var d = String(date.getDate()).padStart(2, '0')
-  return y + '-' + m + '-' + d
-}
-
-function formatDateDisplay(date) {
+function formatDateDisplay(dateStr) {
+  var parts = dateStr.split('-')
+  var d = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
   var options = { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }
-  return date.toLocaleDateString('it-IT', options)
+  return d.toLocaleDateString('it-IT', options)
 }
 
-function ReservationList() {
-  var dateState = useState(new Date())
-  var selectedDate = dateState[0]
-  var setSelectedDate = dateState[1]
+function ReservationDay() {
+  var params = useParams()
+  var dateStr = params.date
+  var navigate = useNavigate()
 
   var mealState = useState('lunch')
   var selectedMeal = mealState[0]
@@ -32,7 +27,7 @@ function ReservationList() {
   var loading = loadingState[0]
   var setLoading = loadingState[1]
 
-  var summaryState = useState({ total_covers: 0, total_reservations: 0 })
+  var summaryState = useState({ total: 0, adults: 0, children: 0, count: 0 })
   var summary = summaryState[0]
   var setSummary = summaryState[1]
 
@@ -40,15 +35,13 @@ function ReservationList() {
   var settings = settingsState[0]
   var setSettings = settingsState[1]
 
-  var navigate = useNavigate()
-
   useEffect(function() {
     loadSettings()
   }, [])
 
   useEffect(function() {
     loadReservations()
-  }, [selectedDate, selectedMeal])
+  }, [dateStr, selectedMeal])
 
   function loadSettings() {
     supabase
@@ -65,7 +58,6 @@ function ReservationList() {
 
   function loadReservations() {
     setLoading(true)
-    var dateStr = formatDateISO(selectedDate)
 
     supabase
       .from('reservations')
@@ -75,41 +67,32 @@ function ReservationList() {
       .order('requested_time', { ascending: true, nullsFirst: false })
       .then(function(result) {
         if (result.error) {
-          console.error('Errore caricamento prenotazioni:', result.error)
           setReservations([])
         } else {
           setReservations(result.data || [])
         }
 
-        // Carica anche il riepilogo coperti
         return supabase
           .from('reservations')
-          .select('guests_count')
+          .select('guests_count, adults_count, children_count')
           .eq('reservation_date', dateStr)
           .eq('meal_type', selectedMeal)
           .not('status', 'in', '("cancelled")')
       })
       .then(function(result) {
         if (!result.error && result.data) {
-          var totalCovers = 0
-          var totalRes = result.data.length
+          var total = 0
+          var adults = 0
+          var children = 0
           for (var i = 0; i < result.data.length; i++) {
-            totalCovers += result.data[i].guests_count
+            total += result.data[i].guests_count
+            adults += result.data[i].adults_count
+            children += result.data[i].children_count
           }
-          setSummary({ total_covers: totalCovers, total_reservations: totalRes })
+          setSummary({ total: total, adults: adults, children: children, count: result.data.length })
         }
         setLoading(false)
       })
-  }
-
-  function changeDate(days) {
-    var newDate = new Date(selectedDate)
-    newDate.setDate(newDate.getDate() + days)
-    setSelectedDate(newDate)
-  }
-
-  function goToToday() {
-    setSelectedDate(new Date())
   }
 
   function updateStatus(reservationId, newStatus) {
@@ -127,8 +110,7 @@ function ReservationList() {
   }
 
   var maxCovers = selectedMeal === 'lunch' ? settings.max_covers_lunch : settings.max_covers_dinner
-  var remainingCovers = maxCovers - summary.total_covers
-  var isToday = formatDateISO(selectedDate) === formatDateISO(new Date())
+  var remainingCovers = maxCovers - summary.total
 
   var statusLabels = {
     confirmed: 'Confermata',
@@ -164,72 +146,31 @@ function ReservationList() {
     hotel_guest: 'Ospite Hotel'
   }
 
-  // Filtra prenotazioni attive (non cancellate)
-  var activeReservations = reservations.filter(function(r) {
-    return r.status !== 'cancelled'
-  })
-
-  var cancelledReservations = reservations.filter(function(r) {
-    return r.status === 'cancelled'
-  })
+  var activeReservations = reservations.filter(function(r) { return r.status !== 'cancelled' })
+  var cancelledReservations = reservations.filter(function(r) { return r.status === 'cancelled' })
 
   return (
     <div>
       {/* Intestazione */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Prenotazioni</h1>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={function() { navigate('/prenotazioni') }}
+            className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
+          >
+            <ArrowLeft size={24} />
+          </button>
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 capitalize">{formatDateDisplay(dateStr)}</h1>
+          </div>
         </div>
         <Link
-          to="/prenotazioni/nuova"
+          to={"/prenotazioni/nuova?date=" + dateStr + "&meal=" + selectedMeal}
           className="inline-flex items-center gap-2 bg-wine-700 text-white px-5 py-3 rounded-xl hover:bg-wine-800 transition-colors font-medium shadow-sm"
         >
           <Plus size={20} />
           <span>Nuova Prenotazione</span>
         </Link>
-      </div>
-
-      {/* Navigazione data */}
-      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-4">
-        <div className="flex items-center justify-between">
-          <button
-            onClick={function() { changeDate(-1) }}
-            className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
-          >
-            <ChevronLeft size={24} />
-          </button>
-
-          <div className="text-center">
-            <p className="text-lg font-semibold text-gray-900 capitalize">
-              {formatDateDisplay(selectedDate)}
-            </p>
-            {!isToday && (
-              <button
-                onClick={goToToday}
-                className="text-sm text-wine-600 hover:text-wine-800 mt-1"
-              >
-                Torna a oggi
-              </button>
-            )}
-          </div>
-
-          <button
-            onClick={function() { changeDate(1) }}
-            className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
-          >
-            <ChevronRight size={24} />
-          </button>
-        </div>
-
-        {/* Selettore data diretta */}
-        <div className="mt-3 flex justify-center">
-          <input
-            type="date"
-            value={formatDateISO(selectedDate)}
-            onChange={function(e) { setSelectedDate(new Date(e.target.value + 'T12:00:00')) }}
-            className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
-          />
-        </div>
       </div>
 
       {/* Tabs Pranzo / Cena */}
@@ -243,7 +184,7 @@ function ReservationList() {
               : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-50")
           }
         >
-          Pranzo (12:30 - 15:00)
+          Pranzo
         </button>
         <button
           onClick={function() { setSelectedMeal('dinner') }}
@@ -254,7 +195,7 @@ function ReservationList() {
               : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-50")
           }
         >
-          Cena (19:30 - 23:00)
+          Cena
         </button>
       </div>
 
@@ -264,11 +205,19 @@ function ReservationList() {
           <div className="flex items-center gap-6">
             <div>
               <p className="text-sm text-gray-500">Prenotazioni</p>
-              <p className="text-2xl font-bold text-gray-900">{summary.total_reservations}</p>
+              <p className="text-2xl font-bold text-gray-900">{summary.count}</p>
             </div>
             <div>
-              <p className="text-sm text-gray-500">Coperti</p>
-              <p className="text-2xl font-bold text-gray-900">{summary.total_covers}</p>
+              <p className="text-sm text-gray-500">Ospiti</p>
+              <p className="text-2xl font-bold text-gray-900">{summary.total}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500 flex items-center gap-1"><User size={12} /> Adulti</p>
+              <p className="text-xl font-bold text-gray-700">{summary.adults}</p>
+            </div>
+            <div>
+              <p className="text-sm text-gray-500 flex items-center gap-1"><Baby size={12} /> Bambini</p>
+              <p className="text-xl font-bold text-gray-700">{summary.children}</p>
             </div>
             <div>
               <p className="text-sm text-gray-500">Disponibili</p>
@@ -277,17 +226,12 @@ function ReservationList() {
               </p>
             </div>
           </div>
-          <div className="text-right">
-            <p className="text-sm text-gray-500">Max coperti</p>
-            <p className="text-lg font-semibold text-gray-700">{maxCovers}</p>
-          </div>
         </div>
 
-        {/* Barra progresso coperti */}
         <div className="mt-3 w-full bg-gray-200 rounded-full h-2">
           <div
             className={"h-2 rounded-full transition-all " + (remainingCovers < 10 ? "bg-red-500" : "bg-wine-600")}
-            style={{ width: Math.min((summary.total_covers / maxCovers) * 100, 100) + '%' }}
+            style={{ width: Math.min((summary.total / maxCovers) * 100, 100) + '%' }}
           />
         </div>
       </div>
@@ -300,9 +244,7 @@ function ReservationList() {
       ) : activeReservations.length === 0 ? (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
           <CalendarDays className="mx-auto text-gray-300 mb-4" size={48} />
-          <p className="text-gray-500 text-lg">
-            Nessuna prenotazione per questo turno
-          </p>
+          <p className="text-gray-500 text-lg">Nessuna prenotazione per questo turno</p>
         </div>
       ) : (
         <div className="space-y-2">
@@ -317,7 +259,6 @@ function ReservationList() {
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
-                    {/* Riga nome e badge */}
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="font-semibold text-gray-900">
                         {customer.last_name} {customer.first_name}
@@ -335,11 +276,10 @@ function ReservationList() {
                       )}
                     </div>
 
-                    {/* Info prenotazione */}
-                    <div className="flex items-center gap-4 mt-2 text-sm text-gray-500">
+                    <div className="flex items-center gap-4 mt-2 text-sm text-gray-500 flex-wrap">
                       <span className="flex items-center gap-1">
                         <Users size={14} />
-                        {res.guests_count} {res.guests_count === 1 ? 'persona' : 'persone'}
+                        {res.guests_count + " ospiti (" + res.adults_count + " ad. + " + res.children_count + " ba.)"}
                       </span>
                       {timeStr && (
                         <span className="flex items-center gap-1">
@@ -359,7 +299,6 @@ function ReservationList() {
                       )}
                     </div>
 
-                    {/* Note e richieste speciali */}
                     {res.notes && (
                       <p className="text-sm text-gray-600 mt-2">{res.notes}</p>
                     )}
@@ -371,7 +310,6 @@ function ReservationList() {
                     )}
                   </div>
 
-                  {/* Stato e azioni */}
                   <div className="flex flex-col items-end gap-2">
                     <span className={"px-3 py-1 rounded-full text-xs font-medium " + statusColors[res.status]}>
                       {statusLabels[res.status]}
@@ -433,11 +371,10 @@ function ReservationList() {
         </div>
       )}
 
-      {/* Prenotazioni cancellate (collassabili) */}
       {cancelledReservations.length > 0 && (
         <details className="mt-6">
           <summary className="text-sm text-gray-400 cursor-pointer hover:text-gray-600">
-            {cancelledReservations.length} {cancelledReservations.length === 1 ? 'prenotazione cancellata' : 'prenotazioni cancellate'}
+            {cancelledReservations.length + (cancelledReservations.length === 1 ? ' prenotazione cancellata' : ' prenotazioni cancellate')}
           </summary>
           <div className="mt-2 space-y-2 opacity-60">
             {cancelledReservations.map(function(res) {
@@ -446,7 +383,7 @@ function ReservationList() {
                 <div key={res.id} className="bg-white rounded-xl border border-gray-200 p-3">
                   <div className="flex items-center justify-between">
                     <span className="text-sm text-gray-500 line-through">
-                      {customer.last_name} {customer.first_name} - {res.guests_count} persone
+                      {customer.last_name + " " + customer.first_name + " - " + res.guests_count + " ospiti"}
                     </span>
                     <span className="px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-800">
                       Cancellata
@@ -464,4 +401,4 @@ function ReservationList() {
   )
 }
 
-export default ReservationList
+export default ReservationDay
