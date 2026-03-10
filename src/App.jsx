@@ -1,81 +1,75 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { AuthProvider, useAuth } from './lib/AuthContext'
-import Layout from './components/Layout'
-import LoginPage from './pages/LoginPage'
-import CustomerList from './pages/CustomerList'
-import CustomerForm from './pages/CustomerForm'
-import CustomerDetail from './pages/CustomerDetail'
-import ReservationCalendar from './pages/ReservationCalendar'
-import ReservationDay from './pages/ReservationDay'
-import ReservationForm from './pages/ReservationForm'
-import UserManagement from './pages/UserManagement'
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { AuthProvider, useAuth } from "./lib/AuthContext";
+import Layout from "./components/Layout";
+import LoginPage from "./pages/LoginPage";
+import CustomerList from "./pages/CustomerList";
+import CustomerForm from "./pages/CustomerForm";
+import CustomerDetail from "./pages/CustomerDetail";
+import ReservationCalendar from "./pages/ReservationCalendar";
+import ReservationDay from "./pages/ReservationDay";
+import ReservationForm from "./pages/ReservationForm";
+import UserManagement from "./pages/UserManagement";
+import StaffList from "./pages/StaffList";
+import StaffForm from "./pages/StaffForm";
+import StaffDetail from "./pages/StaffDetail";
 
 function ProtectedRoutes() {
-  var auth = useAuth()
+  var { session, loading } = useAuth();
 
-  if (auth.loading) {
+  if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="text-center">
-          <div className="w-16 h-16 bg-wine-800 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <span className="text-white text-2xl font-bold">C</span>
-          </div>
-          <p className="text-gray-500">Caricamento...</p>
-        </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh" }}>
+        <div style={{ color: "#7c2d12", fontSize: "18px" }}>Caricamento...</div>
       </div>
-    )
+    );
   }
 
-  if (!auth.session) {
-    return <LoginPage />
-  }
-
-  if (auth.profile && !auth.profile.is_active) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-        <div className="text-center max-w-md">
-          <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <span className="text-red-600 text-2xl font-bold">!</span>
-          </div>
-          <h1 className="text-xl font-bold text-gray-900 mb-2">Account disattivato</h1>
-          <p className="text-gray-500 mb-4">Il tuo account e stato disattivato. Contatta il Super Admin per riattivarlo.</p>
-          <button
-            onClick={function() { auth.signOut() }}
-            className="bg-wine-700 text-white px-6 py-3 rounded-lg hover:bg-wine-800 transition-colors font-medium"
-          >
-            Esci
-          </button>
-        </div>
-      </div>
-    )
+  if (!session) {
+    return <Navigate to="/login" replace />;
   }
 
   return (
-    <Routes>
-      <Route path="/" element={<Layout />}>
-        <Route index element={<Navigate to="/clienti" replace />} />
-        <Route path="clienti" element={<CustomerList />} />
-        <Route path="clienti/nuovo" element={<CustomerForm />} />
-        <Route path="clienti/:id" element={<CustomerDetail />} />
-        <Route path="clienti/:id/modifica" element={<CustomerForm />} />
-        <Route path="prenotazioni" element={<ReservationCalendar />} />
-        <Route path="prenotazioni/giorno/:date" element={<ReservationDay />} />
-        <Route path="prenotazioni/nuova" element={<ReservationForm />} />
-        <Route path="prenotazioni/:id/modifica" element={<ReservationForm />} />
-        <Route path="utenti" element={<UserManagement />} />
-      </Route>
-    </Routes>
-  )
+    <Layout>
+      <Routes>
+        <Route path="/" element={<Navigate to="/prenotazioni" replace />} />
+
+        {/* Clienti */}
+        <Route path="/clienti" element={<CustomerList />} />
+        <Route path="/clienti/nuovo" element={<CustomerForm />} />
+        <Route path="/clienti/:id" element={<CustomerDetail />} />
+        <Route path="/clienti/:id/modifica" element={<CustomerForm />} />
+
+        {/* Prenotazioni */}
+        <Route path="/prenotazioni" element={<ReservationCalendar />} />
+        <Route path="/prenotazioni/:date" element={<ReservationDay />} />
+        <Route path="/prenotazioni/:date/nuova" element={<ReservationForm />} />
+        <Route path="/prenotazioni/:date/:id/modifica" element={<ReservationForm />} />
+
+        {/* Staff — Modulo 3 */}
+        <Route path="/staff" element={<StaffList />} />
+        <Route path="/staff/nuovo" element={<StaffForm />} />
+        <Route path="/staff/:id" element={<StaffDetail />} />
+        <Route path="/staff/:id/modifica" element={<StaffForm />} />
+
+        {/* Gestione utenti — solo Super Admin */}
+        <Route path="/utenti" element={<UserManagement />} />
+
+        {/* Fallback */}
+        <Route path="*" element={<Navigate to="/prenotazioni" replace />} />
+      </Routes>
+    </Layout>
+  );
 }
 
-function App() {
+export default function App() {
   return (
-    <BrowserRouter>
-      <AuthProvider>
-        <ProtectedRoutes />
-      </AuthProvider>
-    </BrowserRouter>
-  )
+    <AuthProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/*" element={<ProtectedRoutes />} />
+        </Routes>
+      </BrowserRouter>
+    </AuthProvider>
+  );
 }
-
-export default App

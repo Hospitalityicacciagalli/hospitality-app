@@ -1,135 +1,189 @@
-import { Outlet, NavLink } from 'react-router-dom'
-import { Users, CalendarDays, Menu, LogOut, Settings, Shield } from 'lucide-react'
-import { useState } from 'react'
-import { useAuth } from '../lib/AuthContext'
+import { useState } from "react";
+import { NavLink, useNavigate } from "react-router-dom";
+import { useAuth } from "../lib/AuthContext";
+import {
+  Users, Calendar, LogOut, Menu, X,
+  UserCog, ChevronDown, Wine, UserCheck
+} from "lucide-react";
 
-var roleLabels = {
-  super_admin: 'Super Admin',
-  proprieta: 'Proprieta',
-  direttore: 'Direttore',
-  reception: 'Reception',
-  sala: 'Sala',
-  cucina: 'Cucina',
-  staff_sala: 'Staff Sala',
-  staff_cucina: 'Staff Cucina',
-  staff_accoglienza: 'Staff Accoglienza'
-}
+var ROLE_LABELS = {
+  super_admin:       "Super Admin",
+  proprieta:         "Proprietà",
+  direttore:         "Direttore",
+  reception:         "Reception",
+  sala:              "Sala",
+  cucina:            "Cucina",
+  staff_sala:        "Staff Sala",
+  staff_cucina:      "Staff Cucina",
+  staff_accoglienza: "Staff Accoglienza"
+};
 
-function Layout() {
-  var sidebarState = useState(false)
-  var sidebarOpen = sidebarState[0]
-  var setSidebarOpen = sidebarState[1]
+export default function Layout(props) {
+  var { profile, signOut, hasRole } = useAuth();
+  var navigate = useNavigate();
+  var [mobileOpen, setMobileOpen] = useState(false);
 
-  var auth = useAuth()
-  var profile = auth.profile
-
-  var navItems = [
-    { to: '/clienti', icon: Users, label: 'Clienti' },
-    { to: '/prenotazioni', icon: CalendarDays, label: 'Prenotazioni' },
-  ]
-
-  // Aggiungi voce Utenti solo per Super Admin
-  if (auth.hasRole(['super_admin'])) {
-    navItems.push({ to: '/utenti', icon: Shield, label: 'Utenti' })
+  function handleSignOut() {
+    signOut();
+    navigate("/login");
   }
 
-  return (
-    <div className="min-h-screen flex bg-gray-50">
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 bg-black bg-opacity-50 z-20 lg:hidden"
-          onClick={function() { setSidebarOpen(false) }}
-        />
-      )}
+  var canSeeStaff = hasRole(["super_admin", "direttore", "proprieta"]);
+  var canSeeUsers = hasRole(["super_admin"]);
 
-      <aside
-        className={
-          "fixed inset-y-0 left-0 z-30 w-64 bg-wine-800 text-white transform transition-transform duration-200 ease-in-out lg:relative lg:translate-x-0 flex flex-col " +
-          (sidebarOpen ? "translate-x-0" : "-translate-x-full")
-        }
+  function NavItem(itemProps) {
+    return (
+      <NavLink
+        to={itemProps.to}
+        onClick={function() { setMobileOpen(false); }}
+        className={function(state) {
+          return "flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-sm font-medium " +
+            (state.isActive
+              ? "bg-white text-wine-800 shadow-sm"
+              : "text-wine-100 hover:bg-wine-600 hover:text-white");
+        }}
       >
-        {/* Logo */}
-        <div className="p-6 border-b border-wine-700">
-          <h1 className="text-xl font-bold">I Cacciagalli</h1>
-          <p className="text-wine-200 text-sm mt-1">Gestionale</p>
+        {itemProps.icon}
+        {itemProps.label}
+      </NavLink>
+    );
+  }
+
+  var sidebar = (
+    <div className="flex flex-col h-full">
+
+      {/* Logo */}
+      <div className="flex items-center gap-3 px-4 py-5 border-b border-wine-600">
+        <div className="bg-white bg-opacity-20 p-2 rounded-lg">
+          <Wine size={22} className="text-white" />
+        </div>
+        <div>
+          <div className="text-white font-bold text-base leading-tight">I Cacciagalli</div>
+          <div className="text-wine-200 text-xs">Hospitality 2026</div>
+        </div>
+        {/* Chiudi su mobile */}
+        <button
+          onClick={function() { setMobileOpen(false); }}
+          className="ml-auto md:hidden text-wine-200 hover:text-white"
+        >
+          <X size={20} />
+        </button>
+      </div>
+
+      {/* Navigazione */}
+      <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+
+        <div className="text-wine-300 text-xs font-semibold uppercase tracking-wider px-4 mb-2">
+          Operativo
         </div>
 
-        {/* Navigazione */}
-        <nav className="p-4 space-y-1 flex-1">
-          {navItems.map(function(item) {
-            return (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                onClick={function() { setSidebarOpen(false) }}
-                className={function(props) {
-                  return "flex items-center gap-3 px-4 py-3 rounded-lg transition-colors " +
-                    (props.isActive
-                      ? "bg-wine-700 text-white"
-                      : "text-wine-200 hover:bg-wine-700 hover:text-white")
-                }}
-              >
-                <item.icon size={20} />
-                <span>{item.label}</span>
-              </NavLink>
-            )
-          })}
-        </nav>
+        <NavItem
+          to="/prenotazioni"
+          icon={<Calendar size={18} />}
+          label="Prenotazioni"
+        />
+        <NavItem
+          to="/clienti"
+          icon={<Users size={18} />}
+          label="Clienti"
+        />
 
-        {/* Profilo utente e logout in fondo */}
-        {profile && (
-          <div className="p-4 border-t border-wine-700">
-            <div className="flex items-center gap-3 mb-3">
-              <div className="w-9 h-9 rounded-full bg-wine-600 flex items-center justify-center text-sm font-bold">
-                {profile.first_name[0]}{profile.last_name[0]}
+        {canSeeStaff && (
+          <>
+            <div className="text-wine-300 text-xs font-semibold uppercase tracking-wider px-4 mt-4 mb-2">
+              Gestione
+            </div>
+            <NavItem
+              to="/staff"
+              icon={<UserCheck size={18} />}
+              label="Staff"
+            />
+          </>
+        )}
+
+        {canSeeUsers && (
+          <>
+            <div className="text-wine-300 text-xs font-semibold uppercase tracking-wider px-4 mt-4 mb-2">
+              Amministrazione
+            </div>
+            <NavItem
+              to="/utenti"
+              icon={<UserCog size={18} />}
+              label="Utenti App"
+            />
+          </>
+        )}
+      </nav>
+
+      {/* Profilo utente */}
+      {profile && (
+        <div className="px-3 py-4 border-t border-wine-600">
+          <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-wine-600 bg-opacity-50">
+            <div className="w-8 h-8 rounded-full bg-white bg-opacity-20 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+              {profile.first_name ? profile.first_name.charAt(0) : "?"}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-white text-sm font-medium truncate">
+                {profile.first_name} {profile.last_name}
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-white truncate">
-                  {profile.first_name} {profile.last_name}
-                </p>
-                <p className="text-xs text-wine-300">
-                  {roleLabels[profile.role] || profile.role}
-                </p>
+              <div className="text-wine-200 text-xs">
+                {ROLE_LABELS[profile.role] || profile.role}
               </div>
             </div>
             <button
-              onClick={function() { auth.signOut() }}
-              className="flex items-center gap-2 w-full px-4 py-2 text-wine-200 hover:text-white hover:bg-wine-700 rounded-lg transition-colors text-sm"
+              onClick={handleSignOut}
+              className="text-wine-200 hover:text-white transition-colors flex-shrink-0"
+              title="Esci"
             >
               <LogOut size={16} />
-              <span>Esci</span>
             </button>
           </div>
-        )}
-      </aside>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="flex h-screen bg-gray-50 overflow-hidden">
+
+      {/* Sidebar desktop */}
+      <div className="hidden md:flex w-64 bg-wine-700 flex-col flex-shrink-0">
+        {sidebar}
+      </div>
+
+      {/* Sidebar mobile — overlay */}
+      {mobileOpen && (
+        <div className="fixed inset-0 z-50 flex md:hidden">
+          <div
+            className="absolute inset-0 bg-black bg-opacity-50"
+            onClick={function() { setMobileOpen(false); }}
+          />
+          <div className="relative w-64 bg-wine-700 flex flex-col z-10">
+            {sidebar}
+          </div>
+        </div>
+      )}
 
       {/* Contenuto principale */}
-      <div className="flex-1 flex flex-col min-w-0">
-        <header className="bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between lg:hidden">
-          <div className="flex items-center gap-4">
-            <button
-              onClick={function() { setSidebarOpen(true) }}
-              className="p-2 rounded-lg hover:bg-gray-100"
-            >
-              <Menu size={24} />
-            </button>
-            <h1 className="text-lg font-semibold text-gray-800">I Cacciagalli</h1>
-          </div>
-          {profile && (
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-wine-100 text-wine-700 flex items-center justify-center text-xs font-bold">
-                {profile.first_name[0]}{profile.last_name[0]}
-              </div>
-            </div>
-          )}
-        </header>
+      <div className="flex-1 flex flex-col overflow-hidden">
 
-        <main className="flex-1 p-4 lg:p-8 overflow-auto">
-          <Outlet />
+        {/* Topbar mobile */}
+        <div className="md:hidden flex items-center gap-3 px-4 py-3 bg-wine-700 text-white flex-shrink-0">
+          <button onClick={function() { setMobileOpen(true); }}>
+            <Menu size={22} />
+          </button>
+          <div className="flex items-center gap-2">
+            <Wine size={18} />
+            <span className="font-bold text-sm">I Cacciagalli</span>
+          </div>
+        </div>
+
+        {/* Area contenuto scrollabile */}
+        <main className="flex-1 overflow-y-auto p-4 md:p-6">
+          {props.children}
         </main>
       </div>
-    </div>
-  )
-}
 
-export default Layout
+    </div>
+  );
+}
