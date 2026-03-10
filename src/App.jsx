@@ -12,6 +12,7 @@ import UserManagement from "./pages/UserManagement";
 import StaffList from "./pages/StaffList";
 import StaffForm from "./pages/StaffForm";
 import StaffDetail from "./pages/StaffDetail";
+import SettingsPage from "./pages/SettingsPage";
 
 function ProtectedRoutes() {
   var { session, loading } = useAuth();
@@ -33,28 +34,24 @@ function ProtectedRoutes() {
       <Routes>
         <Route path="/" element={<Navigate to="/prenotazioni" replace />} />
 
-        {/* Clienti */}
         <Route path="/clienti" element={<CustomerList />} />
         <Route path="/clienti/nuovo" element={<CustomerForm />} />
         <Route path="/clienti/:id" element={<CustomerDetail />} />
         <Route path="/clienti/:id/modifica" element={<CustomerForm />} />
 
-        {/* Prenotazioni */}
         <Route path="/prenotazioni" element={<ReservationCalendar />} />
         <Route path="/prenotazioni/:date" element={<ReservationDay />} />
         <Route path="/prenotazioni/:date/nuova" element={<ReservationForm />} />
         <Route path="/prenotazioni/:date/:id/modifica" element={<ReservationForm />} />
 
-        {/* Staff — Modulo 3 */}
         <Route path="/staff" element={<StaffList />} />
         <Route path="/staff/nuovo" element={<StaffForm />} />
         <Route path="/staff/:id" element={<StaffDetail />} />
         <Route path="/staff/:id/modifica" element={<StaffForm />} />
 
-        {/* Gestione utenti — solo Super Admin */}
         <Route path="/utenti" element={<UserManagement />} />
+        <Route path="/impostazioni" element={<SettingsPage />} />
 
-        {/* Fallback */}
         <Route path="*" element={<Navigate to="/prenotazioni" replace />} />
       </Routes>
     </Layout>
