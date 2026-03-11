@@ -1,155 +1,189 @@
-import { useState } from "react";
-import { NavLink, useNavigate } from "react-router-dom";
-import { useAuth } from "../lib/AuthContext";
-import { Users, Calendar, LogOut, Menu, X, UserCog, Wine, UserCheck, Settings } from "lucide-react";
+import { useState } from 'react';
+import { NavLink, useNavigate } from 'react-router-dom';
+import { useAuth } from '../lib/AuthContext';
 
-var ROLE_LABELS = {
-  super_admin:       "Super Admin",
-  proprieta:         "Proprieta",
-  direttore:         "Direttore",
-  reception:         "Reception",
-  sala:              "Sala",
-  cucina:            "Cucina",
-  staff_sala:        "Staff Sala",
-  staff_cucina:      "Staff Cucina",
-  staff_accoglienza: "Staff Accoglienza"
-};
-
-export default function Layout(props) {
-  var { profile, signOut } = useAuth();
+export default function Layout({ children }) {
+  var { profile, signOut, hasRole } = useAuth();
   var navigate = useNavigate();
   var [mobileOpen, setMobileOpen] = useState(false);
 
   function handleSignOut() {
-    signOut();
-    navigate("/login");
+    signOut().then(function() {
+      navigate('/login');
+    });
   }
 
-  function canAccess(roles) {
-    if (!profile) return false;
-    return roles.indexOf(profile.role) !== -1;
+  function getRoleLabel(role) {
+    var labels = {
+      super_admin: 'Super Admin',
+      proprieta: 'Proprietà',
+      direttore: 'Direttore',
+      reception: 'Reception',
+      sala: 'Sala',
+      cucina: 'Cucina'
+    };
+    return labels[role] || role;
   }
 
-  var canSeeStaff     = canAccess(["super_admin", "direttore", "proprieta"]);
-  var canSeeUsers     = canAccess(["super_admin"]);
-  var canSeeSettings  = canAccess(["super_admin"]);
+  var navLinkBase = 'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ';
+  var navLinkActive = 'bg-wine-800 text-white';
+  var navLinkInactive = 'text-wine-200 hover:bg-wine-800 hover:text-white';
 
-  function NavItem(itemProps) {
-    return (
-      <NavLink
-        to={itemProps.to}
-        onClick={function() { setMobileOpen(false); }}
-        className={function(state) {
-          return "flex items-center gap-3 px-4 py-3 rounded-xl transition-all text-sm font-medium " +
-            (state.isActive
-              ? "bg-white text-wine-800 shadow-sm"
-              : "text-wine-100 hover:bg-wine-600 hover:text-white");
-        }}
-      >
-        {itemProps.icon}
-        {itemProps.label}
-      </NavLink>
-    );
+  function navClass(isActive) {
+    return navLinkBase + (isActive ? navLinkActive : navLinkInactive);
   }
 
-  var sidebar = (
+  var sidebarContent = (
     <div className="flex flex-col h-full">
 
-      <div className="flex items-center gap-3 px-4 py-5 border-b border-wine-600">
-        <div className="bg-white bg-opacity-20 p-2 rounded-lg">
-          <Wine size={22} className="text-white" />
-        </div>
-        <div>
-          <div className="text-white font-bold text-base leading-tight">I Cacciagalli</div>
-          <div className="text-wine-200 text-xs">Hospitality 2026</div>
-        </div>
-        <button
-          onClick={function() { setMobileOpen(false); }}
-          className="ml-auto md:hidden text-wine-200 hover:text-white"
-        >
-          <X size={20} />
-        </button>
+      {/* Logo */}
+      <div className="px-5 py-5 border-b border-wine-800">
+        <div className="text-white font-bold text-lg leading-tight">I Cacciagalli</div>
+        <div className="text-wine-300 text-xs mt-0.5">Hospitality 2026</div>
       </div>
 
+      {/* Navigazione principale */}
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
 
-        <div className="text-wine-300 text-xs font-semibold uppercase tracking-wider px-4 mb-2">
-          Operativo
-        </div>
-        <NavItem to="/prenotazioni" icon={<Calendar size={18} />} label="Prenotazioni" />
-        <NavItem to="/clienti" icon={<Users size={18} />} label="Clienti" />
+        <div className="text-wine-400 text-xs font-semibold uppercase tracking-wider px-3 mb-2">Gestione</div>
 
-        {canSeeStaff && (
-          <div>
-            <div className="text-wine-300 text-xs font-semibold uppercase tracking-wider px-4 mt-4 mb-2">
-              Gestione
-            </div>
-            <NavItem to="/staff" icon={<UserCheck size={18} />} label="Staff" />
-          </div>
+        <NavLink
+          to="/prenotazioni"
+          className={function(p) { return navClass(p.isActive); }}
+          onClick={function() { setMobileOpen(false); }}
+        >
+          <span className="text-base">📅</span>
+          Prenotazioni
+        </NavLink>
+
+        <NavLink
+          to="/clienti"
+          className={function(p) { return navClass(p.isActive); }}
+          onClick={function() { setMobileOpen(false); }}
+        >
+          <span className="text-base">👥</span>
+          Clienti
+        </NavLink>
+
+        {hasRole(['super_admin', 'direttore', 'reception']) && (
+          <NavLink
+            to="/staff"
+            className={function(p) { return navClass(p.isActive); }}
+            onClick={function() { setMobileOpen(false); }}
+          >
+            <span className="text-base">🏷️</span>
+            Staff
+          </NavLink>
         )}
 
-        {(canSeeUsers || canSeeSettings) && (
-          <div>
-            <div className="text-wine-300 text-xs font-semibold uppercase tracking-wider px-4 mt-4 mb-2">
-              Amministrazione
-            </div>
-            {canSeeUsers    && <NavItem to="/utenti"       icon={<UserCog  size={18} />} label="Utenti App" />}
-            {canSeeSettings && <NavItem to="/impostazioni" icon={<Settings size={18} />} label="Impostazioni" />}
-          </div>
+        {hasRole(['super_admin', 'direttore']) && (
+          <>
+            <div className="text-wine-400 text-xs font-semibold uppercase tracking-wider px-3 mt-4 mb-2">Amministrazione</div>
+
+            <NavLink
+              to="/impostazioni"
+              className={function(p) { return navClass(p.isActive); }}
+              onClick={function() { setMobileOpen(false); }}
+            >
+              <span className="text-base">⚙️</span>
+              Impostazioni
+            </NavLink>
+          </>
+        )}
+
+        {hasRole(['super_admin']) && (
+          <NavLink
+            to="/utenti"
+            className={function(p) { return navClass(p.isActive); }}
+            onClick={function() { setMobileOpen(false); }}
+          >
+            <span className="text-base">🔐</span>
+            Utenti App
+          </NavLink>
         )}
 
       </nav>
 
-      {profile && (
-        <div className="px-3 py-4 border-t border-wine-600">
-          <div className="flex items-center gap-3 px-4 py-3 rounded-xl bg-wine-600 bg-opacity-50">
-            <div className="w-8 h-8 rounded-full bg-white bg-opacity-20 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
-              {profile.first_name ? profile.first_name.charAt(0) : "?"}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-white text-sm font-medium truncate">
-                {profile.first_name} {profile.last_name}
-              </div>
-              <div className="text-wine-200 text-xs">
-                {ROLE_LABELS[profile.role] || profile.role || "—"}
-              </div>
-            </div>
-            <button onClick={handleSignOut} className="text-wine-200 hover:text-white transition-colors flex-shrink-0" title="Esci">
-              <LogOut size={16} />
-            </button>
+      {/* Sezione profilo utente in fondo */}
+      <div className="px-3 py-3 border-t border-wine-800">
+
+        <NavLink
+          to="/profilo"
+          className={function(p) { return navClass(p.isActive); }}
+          onClick={function() { setMobileOpen(false); }}
+        >
+          <span className="text-base">👤</span>
+          Il mio profilo
+        </NavLink>
+
+        <div className="mt-2 px-3 py-2">
+          <div className="text-white text-sm font-medium truncate">
+            {profile ? (profile.first_name + ' ' + profile.last_name) : '—'}
+          </div>
+          <div className="text-wine-300 text-xs mt-0.5">
+            {profile ? getRoleLabel(profile.role) : '—'}
           </div>
         </div>
-      )}
+
+        <button
+          onClick={handleSignOut}
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-wine-300 hover:bg-wine-800 hover:text-white transition-colors mt-1"
+        >
+          <span className="text-base">🚪</span>
+          Esci
+        </button>
+
+      </div>
     </div>
   );
 
   return (
-    <div className="flex h-screen bg-gray-50 overflow-hidden">
+    <div className="min-h-screen flex bg-gray-50">
 
-      <div className="hidden md:flex w-64 bg-wine-700 flex-col flex-shrink-0">
-        {sidebar}
-      </div>
+      {/* Sidebar desktop */}
+      <aside className="hidden lg:flex lg:w-60 flex-col bg-wine-900 fixed inset-y-0 left-0 z-30">
+        {sidebarContent}
+      </aside>
 
+      {/* Overlay mobile */}
       {mobileOpen && (
-        <div className="fixed inset-0 z-50 flex md:hidden">
-          <div className="absolute inset-0 bg-black bg-opacity-50" onClick={function() { setMobileOpen(false); }} />
-          <div className="relative w-64 bg-wine-700 flex flex-col z-10">{sidebar}</div>
-        </div>
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
+          onClick={function() { setMobileOpen(false); }}
+        />
       )}
 
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <div className="md:hidden flex items-center gap-3 px-4 py-3 bg-wine-700 text-white flex-shrink-0">
-          <button onClick={function() { setMobileOpen(true); }}><Menu size={22} /></button>
-          <div className="flex items-center gap-2">
-            <Wine size={18} />
-            <span className="font-bold text-sm">I Cacciagalli</span>
-          </div>
-        </div>
-        <main className="flex-1 overflow-y-auto p-4 md:p-6">
-          {props.children}
-        </main>
-      </div>
+      {/* Sidebar mobile */}
+      <aside className={
+        'fixed inset-y-0 left-0 z-50 w-60 bg-wine-900 flex flex-col transform transition-transform duration-200 lg:hidden ' +
+        (mobileOpen ? 'translate-x-0' : '-translate-x-full')
+      }>
+        {sidebarContent}
+      </aside>
 
+      {/* Contenuto principale */}
+      <div className="flex-1 lg:ml-60 flex flex-col min-h-screen">
+
+        {/* Header mobile */}
+        <header className="lg:hidden bg-wine-900 px-4 py-3 flex items-center justify-between">
+          <button
+            onClick={function() { setMobileOpen(true); }}
+            className="text-white p-1"
+          >
+            <div className="w-5 h-0.5 bg-white mb-1"></div>
+            <div className="w-5 h-0.5 bg-white mb-1"></div>
+            <div className="w-5 h-0.5 bg-white"></div>
+          </button>
+          <div className="text-white font-semibold text-sm">I Cacciagalli</div>
+          <div className="w-7"></div>
+        </header>
+
+        {/* Contenuto pagina */}
+        <main className="flex-1 overflow-auto">
+          {children}
+        </main>
+
+      </div>
     </div>
   );
 }
