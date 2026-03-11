@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
 
 function LoginPage() {
@@ -19,6 +20,7 @@ function LoginPage() {
   var setError = errorState[1]
 
   var auth = useAuth()
+  var navigate = useNavigate()
 
   function handleSubmit(e) {
     e.preventDefault()
@@ -26,21 +28,24 @@ function LoginPage() {
     setLoading(true)
 
     auth.signIn(email, password).then(function(result) {
+      setLoading(false)
       if (result.error) {
         if (result.error.message === 'Invalid login credentials') {
           setError('Email o password non corretti.')
         } else {
-          setError('Errore di accesso. Riprova.')
+          setError('Errore di accesso: ' + result.error.message)
         }
+        return
       }
-      setLoading(false)
+      // Login riuscito — naviga esplicitamente
+      navigate('/prenotazioni', { replace: true })
     })
   }
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
-        {/* Logo e titolo */}
+
         <div className="text-center mb-8">
           <div className="w-20 h-20 bg-wine-800 rounded-2xl flex items-center justify-center mx-auto mb-4">
             <span className="text-white text-3xl font-bold">C</span>
@@ -49,7 +54,6 @@ function LoginPage() {
           <p className="text-gray-500 mt-1">Gestionale Hospitality</p>
         </div>
 
-        {/* Form di login */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
           <h2 className="text-lg font-semibold text-gray-900 mb-6">Accedi</h2>
 
