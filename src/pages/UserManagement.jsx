@@ -18,6 +18,7 @@ export default function UserManagement() {
   });
   var [newUserLoading, setNewUserLoading] = useState(false);
   var [newUserError, setNewUserError] = useState(null);
+  var [newUserSuccess, setNewUserSuccess] = useState(null);
 
   // Modale reset password email
   var [showResetModal, setShowResetModal] = useState(false);
@@ -61,6 +62,7 @@ export default function UserManagement() {
 
   function loadUsers() {
     setLoading(true);
+    setError(null);
     supabase
       .from('user_profiles')
       .select('*')
@@ -79,7 +81,7 @@ export default function UserManagement() {
     loadUsers();
   }, []);
 
-  // Chiama la Edge Function con autenticazione
+  // Chiama la Edge Function con il token di autenticazione
   function callEdgeFunction(body, onSuccess, onError, setLoadingFn) {
     setLoadingFn(true);
     supabase.auth.getSession().then(function(sessionResult) {
@@ -108,10 +110,11 @@ export default function UserManagement() {
     });
   }
 
-  // --- CREA NUOVO UTENTE ---
+  // --- CREA NUOVO UTENTE tramite Edge Function ---
   function handleCreateUser(e) {
     e.preventDefault();
     setNewUserError(null);
+    setNewUserSuccess(null);
 
     if (!newUserForm.email || !newUserForm.password || !newUserForm.first_name || !newUserForm.last_name) {
       setNewUserError('Tutti i campi obbligatori devono essere compilati.');
@@ -122,42 +125,23 @@ export default function UserManagement() {
       return;
     }
 
-    setNewUserLoading(true);
-    supabase.auth.admin.createUser({
-      email: newUserForm.email,
-      password: newUserForm.password,
-      email_confirm: true,
-      user_metadata: {
-        first_name: newUserForm.first_name,
-        last_name: newUserForm.last_name
-      }
-    }).then(function(result) {
-      if (result.error) {
-        setNewUserLoading(false);
-        setNewUserError('Errore creazione utente: ' + result.error.message);
-        return;
-      }
-      var userId = result.data.user.id;
-      return supabase.from('user_profiles').upsert({
-        id: userId,
+    callEdgeFunction(
+      {
+        action: 'create_user',
         email: newUserForm.email,
+        password: newUserForm.password,
         first_name: newUserForm.first_name,
         last_name: newUserForm.last_name,
         role: newUserForm.role
-      });
-    }).then(function(profileResult) {
-      setNewUserLoading(false);
-      if (profileResult && profileResult.error) {
-        setNewUserError('Utente creato ma errore nel profilo: ' + profileResult.error.message);
-      } else {
-        setShowNewUserModal(false);
+      },
+      function(msg) {
+        setNewUserSuccess(msg);
         setNewUserForm({ email: '', password: '', first_name: '', last_name: '', role: 'reception' });
         loadUsers();
-      }
-    }).catch(function(err) {
-      setNewUserLoading(false);
-      setNewUserError('Errore imprevisto: ' + err.message);
-    });
+      },
+      function(err) { setNewUserError(err); },
+      setNewUserLoading
+    );
   }
 
   // --- RESET PASSWORD VIA EMAIL ---
@@ -221,7 +205,7 @@ export default function UserManagement() {
           <p className="text-gray-500 mt-1 text-sm">Crea, blocca e gestisci gli accessi al sistema</p>
         </div>
         <button
-          onClick={function() { setShowNewUserModal(true); setNewUserError(null); }}
+          onClick={function() { setShowNewUserModal(true); setNewUserError(null); setNewUserSuccess(null); }}
           className="bg-wine-700 hover:bg-wine-800 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
         >
           + Nuovo utente
@@ -242,16 +226,14 @@ export default function UserManagement() {
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Nome</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Email</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Ruolo</th>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Stato</th>
                 <th className="text-right px-4 py-3 font-medium text-gray-600">Azioni</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {users.map(function(user) {
                 var isSelf = profile && user.id === profile.id;
-                var isBanned = user.is_banned === true;
                 return (
-                  <tr key={user.id} className={isBanned ? 'bg-red-50 opacity-70' : 'hover:bg-gray-50'}>
+                  <tr key={user.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3 font-medium text-gray-900">
                       {user.first_name + ' ' + user.last_name}
                       {isSelf && <span className="ml-2 text-xs text-gray-400">(tu)</span>}
@@ -263,44 +245,22 @@ export default function UserManagement() {
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      {isBanned ? (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
-                          Bloccato
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                          Attivo
-                        </span>
+                      {!isSelf && (
+                        <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={function() { openResetModal(user); }}
+                            className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors"
+                          >
+                            Invia reset password
+                          </button>
+                          <button
+                            onClick={function() { openBanModal(user, 'ban'); }}
+                            className="text-xs px-2 py-1 rounded border border-red-300 text-red-700 hover:bg-red-50 transition-colors"
+                          >
+                            Blocca accesso
+                          </button>
+                        </div>
                       )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-2">
-                        {!isSelf && (
-                          <>
-                            <button
-                              onClick={function() { openResetModal(user); }}
-                              className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-100 transition-colors"
-                            >
-                              Invia reset password
-                            </button>
-                            {isBanned ? (
-                              <button
-                                onClick={function() { openBanModal(user, 'unban'); }}
-                                className="text-xs px-2 py-1 rounded border border-green-300 text-green-700 hover:bg-green-50 transition-colors"
-                              >
-                                Sblocca accesso
-                              </button>
-                            ) : (
-                              <button
-                                onClick={function() { openBanModal(user, 'ban'); }}
-                                className="text-xs px-2 py-1 rounded border border-red-300 text-red-700 hover:bg-red-50 transition-colors"
-                              >
-                                Blocca accesso
-                              </button>
-                            )}
-                          </>
-                        )}
-                      </div>
                     </td>
                   </tr>
                 );
@@ -319,11 +279,16 @@ export default function UserManagement() {
               <button
                 onClick={function() { setShowNewUserModal(false); }}
                 className="text-gray-400 hover:text-gray-600 text-xl font-light"
-              >✕</button>
+              >x</button>
             </div>
             <form onSubmit={handleCreateUser} className="p-6 space-y-4">
               {newUserError && (
                 <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{newUserError}</div>
+              )}
+              {newUserSuccess && (
+                <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">
+                  {'✓ ' + newUserSuccess}
+                </div>
               )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -331,7 +296,7 @@ export default function UserManagement() {
                   <input
                     type="text"
                     value={newUserForm.first_name}
-                    onChange={function(e) { setNewUserForm(Object.assign({}, newUserForm, { first_name: e.target.value })); }}
+                    onChange={function(e) { setNewUserForm(function(p) { var u = {}; for (var k in p) { u[k] = p[k]; } u.first_name = e.target.value; return u; }); }}
                     required
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
                   />
@@ -341,7 +306,7 @@ export default function UserManagement() {
                   <input
                     type="text"
                     value={newUserForm.last_name}
-                    onChange={function(e) { setNewUserForm(Object.assign({}, newUserForm, { last_name: e.target.value })); }}
+                    onChange={function(e) { setNewUserForm(function(p) { var u = {}; for (var k in p) { u[k] = p[k]; } u.last_name = e.target.value; return u; }); }}
                     required
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
                   />
@@ -352,7 +317,7 @@ export default function UserManagement() {
                 <input
                   type="email"
                   value={newUserForm.email}
-                  onChange={function(e) { setNewUserForm(Object.assign({}, newUserForm, { email: e.target.value })); }}
+                  onChange={function(e) { setNewUserForm(function(p) { var u = {}; for (var k in p) { u[k] = p[k]; } u.email = e.target.value; return u; }); }}
                   required
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
                 />
@@ -362,9 +327,10 @@ export default function UserManagement() {
                 <input
                   type="password"
                   value={newUserForm.password}
-                  onChange={function(e) { setNewUserForm(Object.assign({}, newUserForm, { password: e.target.value })); }}
+                  onChange={function(e) { setNewUserForm(function(p) { var u = {}; for (var k in p) { u[k] = p[k]; } u.password = e.target.value; return u; }); }}
                   required
                   placeholder="Almeno 6 caratteri"
+                  autoComplete="new-password"
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
                 />
               </div>
@@ -372,7 +338,7 @@ export default function UserManagement() {
                 <label className="block text-xs font-medium text-gray-700 mb-1">Ruolo *</label>
                 <select
                   value={newUserForm.role}
-                  onChange={function(e) { setNewUserForm(Object.assign({}, newUserForm, { role: e.target.value })); }}
+                  onChange={function(e) { setNewUserForm(function(p) { var u = {}; for (var k in p) { u[k] = p[k]; } u.role = e.target.value; return u; }); }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
                 >
                   {roleOptions.map(function(r) {
@@ -381,20 +347,32 @@ export default function UserManagement() {
                 </select>
               </div>
               <div className="flex gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={function() { setShowNewUserModal(false); }}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
-                >
-                  Annulla
-                </button>
-                <button
-                  type="submit"
-                  disabled={newUserLoading}
-                  className="flex-1 bg-wine-700 hover:bg-wine-800 disabled:bg-wine-300 text-white px-4 py-2 rounded-lg text-sm font-medium"
-                >
-                  {newUserLoading ? 'Creazione...' : 'Crea utente'}
-                </button>
+                {!newUserSuccess ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={function() { setShowNewUserModal(false); }}
+                      className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
+                    >
+                      Annulla
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={newUserLoading}
+                      className="flex-1 bg-wine-700 hover:bg-wine-800 disabled:bg-wine-300 text-white px-4 py-2 rounded-lg text-sm font-medium"
+                    >
+                      {newUserLoading ? 'Creazione...' : 'Crea utente'}
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={function() { setShowNewUserModal(false); }}
+                    className="flex-1 bg-wine-700 hover:bg-wine-800 text-white px-4 py-2 rounded-lg text-sm font-medium"
+                  >
+                    Chiudi
+                  </button>
+                )}
               </div>
             </form>
           </div>
@@ -407,18 +385,14 @@ export default function UserManagement() {
           <div className="bg-white rounded-xl shadow-xl w-full max-w-sm">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
               <h2 className="text-lg font-semibold text-gray-900">Reset password</h2>
-              <button onClick={function() { setShowResetModal(false); }} className="text-gray-400 hover:text-gray-600 text-xl font-light">✕</button>
+              <button onClick={function() { setShowResetModal(false); }} className="text-gray-400 hover:text-gray-600 text-xl font-light">x</button>
             </div>
             <div className="p-6">
               {!resetMessage ? (
                 <>
-                  <p className="text-sm text-gray-600 mb-1">
-                    Verrà inviata una email di reset a:
-                  </p>
+                  <p className="text-sm text-gray-600 mb-1">Verrà inviata una email di reset a:</p>
                   <p className="text-sm font-semibold text-gray-900 mb-4">{resetTarget.email}</p>
-                  <p className="text-xs text-gray-400 mb-6">
-                    L'utente riceverà un link per impostare una nuova password. Il link è valido per 24 ore.
-                  </p>
+                  <p className="text-xs text-gray-400 mb-6">L'utente riceverà un link per impostare una nuova password. Il link è valido per 24 ore.</p>
                   {resetError && (
                     <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{resetError}</div>
                   )}
@@ -456,20 +430,20 @@ export default function UserManagement() {
               <h2 className="text-lg font-semibold text-gray-900">
                 {banTarget.action === 'ban' ? 'Blocca accesso' : 'Sblocca accesso'}
               </h2>
-              <button onClick={function() { setShowBanModal(false); }} className="text-gray-400 hover:text-gray-600 text-xl font-light">✕</button>
+              <button onClick={function() { setShowBanModal(false); }} className="text-gray-400 hover:text-gray-600 text-xl font-light">x</button>
             </div>
             <div className="p-6">
               {!banMessage ? (
                 <>
-                  {banTarget.action === 'ban' ? (
-                    <p className="text-sm text-gray-600 mb-6">
-                      Stai per bloccare l'accesso a <strong>{banTarget.user.first_name + ' ' + banTarget.user.last_name}</strong>. L'utente non potrà più effettuare il login fino allo sblocco.
-                    </p>
-                  ) : (
-                    <p className="text-sm text-gray-600 mb-6">
-                      Stai per riabilitare l'accesso a <strong>{banTarget.user.first_name + ' ' + banTarget.user.last_name}</strong>. L'utente potrà tornare ad accedere al sistema.
-                    </p>
-                  )}
+                  <p className="text-sm text-gray-600 mb-6">
+                    {banTarget.action === 'ban'
+                      ? 'Stai per bloccare l\'accesso a '
+                      : 'Stai per riabilitare l\'accesso a '}
+                    <strong>{banTarget.user.first_name + ' ' + banTarget.user.last_name}</strong>.
+                    {banTarget.action === 'ban'
+                      ? ' L\'utente non potrà più effettuare il login fino allo sblocco.'
+                      : ' L\'utente potrà tornare ad accedere al sistema.'}
+                  </p>
                   {banError && (
                     <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{banError}</div>
                   )}
