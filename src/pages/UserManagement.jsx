@@ -62,7 +62,7 @@ export default function UserManagement() {
   function loadUsers() {
     setLoading(true);
     supabase
-      .from('profiles')
+      .from('user_profiles')
       .select('*')
       .order('last_name', { ascending: true })
       .then(function(result) {
@@ -138,7 +138,7 @@ export default function UserManagement() {
         return;
       }
       var userId = result.data.user.id;
-      return supabase.from('profiles').upsert({
+      return supabase.from('user_profiles').upsert({
         id: userId,
         email: newUserForm.email,
         first_name: newUserForm.first_name,
