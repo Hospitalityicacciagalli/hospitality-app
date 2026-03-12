@@ -87,29 +87,41 @@ export default function UserManagement() {
   // Chiama la Edge Function con il token di autenticazione
   function callEdgeFunction(body, onSuccess, onError, setLoadingFn) {
     setLoadingFn(true);
-    supabase.auth.getSession().then(function(sessionResult) {
-      var token = sessionResult.data.session ? sessionResult.data.session.access_token : '';
-      fetch(EDGE_FUNCTION_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer ' + token
-        },
-        body: JSON.stringify(body)
-      })
-        .then(function(res) { return res.json(); })
-        .then(function(data) {
+
+    // Prima forza un refresh della sessione, poi prende il token aggiornato
+    supabase.auth.refreshSession().then(function() {
+      supabase.auth.getSession().then(function(sessionResult) {
+        var session = sessionResult.data ? sessionResult.data.session : null;
+        var token = session ? session.access_token : '';
+
+        if (!token) {
           setLoadingFn(false);
-          if (data.error) {
-            onError(data.error);
-          } else {
-            onSuccess(data.message);
-          }
+          onError('Sessione non valida. Effettua logout e login di nuovo.');
+          return;
+        }
+
+        fetch(EDGE_FUNCTION_URL, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify(body)
         })
-        .catch(function(err) {
-          setLoadingFn(false);
-          onError('Errore di rete: ' + err.message);
-        });
+          .then(function(res) { return res.json(); })
+          .then(function(data) {
+            setLoadingFn(false);
+            if (data.error) {
+              onError(data.error);
+            } else {
+              onSuccess(data.message);
+            }
+          })
+          .catch(function(err) {
+            setLoadingFn(false);
+            onError('Errore di rete: ' + err.message);
+          });
+      });
     });
   }
 
@@ -158,7 +170,6 @@ export default function UserManagement() {
   function handleResetPassword() {
     setResetMessage(null);
     setResetError(null);
-    // L'email la prendiamo da Supabase Auth tramite la Edge Function usando l'id
     callEdgeFunction(
       { action: 'reset_password_email', userId: resetTarget.id, email: resetTarget.auth_email || '' },
       function(msg) { setResetMessage(msg); },
@@ -258,6 +269,12 @@ export default function UserManagement() {
                     <td className="px-4 py-3">
                       {!isSelf && (
                         <div className="flex items-center justify-end gap-2">
+                          <button
+                            onClick={function() { openResetModal(user); }}
+                            className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
+                          >
+                            Reset password
+                          </button>
                           {isActive ? (
                             <button
                               onClick={function() { openBanModal(user, 'ban'); }}
@@ -437,6 +454,48 @@ export default function UserManagement() {
                     <p className="text-sm font-medium text-gray-900">{banMessage}</p>
                   </div>
                   <button onClick={function() { setShowBanModal(false); }} className="w-full bg-wine-700 hover:bg-wine-800 text-white px-4 py-2 rounded-lg text-sm font-medium mt-2">Chiudi</button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODALE RESET PASSWORD */}
+      {showResetModal && resetTarget && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900">Reset password</h2>
+              <button onClick={function() { setShowResetModal(false); }} className="text-gray-400 hover:text-gray-600 text-xl font-light">x</button>
+            </div>
+            <div className="p-6">
+              {!resetMessage ? (
+                <>
+                  <p className="text-sm text-gray-600 mb-6">
+                    Verrà inviata un'email di reset password a <strong>{resetTarget.display_name || (resetTarget.first_name + ' ' + resetTarget.last_name)}</strong>.
+                  </p>
+                  {resetError && (
+                    <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{resetError}</div>
+                  )}
+                  <div className="flex gap-3">
+                    <button onClick={function() { setShowResetModal(false); }} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">Annulla</button>
+                    <button
+                      onClick={handleResetPassword}
+                      disabled={resetLoading}
+                      className="flex-1 bg-wine-700 hover:bg-wine-800 disabled:bg-wine-300 text-white px-4 py-2 rounded-lg text-sm font-medium"
+                    >
+                      {resetLoading ? 'Invio...' : 'Invia email'}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="text-center py-4">
+                    <div className="text-4xl mb-3">📧</div>
+                    <p className="text-sm font-medium text-gray-900">{resetMessage}</p>
+                  </div>
+                  <button onClick={function() { setShowResetModal(false); }} className="w-full bg-wine-700 hover:bg-wine-800 text-white px-4 py-2 rounded-lg text-sm font-medium mt-2">Chiudi</button>
                 </>
               )}
             </div>
