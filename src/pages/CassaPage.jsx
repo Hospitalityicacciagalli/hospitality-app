@@ -54,26 +54,29 @@ function getMetodoNome(id) {
   for (var i = 0; i < METODI.length; i++) {
     if (METODI[i].id === id) return METODI[i].nome;
   }
-  return '—';
+  return '-';
 }
 
 function taglioKey(t) { return 'tagli_' + t; }
 
+// Calcola totale tagli: banconote intere + spiccioli in euro (con decimali)
 function totaleTagli(tagli) {
   var tot = 0;
   for (var i = 0; i < TAGLI.length; i++) {
     tot += (tagli[taglioKey(TAGLI[i])] || 0) * TAGLI[i];
   }
-  tot += (tagli['monete'] || 0) / 100;
-  return tot;
+  // spiccioli e' gia' in euro (es. 3.40)
+  tot += parseFloat(tagli['spiccioli'] || 0);
+  return Math.round(tot * 100) / 100;
 }
 
 function taglioVuoto() {
-  var t = { monete: 0 };
+  var t = { spiccioli: '' };
   for (var i = 0; i < TAGLI.length; i++) { t[taglioKey(TAGLI[i])] = 0; }
   return t;
 }
 
+// ── FORM TAGLI BANCONOTE ─────────────────────────────────────
 function FormTagli(props) {
   var tagli = props.tagli;
   var onChange = props.onChange;
@@ -84,47 +87,68 @@ function FormTagli(props) {
     if (isNaN(n) || n < 0) n = 0;
     var nuovo = Object.assign({}, tagli);
     nuovo[campo] = n;
-    onChange(nuovo);
+    onChange(nuovo, totaleTagli(nuovo));
+  }
+
+  function setSpiccioli(val) {
+    var nuovo = Object.assign({}, tagli);
+    nuovo['spiccioli'] = val;
+    // calcola totale solo se val e' un numero valido
+    var parsed = parseFloat(val);
+    if (!isNaN(parsed)) {
+      onChange(nuovo, totaleTagli(nuovo));
+    } else {
+      onChange(nuovo, totaleTagli(Object.assign({}, nuovo, { spiccioli: 0 })));
+    }
   }
 
   return (
     <div style={{ background: '#0f1117', borderRadius: '10px', padding: '14px', marginBottom: '16px', border: '1px solid #2d3448' }}>
-      <div style={{ color: '#64748b', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '10px' }}>
+      <div style={{ color: '#64748b', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '12px' }}>
         Dettaglio tagli banconote
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
         {TAGLI.map(function(t) {
+          var quantita = tagli[taglioKey(t)] || 0;
+          var subtot = quantita * t;
           return (
             <div key={t} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span style={{ color: '#64748b', fontSize: '13px', width: '36px', textAlign: 'right', flexShrink: 0 }}>{t}€</span>
+              <span style={{ color: '#64748b', fontSize: '13px', width: '38px', textAlign: 'right', flexShrink: 0, fontWeight: '600' }}>{t}€</span>
               <input
                 type="number" min="0" step="1"
-                value={tagli[taglioKey(t)] || 0}
+                value={quantita}
                 onChange={function(e) { setTaglio(taglioKey(t), e.target.value); }}
-                style={{ width: '100%', background: '#1a1f2e', border: '1px solid #2d3448', borderRadius: '6px', color: '#e2e8f0', padding: '6px 8px', fontSize: '14px', textAlign: 'center', outline: 'none', boxSizing: 'border-box' }}
+                style={{ width: '60px', background: '#1a1f2e', border: '1px solid #2d3448', borderRadius: '6px', color: '#e2e8f0', padding: '6px 8px', fontSize: '14px', textAlign: 'center', outline: 'none', boxSizing: 'border-box', flexShrink: 0 }}
               />
-              <span style={{ color: '#475569', fontSize: '12px', width: '56px', flexShrink: 0, textAlign: 'right' }}>
-                {formatEuro((tagli[taglioKey(t)] || 0) * t)}
+              <span style={{ color: subtot > 0 ? '#c9a96e' : '#374151', fontSize: '12px', minWidth: '52px', textAlign: 'right' }}>
+                {subtot > 0 ? formatEuro(subtot) : '—'}
               </span>
             </div>
           );
         })}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ color: '#64748b', fontSize: '13px', width: '36px', textAlign: 'right', flexShrink: 0 }}>¢</span>
+
+        {/* Riga spiccioli in euro */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', gridColumn: '1 / -1' }}>
+          <span style={{ color: '#64748b', fontSize: '13px', width: '38px', textAlign: 'right', flexShrink: 0 }}>€</span>
           <input
-            type="number" min="0" step="1"
-            value={tagli['monete'] || 0}
-            onChange={function(e) { setTaglio('monete', e.target.value); }}
-            style={{ width: '100%', background: '#1a1f2e', border: '1px solid #2d3448', borderRadius: '6px', color: '#e2e8f0', padding: '6px 8px', fontSize: '14px', textAlign: 'center', outline: 'none', boxSizing: 'border-box' }}
+            type="number" min="0" step="0.01" placeholder="es. 3.40"
+            value={tagli['spiccioli']}
+            onChange={function(e) { setSpiccioli(e.target.value); }}
+            style={{ width: '100px', background: '#1a1f2e', border: '1px solid #2d3448', borderRadius: '6px', color: '#e2e8f0', padding: '6px 8px', fontSize: '14px', outline: 'none', boxSizing: 'border-box', flexShrink: 0 }}
           />
-          <span style={{ color: '#475569', fontSize: '12px', width: '56px', flexShrink: 0, textAlign: 'right' }}>
-            {formatEuro((tagli['monete'] || 0) / 100)}
-          </span>
+          <span style={{ color: '#64748b', fontSize: '12px' }}>Resto / Spiccioli (euro)</span>
         </div>
       </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '10px', paddingTop: '8px', borderTop: '1px solid #2d3448' }}>
-        <span style={{ color: '#94a3b8', fontSize: '13px' }}>Totale contanti inseriti</span>
-        <span style={{ color: '#c9a96e', fontFamily: 'Georgia, serif', fontWeight: '700', fontSize: '16px' }}>
+
+      {/* Totale tagli - evidenziato */}
+      <div style={{
+        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+        marginTop: '12px', paddingTop: '10px', borderTop: '1px solid #2d3448',
+        background: totale > 0 ? '#c9a96e10' : 'transparent',
+        borderRadius: '6px', padding: '8px 10px'
+      }}>
+        <span style={{ color: '#94a3b8', fontSize: '13px' }}>Totale banconote</span>
+        <span style={{ color: '#c9a96e', fontFamily: 'Georgia, serif', fontWeight: '700', fontSize: '18px' }}>
           {formatEuro(totale)}
         </span>
       </div>
@@ -132,6 +156,7 @@ function FormTagli(props) {
   );
 }
 
+// ── RIEPILOGO TAGLI IN CASSA ─────────────────────────────────
 function RiepilogoTagliCassa(props) {
   var tagliCassa = props.tagliCassa;
   var totale = totaleTagli(tagliCassa);
@@ -148,30 +173,25 @@ function RiepilogoTagliCassa(props) {
         return (
           <div key={t} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px solid #1a1f2e' }}>
             <span style={{ color: '#94a3b8', fontSize: '13px' }}>{q} x {t}€</span>
-            <span style={{ color: '#c9a96e', fontFamily: 'Georgia, serif', fontWeight: '600', fontSize: '14px' }}>
-              {formatEuro(q * t)}
-            </span>
+            <span style={{ color: '#c9a96e', fontFamily: 'Georgia, serif', fontWeight: '600', fontSize: '14px' }}>{formatEuro(q * t)}</span>
           </div>
         );
       })}
-      {(tagliCassa['monete'] || 0) > 0 && (
+      {parseFloat(tagliCassa['spiccioli'] || 0) > 0 && (
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '5px 0', borderBottom: '1px solid #1a1f2e' }}>
-          <span style={{ color: '#94a3b8', fontSize: '13px' }}>Monete (centesimi)</span>
-          <span style={{ color: '#c9a96e', fontFamily: 'Georgia, serif', fontWeight: '600', fontSize: '14px' }}>
-            {formatEuro((tagliCassa['monete'] || 0) / 100)}
-          </span>
+          <span style={{ color: '#94a3b8', fontSize: '13px' }}>Resto / Spiccioli</span>
+          <span style={{ color: '#c9a96e', fontFamily: 'Georgia, serif', fontWeight: '600', fontSize: '14px' }}>{formatEuro(parseFloat(tagliCassa['spiccioli'] || 0))}</span>
         </div>
       )}
       <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '10px', paddingTop: '8px', borderTop: '2px solid #2d3448' }}>
         <span style={{ color: '#f8fafc', fontWeight: '700', fontSize: '14px' }}>Totale contanti</span>
-        <span style={{ color: '#c9a96e', fontFamily: 'Georgia, serif', fontWeight: '700', fontSize: '20px' }}>
-          {formatEuro(totale)}
-        </span>
+        <span style={{ color: '#c9a96e', fontFamily: 'Georgia, serif', fontWeight: '700', fontSize: '20px' }}>{formatEuro(totale)}</span>
       </div>
     </div>
   );
 }
 
+// ── FORM NUOVO / MODIFICA MOVIMENTO ─────────────────────────
 function FormMovimento(props) {
   var cassaId = props.cassaId;
   var onSave = props.onSave;
@@ -199,16 +219,24 @@ function FormMovimento(props) {
   var richiedeCentro = TIPI_CHE_RICHIEDONO_CENTRO.indexOf(tipo) !== -1;
   var richiedeCassa = tipo === 'trasferimento_uscita' || tipo === 'trasferimento_entrata';
 
+  // Quando cambio metodo a non-contanti, azzero i tagli
+  function handleMetodoChange(id) {
+    setMetodoId(id);
+    if (id !== ID_CONTANTI) setTagli(taglioVuoto());
+  }
+
+  // Quando i tagli cambiano, aggiorno automaticamente l'importo
+  function handleTagliChange(nuoviTagli, nuovoTotale) {
+    setTagli(nuoviTagli);
+    if (nuovoTotale > 0) {
+      setImporto(String(nuovoTotale));
+    }
+  }
+
   var alertsVivi = [];
   if (richiedeCentro && !centroCostoId) alertsVivi.push('Nessun centro di costo selezionato per questa spesa.');
   if (isfattoria && !nota) alertsVivi.push('Movimento Fattoria senza nota esplicativa.');
   if (richiedeCassa && !cassaCollegataId) alertsVivi.push('Trasferimento senza cassa collegata.');
-  if (isContanti && importo && parseFloat(importo) > 0) {
-    var totT = totaleTagli(tagli);
-    if (totT > 0 && Math.abs(totT - parseFloat(importo)) > 0.01) {
-      alertsVivi.push('I tagli (' + formatEuro(totT) + ') non corrispondono all\'importo (' + formatEuro(parseFloat(importo)) + ').');
-    }
-  }
 
   function handleSave() {
     if (!importo || parseFloat(importo) <= 0) { setErrore('Inserisci un importo valido.'); return; }
@@ -253,6 +281,7 @@ function FormMovimento(props) {
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '16px' }}>
       <div style={{ background: '#1a1f2e', borderRadius: '16px', width: '100%', maxWidth: '540px', padding: '28px', boxShadow: '0 24px 64px rgba(0,0,0,0.5)', border: '1px solid #2d3448', maxHeight: '92vh', overflowY: 'auto' }}>
+
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
           <h2 style={{ color: '#f8fafc', fontFamily: 'Georgia, serif', fontSize: '20px', margin: 0 }}>
             {isModifica ? 'Modifica Movimento' : 'Nuovo Movimento'}
@@ -272,7 +301,7 @@ function FormMovimento(props) {
           {METODI.map(function(m) {
             var sel = m.id === metodoId;
             return (
-              <button key={m.id} onClick={function() { setMetodoId(m.id); }} style={{
+              <button key={m.id} onClick={function() { handleMetodoChange(m.id); }} style={{
                 padding: '6px 14px', borderRadius: '20px', fontSize: '13px', cursor: 'pointer',
                 border: sel ? '2px solid #c9a96e' : '2px solid #2d3448',
                 background: sel ? '#c9a96e22' : 'transparent',
@@ -282,20 +311,29 @@ function FormMovimento(props) {
           })}
         </div>
 
-        <label style={S.label}>Importo (euro)</label>
+        {/* TAGLI - mostrati PRIMA dell'importo se contanti, cosi aggiornano l'importo */}
+        {isContanti && (
+          <FormTagli tagli={tagli} onChange={handleTagliChange} />
+        )}
+
+        <label style={S.label}>
+          Importo (euro)
+          {isContanti && <span style={{ color: '#64748b', marginLeft: '8px', fontSize: '11px', textTransform: 'none', letterSpacing: 0 }}>aggiornato automaticamente dai tagli</span>}
+        </label>
         <input
           type="number" step="0.01" min="0" placeholder="0.00"
-          value={importo} onChange={function(e) { setImporto(e.target.value); }}
+          value={importo}
+          onChange={function(e) { setImporto(e.target.value); }}
           style={Object.assign({}, S.input, {
-            fontSize: '26px', textAlign: 'right',
+            fontSize: '28px', textAlign: 'right',
             color: tipoInfo.segno === '+' ? '#4ade80' : '#f87171',
-            fontWeight: '700', letterSpacing: '-0.5px'
+            fontWeight: '700', letterSpacing: '-0.5px',
+            background: isContanti ? '#0a1a0a' : '#0f1117',
+            border: isContanti ? '1px solid #22c55e44' : '1px solid #2d3448'
           })}
         />
 
-        {isContanti && <FormTagli tagli={tagli} onChange={setTagli} />}
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '4px 0 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '0 0 16px' }}>
           <input type="checkbox" id="chk-fattoria" checked={isfattoria}
             onChange={function(e) { setIsfattoria(e.target.checked); }}
             style={{ width: '18px', height: '18px', accentColor: '#c9a96e', cursor: 'pointer' }}
@@ -305,7 +343,7 @@ function FormMovimento(props) {
 
         <label style={S.label}>
           Centro di costo
-          {richiedeCentro && <span style={{ color: '#f59e0b', marginLeft: '6px', fontSize: '11px' }}>consigliato per spese</span>}
+          {richiedeCentro && <span style={{ color: '#f59e0b', marginLeft: '6px', fontSize: '11px', textTransform: 'none', letterSpacing: 0 }}>consigliato per spese</span>}
         </label>
         <select value={centroCostoId} onChange={function(e) { setCentroCostoId(e.target.value); }} style={S.select}>
           <option value="">nessuno</option>
@@ -350,6 +388,7 @@ function FormMovimento(props) {
   );
 }
 
+// ── RIGA MOVIMENTO ───────────────────────────────────────────
 function RigaMovimento(props) {
   var m = props.movimento;
   var onAnnulla = props.onAnnulla;
@@ -385,12 +424,19 @@ function RigaMovimento(props) {
               if (q === 0) return null;
               return <span key={t} style={{ background: '#0f1117', color: '#64748b', fontSize: '11px', padding: '2px 6px', borderRadius: '6px' }}>{q}x{t}€</span>;
             })}
+            {parseFloat(m._tagli['spiccioli'] || 0) > 0 && (
+              <span style={{ background: '#0f1117', color: '#64748b', fontSize: '11px', padding: '2px 6px', borderRadius: '6px' }}>
+                spiccioli {formatEuro(parseFloat(m._tagli['spiccioli']))}
+              </span>
+            )}
           </div>
         )}
       </div>
+
       <div style={{ fontFamily: 'Georgia, serif', fontSize: '18px', fontWeight: '700', color: coloreImporto, letterSpacing: '-0.5px', flexShrink: 0, paddingRight: m.annullato ? '12px' : '76px' }}>
         {isUscita ? '-' : '+'}{formatEuro(m.importo)}
       </div>
+
       {!m.annullato && (
         <div style={{ position: 'absolute', right: '12px', top: '50%', transform: 'translateY(-50%)', display: 'flex', gap: '4px' }}>
           <button onClick={function() { onModifica(m); }} title="Modifica"
@@ -407,6 +453,7 @@ function RigaMovimento(props) {
   );
 }
 
+// ── CARD NUMERO ──────────────────────────────────────────────
 function CardNum(props) {
   return (
     <div style={{ background: '#1e2538', borderRadius: '12px', padding: '16px 20px', border: '1px solid #2d3448' }}>
@@ -419,6 +466,7 @@ function CardNum(props) {
   );
 }
 
+// ── PAGINA PRINCIPALE ────────────────────────────────────────
 export default function CassaPage() {
   var { profile } = useAuth();
   var userId = profile ? profile.id : null;
@@ -461,7 +509,7 @@ export default function CassaPage() {
           if (ti.segno === '+') saldo += m.importo;
           else saldo -= m.importo;
         });
-        setSaldoContantiStorico(saldo);
+        setSaldoContantiStorico(Math.round(saldo * 100) / 100);
       });
   }, [cassaId, data]);
 
@@ -511,11 +559,16 @@ export default function CassaPage() {
         if (isEntrata) tagliGiorno[k] = (tagliGiorno[k] || 0) + (m._tagli[k] || 0);
         if (isUscita) tagliGiorno[k] = (tagliGiorno[k] || 0) - (m._tagli[k] || 0);
       });
+      var sp = parseFloat(m._tagli['spiccioli'] || 0);
+      if (sp > 0) {
+        if (isEntrata) tagliGiorno['spiccioli'] = (parseFloat(tagliGiorno['spiccioli'] || 0) + sp);
+        if (isUscita) tagliGiorno['spiccioli'] = (parseFloat(tagliGiorno['spiccioli'] || 0) - sp);
+      }
     }
     if (m.alert_centro_costo) alertsGiornata.push('Spesa ' + formatEuro(m.importo) + ' senza centro di costo' + (m.provenienza ? ' (' + m.provenienza + ')' : ''));
   });
 
-  var saldoContantiTotale = saldoContantiStorico + contantiGiorno;
+  var saldoContantiTotale = Math.round((saldoContantiStorico + contantiGiorno) * 100) / 100;
 
   function handleSaveMovimento(salvato, isModifica) {
     if (isModifica) {
@@ -585,6 +638,8 @@ export default function CassaPage() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#0f1117', fontFamily: "'Segoe UI', system-ui, sans-serif", color: '#f8fafc' }}>
+
+      {/* HEADER */}
       <div style={{ background: '#1a1f2e', borderBottom: '1px solid #2d3448', padding: '0 24px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
         <div style={{ padding: '18px 0', marginRight: '24px' }}>
           <div style={{ color: '#64748b', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1.5px' }}>I Cacciagalli</div>
@@ -593,9 +648,7 @@ export default function CassaPage() {
         <div style={{ display: 'flex', gap: '4px', marginRight: '16px' }}>
           {CASSE.map(function(c) {
             var sel = c.id === cassaId;
-            return (
-              <button key={c.id} onClick={function() { setCassaId(c.id); setMsgChiusura(''); }} style={{ padding: '8px 18px', borderRadius: '8px', border: 'none', cursor: 'pointer', background: sel ? '#c9a96e' : 'transparent', color: sel ? '#0f1117' : '#64748b', fontWeight: sel ? '700' : '400', fontSize: '14px', transition: 'all 0.2s' }}>{c.nome}</button>
-            );
+            return <button key={c.id} onClick={function() { setCassaId(c.id); setMsgChiusura(''); }} style={{ padding: '8px 18px', borderRadius: '8px', border: 'none', cursor: 'pointer', background: sel ? '#c9a96e' : 'transparent', color: sel ? '#0f1117' : '#64748b', fontWeight: sel ? '700' : '400', fontSize: '14px', transition: 'all 0.2s' }}>{c.nome}</button>;
           })}
         </div>
         <input type="date" value={data} onChange={function(e) { setData(e.target.value); setMsgChiusura(''); }}
@@ -618,6 +671,7 @@ export default function CassaPage() {
           </div>
         )}
 
+        {/* MOVIMENTI */}
         {sezione === 'movimenti' && (
           <div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '20px' }}>
@@ -651,6 +705,7 @@ export default function CassaPage() {
           </div>
         )}
 
+        {/* CHIUSURA */}
         {sezione === 'chiusura' && (
           <div style={{ background: '#1a1f2e', borderRadius: '16px', padding: '28px', border: '1px solid #2d3448' }}>
             <h2 style={{ color: '#f8fafc', fontFamily: 'Georgia, serif', fontSize: '20px', marginTop: 0, marginBottom: '6px' }}>Chiusura Cassa - {cassa.nome}</h2>
@@ -681,6 +736,7 @@ export default function CassaPage() {
           </div>
         )}
 
+        {/* CASSAFORTE */}
         {sezione === 'cassaforte' && puoVedereCassaforte && (
           <div style={{ background: '#1a1f2e', borderRadius: '16px', padding: '28px', border: '1px solid #2d3448' }}>
             <h2 style={{ color: '#f8fafc', fontFamily: 'Georgia, serif', fontSize: '20px', marginTop: 0 }}>Cassaforte</h2>
