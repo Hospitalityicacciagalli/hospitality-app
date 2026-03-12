@@ -14,6 +14,7 @@ import StaffDetail from './pages/StaffDetail';
 import SettingsPage from './pages/SettingsPage';
 import UserManagement from './pages/UserManagement';
 import ProfilePage from './pages/ProfilePage';
+import CassaPage from './pages/CassaPage';
 
 function ProtectedRoute({ children, roles }) {
   var { session, profile, loading } = useAuth();
@@ -128,6 +129,13 @@ function AppRoutes() {
         <Route path="/staff/:id/modifica" element={
           <ProtectedRoute roles={['super_admin', 'direttore']}>
             <StaffForm />
+          </ProtectedRoute>
+        } />
+
+        {/* Cassa - Reception e Ristorante */}
+        <Route path="/cassa" element={
+          <ProtectedRoute roles={['super_admin', 'proprieta', 'direttore', 'reception', 'sala']}>
+            <CassaPage />
           </ProtectedRoute>
         } />
 

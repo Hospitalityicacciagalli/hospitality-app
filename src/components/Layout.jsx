@@ -76,6 +76,17 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
+        {hasRole(['super_admin', 'proprieta', 'direttore', 'reception', 'sala']) && (
+          <NavLink
+            to="/cassa"
+            className={function(p) { return navClass(p.isActive); }}
+            onClick={function() { setMobileOpen(false); }}
+          >
+            <span className="text-base">💰</span>
+            Cassa
+          </NavLink>
+        )}
+
         {hasRole(['super_admin', 'direttore']) && (
           <>
             <div className="text-wine-400 text-xs font-semibold uppercase tracking-wider px-3 mt-4 mb-2">Amministrazione</div>
