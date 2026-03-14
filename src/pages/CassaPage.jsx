@@ -7,6 +7,8 @@ var CASSE = [
   { id: '4805dd45-da57-4442-9a09-a0141804cc9a', nome: 'Ristorante' }
 ];
 
+var ID_CASSA_RISTORANTE = '4805dd45-da57-4442-9a09-a0141804cc9a';
+
 var METODI = [
   { id: '3a2f24bc-6a09-43cb-b236-ae3e02b62a87', nome: 'Contanti', is_contante: true },
   { id: 'e75b9fb3-be6f-47ec-9c52-28b4564d0cf8', nome: 'Carta', is_contante: false },
@@ -244,9 +246,11 @@ function FormMovimento(props) {
   var onClose = props.onClose;
   var centri = props.centri;
   var userId = props.userId;
+  var tavoli = props.tavoli || [];
   var movimentoEsistente = props.movimento || null;
   var altreCase = CASSE.filter(function(c) { return c.id !== cassaId; });
   var isModifica = movimentoEsistente !== null;
+  var isRistorante = cassaId === ID_CASSA_RISTORANTE;
 
   var [tipo, setTipo] = useState(isModifica ? movimentoEsistente.tipo : 'scontrino');
   var [totaleStr, setTotaleStr] = useState(isModifica ? String(movimentoEsistente.importo) : '');
@@ -256,6 +260,7 @@ function FormMovimento(props) {
   var [provenienza, setProvenienza] = useState(isModifica ? (movimentoEsistente.provenienza || '') : '');
   var [cassaCollegataId, setCassaCollegataId] = useState(isModifica ? (movimentoEsistente.cassa_collegata_id || '') : '');
   var [nota, setNota] = useState(isModifica ? (movimentoEsistente.nota || '') : '');
+  var [tavoloId, setTavoloId] = useState(isModifica ? (movimentoEsistente.tavolo_id || '') : '');
   var [saving, setSaving] = useState(false);
   var [errore, setErrore] = useState('');
 
@@ -307,6 +312,7 @@ function FormMovimento(props) {
         centro_di_costo_id: centroCostoId || null,
         provenienza: provenienza || null,
         cassa_collegata_id: cassaCollegataId || null,
+        tavolo_id: tavoloId || null,
         nota: gruppoId ? ((nota ? nota + ' ' : '') + '(totale ' + formatEuro(totale) + ')') : (nota || null),
         alert_centro_costo: richiedeCentro && !centroCostoId,
         annullato: false,
@@ -322,6 +328,7 @@ function FormMovimento(props) {
         metodo_pagamento_id: r.metodo_pagamento_id, importo: r.importo,
         is_fattoria: r.is_fattoria, centro_di_costo_id: r.centro_di_costo_id,
         provenienza: r.provenienza, cassa_collegata_id: r.cassa_collegata_id,
+        tavolo_id: r.tavolo_id,
         nota: r.nota, alert_centro_costo: r.alert_centro_costo,
         annullato: r.annullato, inserito_da: r.inserito_da
       };
@@ -335,6 +342,11 @@ function FormMovimento(props) {
         if (centroCostoId) {
           for (var i = 0; i < centri.length; i++) {
             if (centri[i].id === centroCostoId) { salvato._centro_nome = centri[i].nome; break; }
+          }
+        }
+        if (tavoloId) {
+          for (var j = 0; j < tavoli.length; j++) {
+            if (tavoli[j].id === tavoloId) { salvato._tavolo_nome = tavoli[j].nome; break; }
           }
         }
         if (riga._tagli) salvato._tagli = riga._tagli;
@@ -443,6 +455,16 @@ function FormMovimento(props) {
           </div>
         )}
 
+        {isRistorante && tavoli.length > 0 && (
+          <div>
+            <label style={S.label}>Tavolo (opzionale)</label>
+            <select value={tavoloId} onChange={function(e) { setTavoloId(e.target.value); }} style={S.select}>
+              <option value="">nessun tavolo</option>
+              {tavoli.map(function(t) { return <option key={t.id} value={t.id}>{t.nome} ({t.capacita} posti)</option>; })}
+            </select>
+          </div>
+        )}
+
         <label style={S.label}>{tipoInfo.segno === '-' ? 'Destinatario / Causale' : 'Provenienza / Da chi'}</label>
         <input type="text" placeholder="es. Tavolo 5, Cliente Rossi, Direttore..." value={provenienza} onChange={function(e) { setProvenienza(e.target.value); }} style={S.input} />
 
@@ -539,6 +561,7 @@ function RigaMovimento(props) {
           {m.is_fattoria && <span style={{ background: '#7c3aed22', color: '#a78bfa', fontSize: '11px', padding: '2px 8px', borderRadius: '10px', border: '1px solid #7c3aed44' }}>Fattoria</span>}
           {m.alert_centro_costo && !m.annullato && <span style={{ background: '#f59e0b18', color: '#f59e0b', fontSize: '11px', padding: '2px 8px', borderRadius: '10px', border: '1px solid #f59e0b55' }}>no centro costo</span>}
           {m.annullato && <span style={{ background: '#37415122', color: '#6b7280', fontSize: '11px', padding: '2px 8px', borderRadius: '10px' }}>Annullato</span>}
+          {m._tavolo_nome && <span style={{ background: '#0369a122', color: '#38bdf8', fontSize: '11px', padding: '2px 8px', borderRadius: '10px', border: '1px solid #0369a144' }}>{m._tavolo_nome}</span>}
         </div>
         <div style={{ color: '#475569', fontSize: '12px', marginTop: '3px' }}>
           {getMetodoNome(m.metodo_pagamento_id)}
@@ -587,6 +610,107 @@ function CardNum(props) {
   );
 }
 
+// ── VISTA TAVOLI ─────────────────────────────────────────────
+function VistaTavoli(props) {
+  var tavoli = props.tavoli || [];
+  var movimenti = props.movimenti || [];
+  var data = props.data;
+  var onFiltra = props.onFiltra;
+  var filtroTavoloId = props.filtroTavoloId;
+
+  // Calcola per ogni tavolo se ha movimenti attivi oggi
+  function getStatoTavolo(tavoloId) {
+    var movTavolo = movimenti.filter(function(m) {
+      return !m.annullato && m.tavolo_id === tavoloId;
+    });
+    if (movTavolo.length === 0) return 'libero';
+    return 'occupato';
+  }
+
+  function getTotaleTavolo(tavoloId) {
+    return arrotonda(movimenti.filter(function(m) {
+      return !m.annullato && m.tavolo_id === tavoloId;
+    }).reduce(function(acc, m) {
+      var ti = getTipoInfo(m.tipo);
+      return acc + (ti.segno === '+' ? m.importo : -m.importo);
+    }, 0));
+  }
+
+  if (tavoli.length === 0) {
+    return (
+      <div style={{ background: '#1a1f2e', borderRadius: '12px', padding: '48px', textAlign: 'center', border: '1px dashed #2d3448' }}>
+        <div style={{ fontSize: '36px', marginBottom: '12px' }}>🪑</div>
+        <div style={{ color: '#475569', fontSize: '15px' }}>Nessun tavolo attivo. Aggiungili dal Modulo Tavoli.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '16px', flexWrap: 'wrap' }}>
+        <div style={{ color: '#94a3b8', fontSize: '13px' }}>{data} - Tavoli ristorante</div>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#475569', fontSize: '12px' }}>
+            <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#22c55e', display: 'inline-block' }}></span>libero
+          </span>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '5px', color: '#475569', fontSize: '12px' }}>
+            <span style={{ width: '10px', height: '10px', borderRadius: '50%', background: '#f87171', display: 'inline-block' }}></span>con movimenti
+          </span>
+        </div>
+        {filtroTavoloId && (
+          <button onClick={function() { onFiltra(null); }} style={{ marginLeft: 'auto', background: '#1e2538', border: '1px solid #2d3448', color: '#94a3b8', borderRadius: '6px', padding: '5px 12px', cursor: 'pointer', fontSize: '12px' }}>
+            Mostra tutti i movimenti
+          </button>
+        )}
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '10px' }}>
+        {tavoli.map(function(tavolo) {
+          var stato = getStatoTavolo(tavolo.id);
+          var totale = getTotaleTavolo(tavolo.id);
+          var selezionato = filtroTavoloId === tavolo.id;
+          var coloreStato = stato === 'libero' ? '#22c55e' : '#f87171';
+          var bgCard = selezionato ? '#1e3040' : '#1a1f2e';
+          var borderCard = selezionato ? '#38bdf8' : (stato === 'libero' ? '#14532d55' : '#7f1d1d55');
+
+          return (
+            <div
+              key={tavolo.id}
+              onClick={function() { if (stato !== 'libero') { onFiltra(selezionato ? null : tavolo.id); } }}
+              style={{
+                background: bgCard,
+                border: '2px solid ' + borderCard,
+                borderRadius: '12px',
+                padding: '14px 12px',
+                cursor: stato !== 'libero' ? 'pointer' : 'default',
+                transition: 'all 0.15s',
+                textAlign: 'center',
+                position: 'relative'
+              }}
+            >
+              <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: coloreStato, margin: '0 auto 8px auto' }}></div>
+              <div style={{ color: '#f8fafc', fontWeight: '700', fontSize: '14px', marginBottom: '4px' }}>{tavolo.nome}</div>
+              <div style={{ color: '#64748b', fontSize: '11px', marginBottom: stato !== 'libero' ? '8px' : '0' }}>{tavolo.capacita} posti</div>
+              {stato !== 'libero' && (
+                <div style={{ color: '#4ade80', fontFamily: 'Georgia, serif', fontWeight: '700', fontSize: '14px' }}>
+                  {formatEuro(totale)}
+                </div>
+              )}
+              {selezionato && (
+                <div style={{ position: 'absolute', top: '6px', right: '6px', background: '#38bdf8', borderRadius: '4px', width: '6px', height: '6px' }}></div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {filtroTavoloId && (
+        <div style={{ marginTop: '20px', background: '#0369a115', border: '1px solid #0369a144', borderRadius: '8px', padding: '10px 14px', color: '#38bdf8', fontSize: '13px' }}>
+          Movimenti filtrati per: <strong>{tavoli.filter(function(t) { return t.id === filtroTavoloId; }).map(function(t) { return t.nome; })[0] || ''}</strong>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── PAGINA PRINCIPALE ────────────────────────────────────────
 export default function CassaPage() {
   var { profile } = useAuth();
@@ -599,18 +723,28 @@ export default function CassaPage() {
   var [sezione, setSezione] = useState('movimenti');
   var [movimenti, setMovimenti] = useState([]);
   var [centri, setCentri] = useState([]);
+  var [tavoli, setTavoli] = useState([]);
   var [saldoContantiStorico, setSaldoContantiStorico] = useState(0);
   var [saldoCassaforte, setSaldoCassaforte] = useState(null);
   var [loading, setLoading] = useState(false);
   var [showForm, setShowForm] = useState(false);
   var [movimentoDaModificare, setMovimentoDaModificare] = useState(null);
   var [msgChiusura, setMsgChiusura] = useState('');
+  var [filtroTavoloId, setFiltroTavoloId] = useState(null);
 
   var cassa = CASSE.find(function(c) { return c.id === cassaId; });
+  var isRistorante = cassaId === ID_CASSA_RISTORANTE;
 
   useEffect(function() {
     supabase.from('centri_di_costo').select('id, nome').eq('attivo', true).order('nome').then(function(r) {
       if (r.data) setCentri(r.data);
+    });
+  }, []);
+
+  // Carica tavoli attivi (usati sia per Vista Tavoli che per il form movimento)
+  useEffect(function() {
+    supabase.from('tavoli').select('id, nome, capacita').eq('attivo', true).order('nome').then(function(r) {
+      if (r.data) setTavoli(r.data);
     });
   }, []);
 
@@ -629,9 +763,23 @@ export default function CassaPage() {
   }, [cassaId, data]);
 
   useEffect(function() {
-    setLoading(true); setMovimenti([]);
+    setLoading(true); setMovimenti([]); setFiltroTavoloId(null);
     supabase.from('movimenti_cassa').select('*').eq('cassa_id', cassaId).eq('data', data).order('created_at', { ascending: true })
-      .then(function(r) { setLoading(false); if (r.data) setMovimenti(r.data); });
+      .then(function(r) {
+        setLoading(false);
+        if (r.data) {
+          // Arricchisce con nome tavolo in memoria
+          var lista = r.data.map(function(m) {
+            if (m.tavolo_id) {
+              for (var i = 0; i < tavoli.length; i++) {
+                if (tavoli[i].id === m.tavolo_id) { m._tavolo_nome = tavoli[i].nome; break; }
+              }
+            }
+            return m;
+          });
+          setMovimenti(lista);
+        }
+      });
   }, [cassaId, data]);
 
   useEffect(function() {
@@ -640,6 +788,21 @@ export default function CassaPage() {
       if (r.data && r.data.length > 0) setSaldoCassaforte(r.data[0]);
     });
   }, [puoVedereCassaforte]);
+
+  // Quando i tavoli vengono caricati, arricchisce i movimenti gia in lista
+  useEffect(function() {
+    if (tavoli.length === 0) return;
+    setMovimenti(function(prev) {
+      return prev.map(function(m) {
+        if (m.tavolo_id && !m._tavolo_nome) {
+          for (var i = 0; i < tavoli.length; i++) {
+            if (tavoli[i].id === m.tavolo_id) { return Object.assign({}, m, { _tavolo_nome: tavoli[i].nome }); }
+          }
+        }
+        return m;
+      });
+    });
+  }, [tavoli]);
 
   var totFiscaleGiorno = 0;
   var totPrelieviGiorno = 0;
@@ -678,6 +841,11 @@ export default function CassaPage() {
 
   var saldoContantiTotale = arrotonda(saldoContantiStorico + contantiGiorno);
   tagliCassaAgg._totale = saldoContantiTotale;
+
+  // Movimenti filtrati per tavolo (se filtro attivo)
+  var movimentiFiltrati = filtroTavoloId
+    ? movimenti.filter(function(m) { return m.tavolo_id === filtroTavoloId; })
+    : movimenti;
 
   function handleSaveMovimento(salvati, isModifica) {
     if (isModifica) {
@@ -742,6 +910,14 @@ export default function CassaPage() {
     });
   }
 
+  // Lista sezioni disponibili
+  var sezioniDisponibili = [
+    { id: 'movimenti', label: 'Movimenti' },
+    { id: 'chiusura', label: 'Chiusura' }
+  ];
+  if (isRistorante) sezioniDisponibili.push({ id: 'tavoli', label: 'Vista Tavoli' });
+  if (puoVedereCassaforte) sezioniDisponibili.push({ id: 'cassaforte', label: 'Cassaforte' });
+
   return (
     <div style={{ minHeight: '100vh', background: '#0f1117', fontFamily: "'Segoe UI', system-ui, sans-serif", color: '#f8fafc' }}>
       <div style={{ background: '#1a1f2e', borderBottom: '1px solid #2d3448', padding: '0 24px', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
@@ -752,13 +928,13 @@ export default function CassaPage() {
         <div style={{ display: 'flex', gap: '4px', marginRight: '16px' }}>
           {CASSE.map(function(c) {
             var sel = c.id === cassaId;
-            return <button key={c.id} onClick={function() { setCassaId(c.id); setMsgChiusura(''); }} style={{ padding: '8px 18px', borderRadius: '8px', border: 'none', cursor: 'pointer', background: sel ? '#c9a96e' : 'transparent', color: sel ? '#0f1117' : '#64748b', fontWeight: sel ? '700' : '400', fontSize: '14px' }}>{c.nome}</button>;
+            return <button key={c.id} onClick={function() { setCassaId(c.id); setMsgChiusura(''); setSezione('movimenti'); setFiltroTavoloId(null); }} style={{ padding: '8px 18px', borderRadius: '8px', border: 'none', cursor: 'pointer', background: sel ? '#c9a96e' : 'transparent', color: sel ? '#0f1117' : '#64748b', fontWeight: sel ? '700' : '400', fontSize: '14px' }}>{c.nome}</button>;
           })}
         </div>
-        <input type="date" value={data} onChange={function(e) { setData(e.target.value); setMsgChiusura(''); }}
+        <input type="date" value={data} onChange={function(e) { setData(e.target.value); setMsgChiusura(''); setFiltroTavoloId(null); }}
           style={{ background: '#0f1117', border: '1px solid #2d3448', borderRadius: '8px', color: '#e2e8f0', padding: '8px 12px', fontSize: '14px', cursor: 'pointer' }} />
         <div style={{ display: 'flex', gap: '2px', marginLeft: 'auto' }}>
-          {[{ id: 'movimenti', label: 'Movimenti' }, { id: 'chiusura', label: 'Chiusura' }, puoVedereCassaforte ? { id: 'cassaforte', label: 'Cassaforte' } : null].filter(Boolean).map(function(s) {
+          {sezioniDisponibili.map(function(s) {
             var sel = s.id === sezione;
             return <button key={s.id} onClick={function() { setSezione(s.id); }} style={{ padding: '8px 16px', border: 'none', cursor: 'pointer', background: 'transparent', color: sel ? '#c9a96e' : '#64748b', fontWeight: sel ? '600' : '400', fontSize: '14px', borderBottom: sel ? '3px solid #c9a96e' : '3px solid transparent' }}>{s.label}</button>;
           })}
@@ -783,19 +959,48 @@ export default function CassaPage() {
             </div>
             <RiepilogoTagliCassa tagliCassa={tagliCassaAgg} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-              <div style={{ color: '#64748b', fontSize: '14px' }}>{loading ? 'Caricamento...' : (movimenti.length === 0 ? 'Nessun movimento' : movimenti.length + ' movimenti')}</div>
+              <div style={{ color: '#64748b', fontSize: '14px' }}>
+                {loading ? 'Caricamento...' : (filtroTavoloId ? (movimentiFiltrati.length + ' movimenti filtrati') : (movimenti.length === 0 ? 'Nessun movimento' : movimenti.length + ' movimenti'))}
+              </div>
               <button onClick={function() { setMovimentoDaModificare(null); setShowForm(true); }} style={{ background: '#c9a96e', color: '#0f1117', border: 'none', borderRadius: '8px', padding: '10px 20px', cursor: 'pointer', fontWeight: '700', fontSize: '14px' }}>+ Nuovo movimento</button>
             </div>
-            {!loading && movimenti.length === 0 ? (
+            {filtroTavoloId && (
+              <div style={{ background: '#0369a115', border: '1px solid #0369a144', borderRadius: '8px', padding: '10px 14px', marginBottom: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: '#38bdf8', fontSize: '13px' }}>
+                  Filtro attivo: <strong>{tavoli.filter(function(t) { return t.id === filtroTavoloId; }).map(function(t) { return t.nome; })[0] || ''}</strong>
+                </span>
+                <button onClick={function() { setFiltroTavoloId(null); }} style={{ background: 'transparent', border: '1px solid #0369a144', color: '#38bdf8', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer', fontSize: '12px' }}>Rimuovi filtro</button>
+              </div>
+            )}
+            {!loading && movimentiFiltrati.length === 0 ? (
               <div style={{ background: '#1a1f2e', borderRadius: '12px', padding: '48px', textAlign: 'center', border: '1px dashed #2d3448' }}>
                 <div style={{ fontSize: '36px', marginBottom: '12px' }}>📋</div>
-                <div style={{ color: '#475569', fontSize: '15px' }}>Nessun movimento per {cassa.nome} - {data}</div>
+                <div style={{ color: '#475569', fontSize: '15px' }}>{filtroTavoloId ? 'Nessun movimento per questo tavolo' : ('Nessun movimento per ' + cassa.nome + ' - ' + data)}</div>
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {movimenti.map(function(m) { return <RigaMovimento key={m.id} movimento={m} onAnnulla={handleAnnulla} onModifica={handleModifica} />; })}
+                {movimentiFiltrati.map(function(m) { return <RigaMovimento key={m.id} movimento={m} onAnnulla={handleAnnulla} onModifica={handleModifica} />; })}
               </div>
             )}
+          </div>
+        )}
+
+        {sezione === 'tavoli' && isRistorante && (
+          <div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px', marginBottom: '20px' }}>
+              <CardNum titolo="Incasso Fiscale" valore={totFiscaleGiorno} colore="#4ade80" grande={true} />
+              <CardNum titolo="Tavoli con movimenti" valore={tavoli.filter(function(t) { return movimenti.some(function(m) { return !m.annullato && m.tavolo_id === t.id; }); }).length} colore="#38bdf8" />
+            </div>
+            <VistaTavoli
+              tavoli={tavoli}
+              movimenti={movimenti}
+              data={data}
+              filtroTavoloId={filtroTavoloId}
+              onFiltra={function(id) {
+                setFiltroTavoloId(id);
+                if (id) setSezione('movimenti');
+              }}
+            />
           </div>
         )}
 
@@ -865,6 +1070,7 @@ export default function CassaPage() {
           cassaId={cassaId}
           centri={centri}
           userId={userId}
+          tavoli={tavoli}
           movimento={movimentoDaModificare}
           onSave={handleSaveMovimento}
           onClose={function() { setShowForm(false); setMovimentoDaModificare(null); }}
