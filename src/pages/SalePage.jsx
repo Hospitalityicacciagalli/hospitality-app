@@ -76,7 +76,8 @@ function SedieSVG(props) {
 }
 
 export default function SalePage() {
-  var { userRole } = useAuth();
+  var { profile } = useAuth();
+  var userRole = profile ? profile.role : '';
   var isAdmin = userRole === 'super_admin' || userRole === 'proprieta' || userRole === 'direttore';
 
   var [tab, setTab] = useState('mappa');
