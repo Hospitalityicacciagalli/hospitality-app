@@ -65,6 +65,17 @@ export default function Layout({ children }) {
           Clienti
         </NavLink>
 
+        {hasRole(['super_admin', 'proprieta', 'direttore', 'reception', 'sala']) && (
+          <NavLink
+            to="/sale"
+            className={function(p) { return navClass(p.isActive); }}
+            onClick={function() { setMobileOpen(false); }}
+          >
+            <span className="text-base">🗺️</span>
+            Sale e Tavoli
+          </NavLink>
+        )}
+
         {hasRole(['super_admin', 'direttore', 'reception']) && (
           <NavLink
             to="/staff"

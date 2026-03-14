@@ -15,6 +15,7 @@ import SettingsPage from './pages/SettingsPage';
 import UserManagement from './pages/UserManagement';
 import ProfilePage from './pages/ProfilePage';
 import CassaPage from './pages/CassaPage';
+import SalePage from './pages/SalePage';
 
 function ProtectedRoute({ children, roles }) {
   var { session, profile, loading } = useAuth();
@@ -107,6 +108,13 @@ function AppRoutes() {
         <Route path="/prenotazioni/:id/modifica" element={
           <ProtectedRoute roles={['super_admin', 'direttore', 'reception', 'sala']}>
             <ReservationForm />
+          </ProtectedRoute>
+        } />
+
+        {/* Sale e Tavoli */}
+        <Route path="/sale" element={
+          <ProtectedRoute roles={['super_admin', 'proprieta', 'direttore', 'reception', 'sala']}>
+            <SalePage />
           </ProtectedRoute>
         } />
 
