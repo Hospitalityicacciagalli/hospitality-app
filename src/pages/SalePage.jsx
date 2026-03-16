@@ -172,18 +172,31 @@ export default function SalePage() {
   var [servizioFine, setServizioFine] = useState(null);
   var [draggingServizio, setDraggingServizio] = useState(false);
 
+  // Layout base
+  var [layoutBase, setLayoutBase] = useState([]);
+  var [showSalvaBase, setShowSalvaBase] = useState(false);
+  var [nomeLayoutBase, setNomeLayoutBase] = useState('');
+  var [descLayoutBase, setDescLayoutBase] = useState('');
+  var [salvaBaseLoading, setSalvaBaseLoading] = useState(false);
+
+  // Mappa occupazione: tavoloId -> nomeSala (altre sale)
+  var [tavoliOccupati, setTavoliOccupati] = useState({});
+
   var gridRef = useRef(null);
   var gridOstacoliRef = useRef(null);
 
   useEffect(function() {
     caricaSale();
     caricaTavoli();
+    caricaOccupazioneTavoli();
   }, []);
 
   useEffect(function() {
     if (salaSelezionata) {
       caricaLayout(salaSelezionata);
       caricaOstacoli(salaSelezionata);
+      caricaLayoutBase(salaSelezionata);
+      caricaOccupazioneTavoli();
     }
   }, [salaSelezionata, dataSelezionata]);
 
@@ -227,6 +240,78 @@ export default function SalePage() {
   function caricaOstacoli(salaId) {
     supabase.from('ostacoli_sala').select('*').eq('sala_id', salaId).then(function(result) {
       if (!result.error) setOstacoli(result.data || []);
+    });
+  }
+
+  function caricaLayoutBase(salaId) {
+    supabase.from('layout_base').select('*, layout_base_tavoli(*, tavolo:tavoli(*))').eq('sala_id', salaId).order('created_at', { ascending: false }).then(function(result) {
+      if (!result.error) setLayoutBase(result.data || []);
+    });
+  }
+
+  function caricaOccupazioneTavoli() {
+    // Carica il layout piu recente per ogni sala e costruisce mappa tavoloId -> nomeSala
+    supabase.from('layout_sala').select('tavolo_id, sala_id, data_validita_dal, sale(nome)').order('data_validita_dal', { ascending: false }).then(function(result) {
+      if (result.error) return;
+      var mappa = {};
+      var vistiSala = {};
+      (result.data || []).forEach(function(r) {
+        // Teniamo solo il record piu recente per ogni coppia tavolo+sala
+        var chiave = r.tavolo_id + '_' + r.sala_id;
+        if (!vistiSala[chiave]) {
+          vistiSala[chiave] = true;
+          if (!mappa[r.tavolo_id]) {
+            mappa[r.tavolo_id] = r.sale ? r.sale.nome : 'altra sala';
+          }
+        }
+      });
+      setTavoliOccupati(mappa);
+    });
+  }
+
+  function salvaLayoutBaseCorrente() {
+    if (!nomeLayoutBase.trim()) { alert('Inserisci un nome per il layout base'); return; }
+    if (layoutTemp.length === 0) { alert('Non ci sono tavoli nel layout attuale'); return; }
+    setSalvaBaseLoading(true);
+    supabase.from('layout_base').insert({ sala_id: salaSelezionata, nome: nomeLayoutBase.trim(), descrizione: descLayoutBase.trim() || null }).select().single().then(function(result) {
+      if (result.error) { alert('Errore: ' + result.error.message); setSalvaBaseLoading(false); return; }
+      var layoutBaseId = result.data.id;
+      var righe = layoutTemp.map(function(item) {
+        return { layout_base_id: layoutBaseId, tavolo_id: item.tavolo_id, pos_x: item.pos_x, pos_y: item.pos_y, rotazione: item.rotazione || 0 };
+      });
+      supabase.from('layout_base_tavoli').insert(righe).then(function(r2) {
+        setSalvaBaseLoading(false);
+        if (r2.error) { alert('Errore salvataggio posizioni: ' + r2.error.message); return; }
+        setShowSalvaBase(false);
+        setNomeLayoutBase('');
+        setDescLayoutBase('');
+        caricaLayoutBase(salaSelezionata);
+      });
+    });
+  }
+
+  function caricaLayoutBaseSuGriglia(lb) {
+    if (!window.confirm('Caricare il layout "' + lb.nome + '"? Sostituira il layout attuale in griglia. Le modifiche non salvate andranno perse.')) return;
+    var nuovoLayout = (lb.layout_base_tavoli || []).map(function(item) {
+      return {
+        id: null, sala_id: salaSelezionata,
+        tavolo_id: item.tavolo_id,
+        tavolo: item.tavolo,
+        pos_x: item.pos_x, pos_y: item.pos_y,
+        rotazione: item.rotazione || 0,
+        data_validita_dal: dataSelezionata,
+        nuovo: true
+      };
+    });
+    setLayoutTemp(nuovoLayout);
+    setLayoutModificato(true);
+  }
+
+  function eliminaLayoutBase(lb) {
+    if (!window.confirm('Eliminare il layout base "' + lb.nome + '"?')) return;
+    supabase.from('layout_base').delete().eq('id', lb.id).then(function(result) {
+      if (result.error) { alert('Errore: ' + result.error.message); return; }
+      caricaLayoutBase(salaSelezionata);
     });
   }
 
@@ -807,8 +892,21 @@ export default function SalePage() {
   // ── TAB EDITOR LAYOUT ─────────────────────────────────────────
 
   function renderTabEditor() {
+    // Tavoli non ancora in questo layout temporaneo
     var tavoliNonInLayout = tavoli.filter(function(t) { return !layoutTemp.some(function(l) { return l.tavolo_id === t.id; }); });
-    var gruppi = raggruppaPerCategoria(tavoliNonInLayout);
+    // Tavoli disponibili: non in questo layout E non occupati in un'altra sala
+    var tavoliDisponibili = tavoliNonInLayout.filter(function(t) {
+      var salaCorrente = sale.find(function(s) { return s.id === salaSelezionata; });
+      var nomeSalaCorrente = salaCorrente ? salaCorrente.nome : '';
+      return !tavoliOccupati[t.id] || tavoliOccupati[t.id] === nomeSalaCorrente;
+    });
+    // Tavoli occupati in altre sale
+    var tavoliAlteSale = tavoliNonInLayout.filter(function(t) {
+      var salaCorrente = sale.find(function(s) { return s.id === salaSelezionata; });
+      var nomeSalaCorrente = salaCorrente ? salaCorrente.nome : '';
+      return tavoliOccupati[t.id] && tavoliOccupati[t.id] !== nomeSalaCorrente;
+    });
+    var gruppi = raggruppaPerCategoria(tavoliDisponibili);
 
     return (
       <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
@@ -817,6 +915,7 @@ export default function SalePage() {
             <span style={{ fontSize: '13px', color: '#6B7280' }}>Trascina i tavoli per posizionarli nella sala</span>
             {renderSliderGriglia()}
             {layoutModificato && <button onClick={salvaLayout} style={{ background: '#10B981', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 18px', fontSize: '14px', cursor: 'pointer', fontWeight: '700' }}>Salva layout</button>}
+            <button onClick={function() { setShowSalvaBase(true); setNomeLayoutBase(''); setDescLayoutBase(''); }} style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '7px 14px', fontSize: '13px', cursor: 'pointer', fontWeight: '600' }}>📐 Salva come layout base</button>
           </div>
           {renderLegendaOstacoli()}
           <div ref={gridRef} onMouseMove={onMouseMoveGrid} onMouseUp={onMouseUpGrid} onMouseLeave={onMouseUpGrid} style={{ position: 'relative', width: GRID_COLS * gridSize + 'px', height: GRID_ROWS * gridSize + 'px', backgroundImage: 'linear-gradient(to right, #e5e7eb 1px, transparent 1px), linear-gradient(to bottom, #e5e7eb 1px, transparent 1px)', backgroundSize: gridSize + 'px ' + gridSize + 'px', backgroundColor: '#f9fafb', borderRadius: '8px', border: '1px solid #d1d5db', overflow: 'visible', flexShrink: 0 }}>
@@ -825,54 +924,126 @@ export default function SalePage() {
           </div>
         </div>
 
-        <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '16px', minWidth: '250px', maxWidth: '280px' }}>
-          <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: '700', color: '#374151' }}>
-            Tavoli disponibili
-            {tavoliNonInLayout.length > 0 && <span style={{ color: '#9CA3AF', fontWeight: '400', fontSize: '12px', marginLeft: '6px' }}>({tavoliNonInLayout.length})</span>}
-          </h4>
-          {tavoliNonInLayout.length === 0 ? (
-            <p style={{ fontSize: '13px', color: '#9CA3AF', margin: 0 }}>Tutti i tavoli sono in sala</p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              {gruppi.map(function(gruppo) {
-                var espanso = gruppiEspansi[gruppo.categoria];
-                var disponibili = gruppo.tavoli.filter(function(t) { return !layoutTemp.some(function(l) { return l.tavolo_id === t.id; }); });
-                return (
-                  <div key={gruppo.categoria} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 10px', background: '#f9fafb', cursor: 'pointer' }} onClick={function() { toggleGruppo(gruppo.categoria); }}>
-                      <span style={{ fontSize: '11px', color: '#6B7280', transform: espanso ? 'rotate(90deg)' : 'none', display: 'inline-block', flexShrink: 0 }}>▶</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', minWidth: '250px', maxWidth: '280px' }}>
+
+          {/* Pannello Layout Base */}
+          {layoutBase.length > 0 && (
+            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', padding: '14px' }}>
+              <h4 style={{ margin: '0 0 10px 0', fontSize: '13px', fontWeight: '700', color: '#166534' }}>📐 Layout base salvati</h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {layoutBase.map(function(lb) {
+                  var nTavoli = lb.layout_base_tavoli ? lb.layout_base_tavoli.length : 0;
+                  return (
+                    <div key={lb.id} style={{ background: 'white', border: '1px solid #d1fae5', borderRadius: '8px', padding: '8px 10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: '12px', fontWeight: '700', color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{gruppo.categoria}</div>
-                        <div style={{ fontSize: '11px', color: '#9CA3AF' }}>{disponibili.length} di {gruppo.tavoli.length} disponibili</div>
+                        <div style={{ fontSize: '12px', fontWeight: '700', color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lb.nome}</div>
+                        <div style={{ fontSize: '11px', color: '#6B7280' }}>{nTavoli} tavol{nTavoli === 1 ? 'o' : 'i'}{lb.descrizione ? ' - ' + lb.descrizione : ''}</div>
                       </div>
-                      {disponibili.length > 1 && <button onClick={function(e) { e.stopPropagation(); aggiungiGruppoAlLayout(disponibili); }} style={{ background: '#3B82F6', color: 'white', border: 'none', borderRadius: '5px', padding: '3px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: '700', flexShrink: 0 }}>++ Tutti</button>}
+                      <button onClick={function() { caricaLayoutBaseSuGriglia(lb); }} title="Carica in griglia" style={{ background: '#10B981', color: 'white', border: 'none', borderRadius: '5px', padding: '4px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: '700', flexShrink: 0 }}>Carica</button>
+                      <button onClick={function() { eliminaLayoutBase(lb); }} title="Elimina" style={{ background: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA', borderRadius: '5px', padding: '4px 7px', fontSize: '11px', cursor: 'pointer', flexShrink: 0 }}>x</button>
                     </div>
-                    {espanso && (
-                      <div style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        {gruppo.tavoli.map(function(t) {
-                          var inLayout = layoutTemp.some(function(l) { return l.tavolo_id === t.id; });
-                          return (
-                            <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: '7px', padding: '6px 8px', background: inLayout ? '#f0fdf4' : '#f9fafb', borderRadius: '6px', border: '1px solid ' + (inLayout ? '#bbf7d0' : '#e5e7eb'), opacity: inLayout ? 0.6 : 1 }}>
-                              <div style={{ width: '12px', height: '12px', borderRadius: t.forma === 'rotondo' ? '50%' : '2px', background: t.colore || '#6B7280', flexShrink: 0 }}></div>
-                              <div style={{ flex: 1, minWidth: 0 }}>
-                                <div style={{ fontSize: '12px', fontWeight: '700', color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.nome}</div>
-                                <div style={{ fontSize: '10px', color: '#9CA3AF' }}>{t.capacita} posti</div>
-                              </div>
-                              {inLayout ? <span style={{ fontSize: '10px', color: '#16a34a', fontWeight: '600' }}>in sala</span> : <button onClick={function() { aggiungiTavoloAlLayout(t); }} style={{ background: '#3B82F6', color: 'white', border: 'none', borderRadius: '5px', padding: '3px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: '700' }}>+</button>}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
           )}
-          <div style={{ borderTop: '1px solid #f3f4f6', marginTop: '12px', paddingTop: '12px' }}>
-            <button onClick={function() { setTab('gestione'); }} style={{ width: '100%', background: '#f3f4f6', color: '#374151', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px', fontSize: '13px', cursor: 'pointer', fontWeight: '600' }}>+ Crea nuovo tavolo</button>
+
+          {/* Pannello Tavoli disponibili */}
+          <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '16px' }}>
+            <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: '700', color: '#374151' }}>
+              Tavoli disponibili
+              {tavoliDisponibili.length > 0 && <span style={{ color: '#9CA3AF', fontWeight: '400', fontSize: '12px', marginLeft: '6px' }}>({tavoliDisponibili.length})</span>}
+            </h4>
+            {tavoliDisponibili.length === 0 && tavoliAlteSale.length === 0 ? (
+              <p style={{ fontSize: '13px', color: '#9CA3AF', margin: 0 }}>Tutti i tavoli sono in sala</p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                {gruppi.map(function(gruppo) {
+                  var espanso = gruppiEspansi[gruppo.categoria];
+                  var disponibili = gruppo.tavoli.filter(function(t) { return !layoutTemp.some(function(l) { return l.tavolo_id === t.id; }); });
+                  return (
+                    <div key={gruppo.categoria} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 10px', background: '#f9fafb', cursor: 'pointer' }} onClick={function() { toggleGruppo(gruppo.categoria); }}>
+                        <span style={{ fontSize: '11px', color: '#6B7280', transform: espanso ? 'rotate(90deg)' : 'none', display: 'inline-block', flexShrink: 0 }}>▶</span>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: '12px', fontWeight: '700', color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{gruppo.categoria}</div>
+                          <div style={{ fontSize: '11px', color: '#9CA3AF' }}>{disponibili.length} di {gruppo.tavoli.length} disponibili</div>
+                        </div>
+                        {disponibili.length > 1 && <button onClick={function(e) { e.stopPropagation(); aggiungiGruppoAlLayout(disponibili); }} style={{ background: '#3B82F6', color: 'white', border: 'none', borderRadius: '5px', padding: '3px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: '700', flexShrink: 0 }}>++ Tutti</button>}
+                      </div>
+                      {espanso && (
+                        <div style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          {gruppo.tavoli.map(function(t) {
+                            var inLayout = layoutTemp.some(function(l) { return l.tavolo_id === t.id; });
+                            return (
+                              <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: '7px', padding: '6px 8px', background: inLayout ? '#f0fdf4' : '#f9fafb', borderRadius: '6px', border: '1px solid ' + (inLayout ? '#bbf7d0' : '#e5e7eb'), opacity: inLayout ? 0.6 : 1 }}>
+                                <div style={{ width: '12px', height: '12px', borderRadius: t.forma === 'rotondo' ? '50%' : '2px', background: t.colore || '#6B7280', flexShrink: 0 }}></div>
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ fontSize: '12px', fontWeight: '700', color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.nome}</div>
+                                  <div style={{ fontSize: '10px', color: '#9CA3AF' }}>{t.capacita} posti</div>
+                                </div>
+                                {inLayout ? <span style={{ fontSize: '10px', color: '#16a34a', fontWeight: '600' }}>in sala</span> : <button onClick={function() { aggiungiTavoloAlLayout(t); }} style={{ background: '#3B82F6', color: 'white', border: 'none', borderRadius: '5px', padding: '3px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: '700' }}>+</button>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Tavoli occupati in altre sale */}
+            {tavoliAlteSale.length > 0 && (
+              <div style={{ marginTop: '12px', borderTop: '1px solid #f3f4f6', paddingTop: '12px' }}>
+                <div style={{ fontSize: '11px', color: '#9CA3AF', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>In un'altra sala</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {tavoliAlteSale.map(function(t) {
+                    return (
+                      <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: '7px', padding: '6px 8px', background: '#fafafa', borderRadius: '6px', border: '1px solid #f3f4f6', opacity: 0.7 }}>
+                        <div style={{ width: '12px', height: '12px', borderRadius: t.forma === 'rotondo' ? '50%' : '2px', background: t.colore || '#6B7280', flexShrink: 0 }}></div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: '12px', fontWeight: '700', color: '#6B7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.nome}</div>
+                          <div style={{ fontSize: '10px', color: '#9CA3AF' }}>{tavoliOccupati[t.id]}</div>
+                        </div>
+                        <span style={{ fontSize: '10px', color: '#9CA3AF', flexShrink: 0 }}>non disp.</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            <div style={{ borderTop: '1px solid #f3f4f6', marginTop: '12px', paddingTop: '12px' }}>
+              <button onClick={function() { setTab('gestione'); }} style={{ width: '100%', background: '#f3f4f6', color: '#374151', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px', fontSize: '13px', cursor: 'pointer', fontWeight: '600' }}>+ Crea nuovo tavolo</button>
+            </div>
           </div>
         </div>
+
+        {/* Modale salva layout base */}
+        {showSalvaBase && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+            <div style={{ background: 'white', borderRadius: '16px', padding: '28px', width: '400px', maxWidth: '100%' }}>
+              <h3 style={{ margin: '0 0 6px 0', fontSize: '18px', fontWeight: '800', color: '#111827' }}>Salva come layout base</h3>
+              <p style={{ margin: '0 0 20px 0', fontSize: '13px', color: '#6B7280' }}>Salva la configurazione attuale ({layoutTemp.length} tavoli) come template riutilizzabile per questa sala.</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', color: '#374151', marginBottom: '4px', fontWeight: '700' }}>Nome *</label>
+                  <input type="text" value={nomeLayoutBase} onChange={function(e) { setNomeLayoutBase(e.target.value); }} autoFocus placeholder="es. Configurazione standard, Evento privato..." style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }} />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', color: '#374151', marginBottom: '4px', fontWeight: '700' }}>Descrizione (opzionale)</label>
+                  <input type="text" value={descLayoutBase} onChange={function(e) { setDescLayoutBase(e.target.value); }} placeholder="es. 10 tavoli, massimo 40 coperti..." style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }} />
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+                <button onClick={salvaLayoutBaseCorrente} disabled={salvaBaseLoading} style={{ flex: 1, background: '#10B981', color: 'white', border: 'none', borderRadius: '8px', padding: '12px', fontSize: '15px', cursor: 'pointer', fontWeight: '800', opacity: salvaBaseLoading ? 0.6 : 1 }}>{salvaBaseLoading ? 'Salvataggio...' : 'Salva layout base'}</button>
+                <button onClick={function() { setShowSalvaBase(false); }} style={{ flex: 1, background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: '8px', padding: '12px', fontSize: '15px', cursor: 'pointer' }}>Annulla</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
