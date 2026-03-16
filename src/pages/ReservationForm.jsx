@@ -21,7 +21,21 @@ for (var h = 7; h <= 23; h++) {
 
 var MINUTES = ['00', '15', '30', '45']
 
-// Rileva il turno dall'ora in base ai turni attivi caricati da config_options
+var PREFERENZE_POSTO = [
+  { value: '',                  label: 'Nessuna preferenza',        icona: '' },
+  { value: 'vicino_finestra',   label: 'Vicino alla finestra',      icona: '⬜' },
+  { value: 'vicino_bancone',    label: 'Vicino al bancone / bar',   icona: '▬' },
+  { value: 'lontano_porta',     label: 'Lontano dalle porte',       icona: '🚪' },
+  { value: 'angolo_tranquillo', label: 'Angolo tranquillo',         icona: '🤫' }
+]
+
+function getLabelPreferenza(value) {
+  for (var i = 0; i < PREFERENZE_POSTO.length; i++) {
+    if (PREFERENZE_POSTO[i].value === value) return PREFERENZE_POSTO[i].label
+  }
+  return ''
+}
+
 function detectMealFromHour(hour, mealTypes) {
   var h = parseInt(hour)
   var ranges = {
@@ -36,9 +50,7 @@ function detectMealFromHour(hour, mealTypes) {
     var range = ranges[key]
     if (h >= range.from && h <= range.to) {
       for (var j = 0; j < mealTypes.length; j++) {
-        if (mealTypes[j].value === key) {
-          return key
-        }
+        if (mealTypes[j].value === key) return key
       }
     }
   }
@@ -93,7 +105,6 @@ function ReservationForm() {
   var selectedMinute = minuteState[0]
   var setSelectedMinute = minuteState[1]
 
-  // INTERVENTO B: turni da config_options
   var mealTypesState = useState([])
   var mealTypes = mealTypesState[0]
   var setMealTypes = mealTypesState[1]
@@ -102,7 +113,6 @@ function ReservationForm() {
   var loadingMealTypes = loadingMealTypesState[0]
   var setLoadingMealTypes = loadingMealTypesState[1]
 
-  // INTERVENTO A: modale cliente rapido
   var showQuickState = useState(false)
   var showQuickCustomer = showQuickState[0]
   var setShowQuickCustomer = showQuickState[1]
@@ -120,6 +130,16 @@ function ReservationForm() {
   var quickErrorState = useState(null)
   var quickError = quickErrorState[0]
   var setQuickError = quickErrorState[1]
+
+  // Preferenza posto: stato locale per la prenotazione corrente
+  var preferenzaState = useState('')
+  var preferenzaPosto = preferenzaState[0]
+  var setPreferenzaPosto = preferenzaState[1]
+
+  // Salva preferenza sul cliente: flag
+  var salvaPreferenzaState = useState(false)
+  var salvaPreferenzaCliente = salvaPreferenzaState[0]
+  var setSalvaPreferenzaCliente = salvaPreferenzaState[1]
 
   var initialDate = searchParams.get('date') || formatDateISO(new Date())
   var initialMeal = searchParams.get('meal') || ''
@@ -139,7 +159,6 @@ function ReservationForm() {
 
   var totalGuests = formData.adults_count + formData.children_count
 
-  // Carica turni da config_options
   useEffect(function() {
     supabase
       .from('config_options')
@@ -170,15 +189,11 @@ function ReservationForm() {
   }, [])
 
   useEffect(function() {
-    if (isEditing) {
-      loadReservation()
-    }
+    if (isEditing) loadReservation()
   }, [id])
 
   useEffect(function() {
-    if (formData.reservation_date && formData.meal_type) {
-      checkAvailability()
-    }
+    if (formData.reservation_date && formData.meal_type) checkAvailability()
   }, [formData.reservation_date, formData.meal_type, totalGuests])
 
   useEffect(function() {
@@ -199,15 +214,11 @@ function ReservationForm() {
     setLoading(true)
     supabase
       .from('reservations')
-      .select('*, customers(id, first_name, last_name, phone, email, category)')
+      .select('*, customers(id, first_name, last_name, phone, email, category, preferenza_posto)')
       .eq('id', id)
       .single()
       .then(function(result) {
-        if (result.error) {
-          alert('Prenotazione non trovata.')
-          navigate('/prenotazioni')
-          return
-        }
+        if (result.error) { alert('Prenotazione non trovata.'); navigate('/prenotazioni'); return; }
         var res = result.data
         setFormData({
           reservation_date: res.reservation_date,
@@ -219,6 +230,12 @@ function ReservationForm() {
           special_requests: res.special_requests || '',
           source: res.source || 'manual'
         })
+        // Carica preferenza dalla prenotazione, poi fallback sul cliente
+        if (res.preferenza_posto) {
+          setPreferenzaPosto(res.preferenza_posto)
+        } else if (res.customers && res.customers.preferenza_posto) {
+          setPreferenzaPosto(res.customers.preferenza_posto)
+        }
         if (res.requested_time) {
           var timeParts = res.requested_time.split(':')
           setSelectedHour(timeParts[0])
@@ -239,21 +256,16 @@ function ReservationForm() {
 
   function searchCustomers(query) {
     setCustomerSearch(query)
-    if (query.length < 2) {
-      setSearchResults([])
-      return
-    }
+    if (query.length < 2) { setSearchResults([]); return; }
     supabase
       .from('customers')
-      .select('id, first_name, last_name, phone, email, category')
+      .select('id, first_name, last_name, phone, email, category, preferenza_posto')
       .eq('is_active', true)
       .or('last_name.ilike.%' + query + '%,first_name.ilike.%' + query + '%,phone.ilike.%' + query + '%,email.ilike.%' + query + '%')
       .order('last_name')
       .limit(10)
       .then(function(result) {
-        if (!result.error) {
-          setSearchResults(result.data || [])
-        }
+        if (!result.error) setSearchResults(result.data || [])
       })
   }
 
@@ -263,6 +275,12 @@ function ReservationForm() {
     setSearchResults([])
     setCustomerSearch('')
     loadCustomerAllergens(customer.id)
+    // Pre-compila la preferenza dal profilo cliente se presente
+    if (customer.preferenza_posto) {
+      setPreferenzaPosto(customer.preferenza_posto)
+    } else {
+      setPreferenzaPosto('')
+    }
   }
 
   function loadCustomerAllergens(customerId) {
@@ -271,23 +289,15 @@ function ReservationForm() {
       .select('severity, allergens(id, name, icon)')
       .eq('customer_id', customerId)
       .then(function(result) {
-        if (!result.error) {
-          setCustomerAllergens(result.data || [])
-        }
+        if (!result.error) setCustomerAllergens(result.data || [])
       })
   }
 
   function checkAvailability() {
     supabase
-      .rpc('check_availability', {
-        p_date: formData.reservation_date,
-        p_meal_type: formData.meal_type,
-        p_guests: totalGuests
-      })
+      .rpc('check_availability', { p_date: formData.reservation_date, p_meal_type: formData.meal_type, p_guests: totalGuests })
       .then(function(result) {
-        if (!result.error && result.data && result.data.length > 0) {
-          setAvailability(result.data[0])
-        }
+        if (!result.error && result.data && result.data.length > 0) setAvailability(result.data[0])
       })
   }
 
@@ -315,10 +325,7 @@ function ReservationForm() {
   function handleQuickCustomerSubmit(e) {
     e.preventDefault()
     setQuickError(null)
-    if (!quickForm.first_name.trim() || !quickForm.last_name.trim()) {
-      setQuickError('Nome e Cognome sono obbligatori.')
-      return
-    }
+    if (!quickForm.first_name.trim() || !quickForm.last_name.trim()) { setQuickError('Nome e Cognome sono obbligatori.'); return; }
     setQuickLoading(true)
     var newCustomer = {
       first_name: quickForm.first_name.trim(),
@@ -339,7 +346,7 @@ function ReservationForm() {
         setQuickLoading(false)
         if (result.error) {
           if (result.error.code === '23505') {
-            setQuickError('Esiste gia un cliente con questo telefono o email. Cercalo nella lista.')
+            setQuickError('Esiste gia un cliente con questo telefono o email.')
           } else {
             setQuickError('Errore creazione cliente: ' + result.error.message)
           }
@@ -352,29 +359,17 @@ function ReservationForm() {
 
   function handleSubmit(e) {
     e.preventDefault()
-    if (!selectedCustomer) {
-      alert('Seleziona un cliente per la prenotazione.')
-      return
-    }
-    if (!formData.reservation_date) {
-      alert('Seleziona una data.')
-      return
-    }
-    if (formData.adults_count < 1) {
-      alert('Il numero di adulti deve essere almeno 1.')
-      return
-    }
+    if (!selectedCustomer) { alert('Seleziona un cliente per la prenotazione.'); return; }
+    if (!formData.reservation_date) { alert('Seleziona una data.'); return; }
+    if (formData.adults_count < 1) { alert('Il numero di adulti deve essere almeno 1.'); return; }
     if (availability && !availability.is_available) {
-      var conferma = window.confirm(
-        'Attenzione: i coperti disponibili (' + availability.remaining_covers + ') non sono sufficienti per ' + totalGuests + ' ospiti. Vuoi procedere comunque?'
-      )
+      var conferma = window.confirm('Attenzione: i coperti disponibili (' + availability.remaining_covers + ') non sono sufficienti per ' + totalGuests + ' ospiti. Vuoi procedere comunque?')
       if (!conferma) return
     }
     setSaving(true)
     var requestedTime = null
-    if (selectedHour !== '') {
-      requestedTime = pad(parseInt(selectedHour)) + ':' + selectedMinute + ':00'
-    }
+    if (selectedHour !== '') requestedTime = pad(parseInt(selectedHour)) + ':' + selectedMinute + ':00'
+
     var reservationData = {
       customer_id: selectedCustomer.id,
       reservation_date: formData.reservation_date,
@@ -387,18 +382,29 @@ function ReservationForm() {
       notes: formData.notes || null,
       special_requests: formData.special_requests || null,
       source: formData.source,
-      has_allergen_alerts: customerAllergens.length > 0
+      has_allergen_alerts: customerAllergens.length > 0,
+      preferenza_posto: preferenzaPosto || null
     }
+
     var promise
     if (isEditing) {
       promise = supabase.from('reservations').update(reservationData).eq('id', id)
     } else {
       promise = supabase.from('reservations').insert(reservationData)
     }
+
     promise.then(function(result) {
       if (result.error) {
         console.error('Errore salvataggio:', result.error)
         alert('Errore nel salvataggio. Riprova.')
+        setSaving(false)
+        return
+      }
+      // Salva preferenza sul profilo cliente se richiesto
+      if (salvaPreferenzaCliente && selectedCustomer && preferenzaPosto !== undefined) {
+        supabase.from('customers').update({ preferenza_posto: preferenzaPosto || null }).eq('id', selectedCustomer.id).then(function() {
+          navigate('/prenotazioni')
+        })
       } else {
         navigate('/prenotazioni')
       }
@@ -416,19 +422,13 @@ function ReservationForm() {
 
   var mealLabel = ''
   for (var mi = 0; mi < mealTypes.length; mi++) {
-    if (mealTypes[mi].value === formData.meal_type) {
-      mealLabel = mealTypes[mi].label
-      break
-    }
+    if (mealTypes[mi].value === formData.meal_type) { mealLabel = mealTypes[mi].label; break; }
   }
 
   return (
     <div className="max-w-3xl mx-auto">
       <div className="flex items-center gap-4 mb-6">
-        <button
-          onClick={function() { navigate(-1) }}
-          className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
-        >
+        <button onClick={function() { navigate(-1) }} className="p-2 rounded-lg hover:bg-gray-100 transition-colors">
           <ArrowLeft size={24} />
         </button>
         <h1 className="text-2xl font-bold text-gray-900">
@@ -450,23 +450,18 @@ function ReservationForm() {
                     {selectedCustomer.first_name[0]}{selectedCustomer.last_name[0]}
                   </div>
                   <div>
-                    <p className="font-semibold text-gray-900">
-                      {selectedCustomer.first_name} {selectedCustomer.last_name}
-                    </p>
-                    <p className="text-sm text-gray-500">
-                      {selectedCustomer.phone || selectedCustomer.email || 'Nessun contatto'}
-                    </p>
+                    <p className="font-semibold text-gray-900">{selectedCustomer.first_name} {selectedCustomer.last_name}</p>
+                    <p className="text-sm text-gray-500">{selectedCustomer.phone || selectedCustomer.email || 'Nessun contatto'}</p>
+                    {selectedCustomer.preferenza_posto && (
+                      <p className="text-xs text-blue-600 mt-0.5">
+                        Preferenza salvata: {getLabelPreferenza(selectedCustomer.preferenza_posto)}
+                      </p>
+                    )}
                   </div>
                   <Check size={20} className="text-green-600" />
                 </div>
                 {!isEditing && (
-                  <button
-                    type="button"
-                    onClick={function() { setShowSearch(true); setSelectedCustomer(null); setCustomerAllergens([]) }}
-                    className="text-sm text-wine-600 hover:text-wine-800"
-                  >
-                    Cambia
-                  </button>
+                  <button type="button" onClick={function() { setShowSearch(true); setSelectedCustomer(null); setCustomerAllergens([]); setPreferenzaPosto(''); }} className="text-sm text-wine-600 hover:text-wine-800">Cambia</button>
                 )}
               </div>
 
@@ -478,11 +473,7 @@ function ReservationForm() {
                   </div>
                   <div className="flex flex-wrap gap-1">
                     {customerAllergens.map(function(ca, idx) {
-                      return (
-                        <span key={idx} className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded">
-                          {ca.allergens.icon} {ca.allergens.name}
-                        </span>
-                      )
+                      return <span key={idx} className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded">{ca.allergens.icon} {ca.allergens.name}</span>
                     })}
                   </div>
                 </div>
@@ -506,22 +497,16 @@ function ReservationForm() {
                 <div className="mt-2 border border-gray-200 rounded-lg overflow-hidden">
                   {searchResults.map(function(customer) {
                     return (
-                      <button
-                        key={customer.id}
-                        type="button"
-                        onClick={function() { selectCustomer(customer) }}
-                        className="w-full text-left px-4 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-0 flex items-center gap-3"
-                      >
+                      <button key={customer.id} type="button" onClick={function() { selectCustomer(customer) }} className="w-full text-left px-4 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-0 flex items-center gap-3">
                         <div className="w-8 h-8 rounded-full bg-wine-100 text-wine-700 flex items-center justify-center text-sm font-bold flex-shrink-0">
                           {customer.first_name[0]}{customer.last_name[0]}
                         </div>
                         <div>
-                          <p className="font-medium text-gray-900">
-                            {customer.last_name} {customer.first_name}
-                          </p>
-                          <p className="text-sm text-gray-500">
-                            {customer.phone || customer.email || ''}
-                          </p>
+                          <p className="font-medium text-gray-900">{customer.last_name} {customer.first_name}</p>
+                          <p className="text-sm text-gray-500">{customer.phone || customer.email || ''}</p>
+                          {customer.preferenza_posto && (
+                            <p className="text-xs text-blue-500">{getLabelPreferenza(customer.preferenza_posto)}</p>
+                          )}
                         </div>
                       </button>
                     )
@@ -529,30 +514,19 @@ function ReservationForm() {
                 </div>
               )}
 
-              {/* INTERVENTO A: modale invece di navigazione esterna */}
               {customerSearch.length >= 2 && searchResults.length === 0 && (
                 <div className="mt-3 text-center py-4">
                   <p className="text-gray-500 text-sm mb-2">Nessun cliente trovato</p>
-                  <button
-                    type="button"
-                    onClick={openQuickCustomer}
-                    className="inline-flex items-center gap-2 text-wine-600 hover:text-wine-800 text-sm font-medium"
-                  >
-                    <UserPlus size={16} />
-                    Registra nuovo cliente
+                  <button type="button" onClick={openQuickCustomer} className="inline-flex items-center gap-2 text-wine-600 hover:text-wine-800 text-sm font-medium">
+                    <UserPlus size={16} />Registra nuovo cliente
                   </button>
                 </div>
               )}
 
               {customerSearch.length === 0 && (
                 <div className="mt-3 text-center">
-                  <button
-                    type="button"
-                    onClick={openQuickCustomer}
-                    className="inline-flex items-center gap-2 text-wine-600 hover:text-wine-800 text-sm font-medium"
-                  >
-                    <UserPlus size={16} />
-                    Registra nuovo cliente
+                  <button type="button" onClick={openQuickCustomer} className="inline-flex items-center gap-2 text-wine-600 hover:text-wine-800 text-sm font-medium">
+                    <UserPlus size={16} />Registra nuovo cliente
                   </button>
                 </div>
               )}
@@ -566,26 +540,14 @@ function ReservationForm() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Data <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="date"
-                name="reservation_date"
-                value={formData.reservation_date}
-                onChange={handleInputChange}
-                required
-                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base"
-              />
+              <label className="block text-sm font-medium text-gray-700 mb-1">Data <span className="text-red-500">*</span></label>
+              <input type="date" name="reservation_date" value={formData.reservation_date} onChange={handleInputChange} required className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base" />
             </div>
 
-            {/* INTERVENTO B: turni configurabili con bottoni */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 Turno <span className="text-red-500">*</span>
-                {selectedHour !== '' && (
-                  <span className="text-xs text-wine-600 ml-1">(rilevato dall'orario)</span>
-                )}
+                {selectedHour !== '' && <span className="text-xs text-wine-600 ml-1">(rilevato dall'orario)</span>}
               </label>
               {loadingMealTypes ? (
                 <div className="text-xs text-gray-400 py-3">Caricamento turni...</div>
@@ -594,72 +556,33 @@ function ReservationForm() {
                   {mealTypes.map(function(mt) {
                     var isSelected = formData.meal_type === mt.value
                     return (
-                      <button
-                        key={mt.value}
-                        type="button"
-                        onClick={function() {
-                          setFormData(function(prev) {
-                            var updated = {}
-                            for (var key in prev) { updated[key] = prev[key] }
-                            updated.meal_type = mt.value
-                            return updated
-                          })
-                        }}
-                        className={
-                          'px-4 py-2.5 rounded-lg text-sm font-medium border transition-colors ' +
-                          (isSelected
-                            ? 'bg-wine-700 border-wine-700 text-white'
-                            : 'bg-white border-gray-300 text-gray-700 hover:border-wine-400')
-                        }
-                      >
-                        {mt.label}
-                      </button>
+                      <button key={mt.value} type="button"
+                        onClick={function() { setFormData(function(prev) { var u = {}; for (var k in prev) { u[k] = prev[k] } u.meal_type = mt.value; return u }) }}
+                        className={'px-4 py-2.5 rounded-lg text-sm font-medium border transition-colors ' + (isSelected ? 'bg-wine-700 border-wine-700 text-white' : 'bg-white border-gray-300 text-gray-700 hover:border-wine-400')}
+                      >{mt.label}</button>
                     )
                   })}
                 </div>
               )}
             </div>
 
-            {/* Orario con ore e minuti separati - identico all'originale */}
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Orario di arrivo
-              </label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Orario di arrivo</label>
               <div className="flex items-center gap-2">
-                <select
-                  value={selectedHour}
-                  onChange={function(e) { setSelectedHour(e.target.value) }}
-                  className="flex-1 px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 bg-white text-base"
-                >
+                <select value={selectedHour} onChange={function(e) { setSelectedHour(e.target.value) }} className="flex-1 px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 bg-white text-base">
                   <option value="">Ore</option>
-                  {HOURS.map(function(h) {
-                    return <option key={h} value={h}>{pad(h)}</option>
-                  })}
+                  {HOURS.map(function(h) { return <option key={h} value={h}>{pad(h)}</option> })}
                 </select>
                 <span className="text-xl font-bold text-gray-400">:</span>
-                <select
-                  value={selectedMinute}
-                  onChange={function(e) { setSelectedMinute(e.target.value) }}
-                  className="flex-1 px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 bg-white text-base"
-                  disabled={selectedHour === ''}
-                >
-                  {MINUTES.map(function(m) {
-                    return <option key={m} value={m}>{m}</option>
-                  })}
+                <select value={selectedMinute} onChange={function(e) { setSelectedMinute(e.target.value) }} className="flex-1 px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 bg-white text-base" disabled={selectedHour === ''}>
+                  {MINUTES.map(function(m) { return <option key={m} value={m}>{m}</option> })}
                 </select>
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Fonte
-              </label>
-              <select
-                name="source"
-                value={formData.source}
-                onChange={handleInputChange}
-                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 bg-white text-base"
-              >
+              <label className="block text-sm font-medium text-gray-700 mb-1">Fonte</label>
+              <select name="source" value={formData.source} onChange={handleInputChange} className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 bg-white text-base">
                 <option value="manual">Inserimento manuale</option>
                 <option value="phone">Telefono</option>
                 <option value="email">Email</option>
@@ -669,44 +592,21 @@ function ReservationForm() {
             </div>
           </div>
 
-          {/* Adulti e Bambini */}
+          {/* Ospiti */}
           <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
             <h3 className="text-sm font-semibold text-gray-700 mb-3">Numero ospiti</h3>
             <div className="grid grid-cols-3 gap-4 items-end">
               <div>
-                <label className="block text-sm text-gray-600 mb-1">
-                  Adulti <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="number"
-                  name="adults_count"
-                  value={formData.adults_count}
-                  onChange={handleInputChange}
-                  min="1"
-                  max="200"
-                  required
-                  className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base text-center"
-                />
+                <label className="block text-sm text-gray-600 mb-1">Adulti <span className="text-red-500">*</span></label>
+                <input type="number" name="adults_count" value={formData.adults_count} onChange={handleInputChange} min="1" max="200" required className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base text-center" />
               </div>
               <div>
-                <label className="block text-sm text-gray-600 mb-1">
-                  Bambini
-                </label>
-                <input
-                  type="number"
-                  name="children_count"
-                  value={formData.children_count}
-                  onChange={handleInputChange}
-                  min="0"
-                  max="200"
-                  className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base text-center"
-                />
+                <label className="block text-sm text-gray-600 mb-1">Bambini</label>
+                <input type="number" name="children_count" value={formData.children_count} onChange={handleInputChange} min="0" max="200" className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base text-center" />
               </div>
               <div className="text-center">
                 <label className="block text-sm text-gray-600 mb-1">Totale</label>
-                <div className="px-4 py-3 bg-wine-100 text-wine-800 rounded-lg font-bold text-lg">
-                  {totalGuests}
-                </div>
+                <div className="px-4 py-3 bg-wine-100 text-wine-800 rounded-lg font-bold text-lg">{totalGuests}</div>
               </div>
             </div>
           </div>
@@ -722,154 +622,114 @@ function ReservationForm() {
             </div>
           )}
 
+          {/* Preferenza posto */}
+          <div className="mt-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Preferenza posto
+              {selectedCustomer && selectedCustomer.preferenza_posto && (
+                <span className="text-xs text-blue-500 font-normal ml-2">
+                  (salvata sul cliente: {getLabelPreferenza(selectedCustomer.preferenza_posto)})
+                </span>
+              )}
+            </label>
+            <div className="flex flex-wrap gap-2">
+              {PREFERENZE_POSTO.map(function(pref) {
+                var sel = preferenzaPosto === pref.value
+                return (
+                  <button
+                    key={pref.value}
+                    type="button"
+                    onClick={function() { setPreferenzaPosto(pref.value) }}
+                    className={'px-3 py-2 rounded-lg text-sm border transition-colors ' + (sel ? 'bg-blue-600 border-blue-600 text-white font-semibold' : 'bg-white border-gray-300 text-gray-700 hover:border-blue-400')}
+                  >
+                    {pref.icona && <span className="mr-1">{pref.icona}</span>}
+                    {pref.label}
+                  </button>
+                )
+              })}
+            </div>
+            {preferenzaPosto && selectedCustomer && (
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="chk-salva-preferenza"
+                  checked={salvaPreferenzaCliente}
+                  onChange={function(e) { setSalvaPreferenzaCliente(e.target.checked) }}
+                  className="w-4 h-4 accent-blue-600 cursor-pointer"
+                />
+                <label htmlFor="chk-salva-preferenza" className="text-sm text-gray-600 cursor-pointer">
+                  Ricorda questa preferenza per {selectedCustomer.first_name} nelle prossime prenotazioni
+                </label>
+              </div>
+            )}
+          </div>
+
           <div className="mt-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">Tavolo</label>
-            <input
-              type="text"
-              name="table_info"
-              value={formData.table_info}
-              onChange={handleInputChange}
-              className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base"
-              placeholder="Es: Tavolo 5, Terrazza"
-            />
+            <input type="text" name="table_info" value={formData.table_info} onChange={handleInputChange} className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base" placeholder="Es: Tavolo 5, Terrazza" />
           </div>
 
           <div className="mt-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">Note</label>
-            <textarea
-              name="notes"
-              value={formData.notes}
-              onChange={handleInputChange}
-              rows={2}
-              className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base"
-              placeholder="Note interne sulla prenotazione"
-            />
+            <textarea name="notes" value={formData.notes} onChange={handleInputChange} rows={2} className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base" placeholder="Note interne sulla prenotazione" />
           </div>
 
           <div className="mt-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">Richieste speciali</label>
-            <textarea
-              name="special_requests"
-              value={formData.special_requests}
-              onChange={handleInputChange}
-              rows={2}
-              className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base"
-              placeholder="Es: compleanno, menu vegano, seggiolone..."
-            />
+            <textarea name="special_requests" value={formData.special_requests} onChange={handleInputChange} rows={2} className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base" placeholder="Es: compleanno, menu vegano, seggiolone..." />
           </div>
         </div>
 
         {/* Pulsanti */}
         <div className="flex flex-col sm:flex-row gap-3 pb-8">
-          <button
-            type="submit"
-            disabled={saving || !selectedCustomer}
-            className="flex-1 flex items-center justify-center gap-2 bg-wine-700 text-white px-6 py-4 rounded-xl hover:bg-wine-800 transition-colors font-medium shadow-sm disabled:opacity-50 disabled:cursor-not-allowed text-base"
-          >
+          <button type="submit" disabled={saving || !selectedCustomer} className="flex-1 flex items-center justify-center gap-2 bg-wine-700 text-white px-6 py-4 rounded-xl hover:bg-wine-800 transition-colors font-medium shadow-sm disabled:opacity-50 disabled:cursor-not-allowed text-base">
             <Save size={20} />
             <span>{saving ? 'Salvataggio...' : (isEditing ? 'Salva Modifiche' : 'Conferma Prenotazione')}</span>
           </button>
-          <button
-            type="button"
-            onClick={function() { navigate(-1) }}
-            className="px-6 py-4 border border-gray-300 rounded-xl hover:bg-gray-50 transition-colors font-medium text-gray-700 text-base"
-          >
-            Annulla
-          </button>
+          <button type="button" onClick={function() { navigate(-1) }} className="px-6 py-4 border border-gray-300 rounded-xl hover:bg-gray-50 transition-colors font-medium text-gray-700 text-base">Annulla</button>
         </div>
 
       </form>
 
-      {/* ========== MODALE CLIENTE RAPIDO ========== */}
+      {/* Modale cliente rapido */}
       {showQuickCustomer && (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md">
-
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Nuovo cliente rapido</h2>
                 <p className="text-xs text-gray-400 mt-0.5">Il cliente verra creato e selezionato automaticamente</p>
               </div>
-              <button
-                type="button"
-                onClick={function() { setShowQuickCustomer(false) }}
-                className="text-gray-400 hover:text-gray-600 text-xl font-light"
-              >x</button>
+              <button type="button" onClick={function() { setShowQuickCustomer(false) }} className="text-gray-400 hover:text-gray-600 text-xl font-light">x</button>
             </div>
 
             <form onSubmit={handleQuickCustomerSubmit} className="p-6 space-y-4">
-
-              {quickError && (
-                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{quickError}</div>
-              )}
+              {quickError && <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{quickError}</div>}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Nome <span className="text-red-500">*</span></label>
-                  <input
-                    type="text"
-                    value={quickForm.first_name}
-                    onChange={function(e) {
-                      var val = e.target.value
-                      setQuickForm(function(prev) { var u = {}; for (var k in prev) { u[k] = prev[k] } u.first_name = val; return u })
-                    }}
-                    required
-                    autoFocus
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
-                  />
+                  <input type="text" value={quickForm.first_name} onChange={function(e) { var val = e.target.value; setQuickForm(function(prev) { var u = {}; for (var k in prev) { u[k] = prev[k] } u.first_name = val; return u }) }} required autoFocus className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Cognome <span className="text-red-500">*</span></label>
-                  <input
-                    type="text"
-                    value={quickForm.last_name}
-                    onChange={function(e) {
-                      var val = e.target.value
-                      setQuickForm(function(prev) { var u = {}; for (var k in prev) { u[k] = prev[k] } u.last_name = val; return u })
-                    }}
-                    required
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
-                  />
+                  <input type="text" value={quickForm.last_name} onChange={function(e) { var val = e.target.value; setQuickForm(function(prev) { var u = {}; for (var k in prev) { u[k] = prev[k] } u.last_name = val; return u }) }} required className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
                 </div>
               </div>
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Telefono <span className="text-gray-400 font-normal">(consigliato)</span></label>
-                <input
-                  type="tel"
-                  value={quickForm.phone}
-                  onChange={function(e) {
-                    var val = e.target.value
-                    setQuickForm(function(prev) { var u = {}; for (var k in prev) { u[k] = prev[k] } u.phone = val; return u })
-                  }}
-                  placeholder="+39 ..."
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
-                />
+                <input type="tel" value={quickForm.phone} onChange={function(e) { var val = e.target.value; setQuickForm(function(prev) { var u = {}; for (var k in prev) { u[k] = prev[k] } u.phone = val; return u }) }} placeholder="+39 ..." className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
               </div>
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Email</label>
-                <input
-                  type="email"
-                  value={quickForm.email}
-                  onChange={function(e) {
-                    var val = e.target.value
-                    setQuickForm(function(prev) { var u = {}; for (var k in prev) { u[k] = prev[k] } u.email = val; return u })
-                  }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
-                />
+                <input type="email" value={quickForm.email} onChange={function(e) { var val = e.target.value; setQuickForm(function(prev) { var u = {}; for (var k in prev) { u[k] = prev[k] } u.email = val; return u }) }} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
               </div>
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Categoria</label>
-                <select
-                  value={quickForm.category}
-                  onChange={function(e) {
-                    var val = e.target.value
-                    setQuickForm(function(prev) { var u = {}; for (var k in prev) { u[k] = prev[k] } u.category = val; return u })
-                  }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
-                >
+                <select value={quickForm.category} onChange={function(e) { var val = e.target.value; setQuickForm(function(prev) { var u = {}; for (var k in prev) { u[k] = prev[k] } u.category = val; return u }) }} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500">
                   <option value="standard">Standard</option>
                   <option value="vip">VIP</option>
                   <option value="press">Stampa</option>
@@ -880,39 +740,15 @@ function ReservationForm() {
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Note rapide</label>
-                <textarea
-                  value={quickForm.notes}
-                  onChange={function(e) {
-                    var val = e.target.value
-                    setQuickForm(function(prev) { var u = {}; for (var k in prev) { u[k] = prev[k] } u.notes = val; return u })
-                  }}
-                  rows="2"
-                  placeholder="Informazioni utili da ricordare..."
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 resize-none"
-                />
+                <textarea value={quickForm.notes} onChange={function(e) { var val = e.target.value; setQuickForm(function(prev) { var u = {}; for (var k in prev) { u[k] = prev[k] } u.notes = val; return u }) }} rows="2" placeholder="Informazioni utili da ricordare..." className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 resize-none" />
               </div>
 
-              <p className="text-xs text-gray-400">
-                Allergeni, GDPR e dati completi si aggiungono in seguito da Anagrafica Clienti.
-              </p>
+              <p className="text-xs text-gray-400">Allergeni, GDPR e dati completi si aggiungono in seguito da Anagrafica Clienti.</p>
 
               <div className="flex gap-3 pt-1">
-                <button
-                  type="button"
-                  onClick={function() { setShowQuickCustomer(false) }}
-                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
-                >
-                  Annulla
-                </button>
-                <button
-                  type="submit"
-                  disabled={quickLoading}
-                  className="flex-1 bg-wine-700 hover:bg-wine-800 disabled:bg-wine-300 text-white px-4 py-2 rounded-lg text-sm font-medium"
-                >
-                  {quickLoading ? 'Creazione...' : 'Crea e seleziona'}
-                </button>
+                <button type="button" onClick={function() { setShowQuickCustomer(false) }} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">Annulla</button>
+                <button type="submit" disabled={quickLoading} className="flex-1 bg-wine-700 hover:bg-wine-800 disabled:bg-wine-300 text-white px-4 py-2 rounded-lg text-sm font-medium">{quickLoading ? 'Creazione...' : 'Crea e seleziona'}</button>
               </div>
-
             </form>
           </div>
         </div>
