@@ -171,7 +171,7 @@ export default function SalePage() {
 
   var [showFormTavolo, setShowFormTavolo] = useState(false);
   var [tavoloInEditing, setTavoloInEditing] = useState(null);
-  var [formTavolo, setFormTavolo] = useState({ nome: '', capacita: 4, forma: 'rettangolo', larghezza: 2, altezza: 1, colore: '#6B7280', note: '', categoria: '', quantita: 1 });
+  var [formTavolo, setFormTavolo] = useState({ nome: '', capacita: 4, forma: 'rettangolo', larghezza: 2, altezza: 1, colore: '#6B7280', note: '', categoria: '', quantita: 1, border_radius: 0 });
 
   var [showModaleEtichetta, setShowModaleEtichetta] = useState(false);
   var [tavoloInAttesaEtichetta, setTavoloInAttesaEtichetta] = useState(null);
@@ -666,7 +666,7 @@ export default function SalePage() {
   function apriFormTavolo(tavolo) {
     if (tavolo) {
       setTavoloInEditing(tavolo);
-      setFormTavolo({ nome: tavolo.nome, capacita: tavolo.capacita, forma: tavolo.forma, larghezza: tavolo.larghezza, altezza: tavolo.altezza, colore: tavolo.colore, note: tavolo.note || '', categoria: tavolo.categoria || '', quantita: tavolo.quantita || 1 });
+      setFormTavolo({ nome: tavolo.nome, capacita: tavolo.capacita, forma: tavolo.forma, larghezza: tavolo.larghezza, altezza: tavolo.altezza, colore: tavolo.colore, note: tavolo.note || '', categoria: tavolo.categoria || '', quantita: tavolo.quantita || 1, border_radius: tavolo.border_radius || 0 });
     } else {
       setTavoloInEditing(null);
       setFormTavolo({ nome: '', capacita: 4, forma: 'rettangolo', larghezza: 2, altezza: 1, colore: '#6B7280', note: '', categoria: '', quantita: 1 });
@@ -676,7 +676,7 @@ export default function SalePage() {
 
   function salvaTavolo() {
     if (!formTavolo.nome.trim()) { alert('Inserisci il nome della tipologia'); return; }
-    var dati = { nome: formTavolo.nome.trim(), capacita: parseInt(formTavolo.capacita) || 4, forma: formTavolo.forma, larghezza: parseInt(formTavolo.larghezza) || 2, altezza: parseInt(formTavolo.altezza) || 1, colore: formTavolo.colore, note: formTavolo.note, categoria: formTavolo.categoria.trim() || null, quantita: parseInt(formTavolo.quantita) || 1 };
+    var dati = { nome: formTavolo.nome.trim(), capacita: parseInt(formTavolo.capacita) || 4, forma: formTavolo.forma, larghezza: parseInt(formTavolo.larghezza) || 2, altezza: parseInt(formTavolo.altezza) || 1, colore: formTavolo.colore, note: formTavolo.note, categoria: formTavolo.categoria.trim() || null, quantita: parseInt(formTavolo.quantita) || 1, border_radius: parseInt(formTavolo.border_radius) || 0 };
     if (tavoloInEditing) {
       supabase.from('tavoli').update(dati).eq('id', tavoloInEditing.id).then(function(result) {
         if (result.error) { alert('Errore: ' + result.error.message); return; }
@@ -927,7 +927,8 @@ export default function SalePage() {
     var bgColor = editorMode ? (t.colore || '#6B7280') : (stato === 'occupato' ? '#EF4444' : stato === 'prenotato' ? '#F59E0B' : '#10B981');
     var pad = mostraSedie ? 14 : 0;
     // Mostra etichetta se assegnata, altrimenti nome tipologia
-    var labelVisibile = (layoutItem.etichetta && layoutItem.etichetta.trim()) ? layoutItem.etichetta.trim() : t.nome;
+    var labelVisibile = (layoutItem.etichetta && layoutItem.etichetta.trim()) ? layoutItem.etichetta.trim() : '';
+    var borderRadiusTavolo = isRound ? '50%' : ((t.border_radius || 0) + 'px');
     var rotAttuale = (layoutItem.rotazione === null || layoutItem.rotazione === undefined) ? 0 : Number(layoutItem.rotazione);
 
     return (
@@ -941,7 +942,7 @@ export default function SalePage() {
             <SedieSVG w={w + pad * 2} h={h + pad * 2} capacita={t.capacita} forma={t.forma} colore={editorMode ? (t.colore || '#6B7280') : bgColor} />
           </div>
         )}
-        <div style={{ position: 'relative', width: w + 'px', height: h + 'px', backgroundColor: bgColor, borderRadius: isRound ? '50%' : '8px', boxShadow: suOstacolo ? '0 0 0 3px #EF4444' : (unito ? '0 0 0 3px #7C3AED' : '0 2px 6px rgba(0,0,0,0.25)'), display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white', overflow: 'hidden' }}>
+        <div style={{ position: 'relative', width: w + 'px', height: h + 'px', backgroundColor: bgColor, borderRadius: borderRadiusTavolo, boxShadow: suOstacolo ? '0 0 0 3px #EF4444' : (unito ? '0 0 0 3px #7C3AED' : '0 2px 6px rgba(0,0,0,0.25)'), display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white', overflow: 'hidden' }}>
           <span style={{ fontSize: '12px', fontWeight: '800', textShadow: '0 1px 2px rgba(0,0,0,0.3)', textAlign: 'center', padding: '0 2px' }}>{labelVisibile}</span>
           {!editorMode && nomeCliente && <span style={{ fontSize: '9px', opacity: 0.95, textAlign: 'center', maxWidth: '90%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>{nomeCliente}</span>}
           {!editorMode && ospiti > 0 && <span style={{ fontSize: '9px', opacity: 0.85, marginTop: '1px' }}>{ospiti} osp.</span>}
@@ -1491,7 +1492,7 @@ export default function SalePage() {
             <div style={{ background: 'white', borderRadius: '16px', padding: '28px', width: '440px', maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
               <h3 style={{ margin: '0 0 20px 0', fontSize: '18px', fontWeight: '800', color: '#111827' }}>{tavoloInEditing ? 'Modifica tipologia' : 'Nuova tipologia'}</h3>
               <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'center', padding: '20px', background: '#f9fafb', borderRadius: '10px', minHeight: '80px', alignItems: 'center' }}>
-                <div style={{ width: Math.min(formTavolo.larghezza * 30, 180) + 'px', height: Math.min(formTavolo.altezza * 30, 120) + 'px', background: formTavolo.colore || '#6B7280', borderRadius: formTavolo.forma === 'rotondo' ? '50%' : '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '11px', fontWeight: '800', boxShadow: '0 2px 8px rgba(0,0,0,0.2)' }}>{formTavolo.nome || '-'}</div>
+                <div style={{ width: Math.min(formTavolo.larghezza * 30, 180) + 'px', height: Math.min(formTavolo.altezza * 30, 120) + 'px', background: formTavolo.colore || '#6B7280', borderRadius: formTavolo.forma === 'rotondo' ? '50%' : ((formTavolo.border_radius || 0) + 'px'), display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '11px', fontWeight: '800', boxShadow: '0 2px 8px rgba(0,0,0,0.2)' }}>{formTavolo.nome || '-'}</div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 <div>
@@ -1533,6 +1534,13 @@ export default function SalePage() {
                     {COLORI_TAVOLO.map(function(c) {
                       return <button key={c.value} onClick={function() { setFormTavolo(Object.assign({}, formTavolo, { colore: c.value })); }} title={c.label} style={{ width: '34px', height: '34px', borderRadius: '50%', background: c.value, cursor: 'pointer', border: formTavolo.colore === c.value ? '3px solid #111827' : '2px solid transparent' }} />;
                     })}
+                  </div>
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '13px', color: '#374151', marginBottom: '4px', fontWeight: '700' }}>Arrotondamento angoli <span style={{ color: '#9CA3AF', fontWeight: '400', fontSize: '12px' }}>0 = spigolo vivo</span></label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input type="range" min="0" max="20" step="1" value={formTavolo.border_radius || 0} onChange={function(e) { setFormTavolo(Object.assign({}, formTavolo, { border_radius: parseInt(e.target.value) || 0 })); }} style={{ flex: 1, cursor: 'pointer' }} />
+                    <span style={{ fontSize: '13px', fontWeight: '700', color: '#374151', width: '36px', textAlign: 'right' }}>{formTavolo.border_radius || 0}px</span>
                   </div>
                 </div>
                 <div>
