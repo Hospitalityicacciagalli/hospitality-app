@@ -2,37 +2,30 @@ import { useState, useEffect, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/AuthContext';
 
-// GRID_COLS e GRID_ROWS non sono piu costanti globali: vengono caricati per sala dal DB
 var GRID_SIZE_MIN = 5;
 var GRID_SIZE_MAX = 60;
+var VIEWPORT_W = 860;
+var VIEWPORT_H = 580;
 
 var COLORI_TAVOLO = [
-  { label: 'Grigio', value: '#6B7280' },
-  { label: 'Blu', value: '#3B82F6' },
-  { label: 'Verde', value: '#10B981' },
+  { label: 'Grigio',  value: '#6B7280' },
+  { label: 'Blu',     value: '#3B82F6' },
+  { label: 'Verde',   value: '#10B981' },
   { label: 'Arancio', value: '#F59E0B' },
-  { label: 'Rosa', value: '#EC4899' },
-  { label: 'Viola', value: '#8B5CF6' },
-  { label: 'Rosso', value: '#EF4444' },
-  { label: 'Giallo', value: '#EAB308' }
+  { label: 'Rosa',    value: '#EC4899' },
+  { label: 'Viola',   value: '#8B5CF6' },
+  { label: 'Rosso',   value: '#EF4444' },
+  { label: 'Giallo',  value: '#EAB308' }
 ];
 
 var TIPI_OSTACOLO = [
-  { value: 'muro',     label: 'Muro',             colore: '#374151', blocca: true },
-  { value: 'colonna',  label: 'Colonna',           colore: '#92400E', blocca: true },
-  { value: 'tramezzo', label: 'Tramezzo',          colore: '#64748B', blocca: true },
-  { value: 'finestra', label: 'Finestra',          colore: '#38BDF8', blocca: false },
-  { value: 'porta',    label: 'Porta',             colore: '#F97316', blocca: false },
-  { value: 'bancone',  label: 'Bancone / Bar',     colore: '#8B5CF6', blocca: true },
-  { value: 'servizio', label: 'Tavolo di servizio',colore: '#9CA3AF', blocca: true }
-];
-
-var PREFERENZE_POSTO = [
-  { value: '',                label: 'Nessuna preferenza' },
-  { value: 'vicino_finestra', label: 'Vicino alla finestra' },
-  { value: 'vicino_bancone',  label: 'Vicino al bancone / bar' },
-  { value: 'lontano_porta',   label: 'Lontano dalle porte' },
-  { value: 'angolo_tranquillo', label: 'Angolo tranquillo' }
+  { value: 'muro',     label: 'Muro',              colore: '#374151', blocca: true  },
+  { value: 'colonna',  label: 'Colonna',            colore: '#92400E', blocca: true  },
+  { value: 'tramezzo', label: 'Tramezzo',           colore: '#64748B', blocca: true  },
+  { value: 'finestra', label: 'Finestra',           colore: '#38BDF8', blocca: false },
+  { value: 'porta',    label: 'Porta',              colore: '#F97316', blocca: false },
+  { value: 'bancone',  label: 'Bancone / Bar',      colore: '#8B5CF6', blocca: true  },
+  { value: 'servizio', label: 'Tavolo di servizio', colore: '#9CA3AF', blocca: true  }
 ];
 
 function getTipoOstacolo(value) {
@@ -48,7 +41,6 @@ function labelStato(stato) {
   return 'Libero';
 }
 
-// --- TIPOLOGIE: getCategoria usa il nome della tipologia come categoria ---
 function getCategoria(t) {
   return (t.categoria && t.categoria.trim()) ? t.categoria.trim() : t.nome;
 }
@@ -56,19 +48,19 @@ function getCategoria(t) {
 function raggruppaPerCategoria(lista) {
   var mappa = {};
   var ordine = [];
-  lista.forEach(function(t) {
+  for (var i = 0; i < lista.length; i++) {
+    var t = lista[i];
     var cat = getCategoria(t);
     if (!mappa[cat]) { mappa[cat] = []; ordine.push(cat); }
     mappa[cat].push(t);
-  });
+  }
   return ordine.map(function(cat) { return { categoria: cat, tavoli: mappa[cat] }; });
 }
 
-// Calcola larghezza e altezza reali di un layoutItem tenendo conto della rotazione
 function getDimensioniEffettive(layoutItem) {
   var t = layoutItem.tavolo;
   if (!t) return { w: 1, h: 1 };
-  var rot = layoutItem.rotazione || 0;
+  var rot = (layoutItem.rotazione === null || layoutItem.rotazione === undefined) ? 0 : layoutItem.rotazione;
   if (rot === 90 || rot === 270) {
     return { w: t.altezza || 1, h: t.larghezza || 2 };
   }
@@ -94,26 +86,26 @@ function SedieSVG(props) {
       sedie.push(<circle key={i} cx={cx} cy={cy} r={sedieSize / 2} fill={colore} opacity="0.7" />);
     }
   } else {
-    var top = Math.ceil(capacita / 4);
+    var top    = Math.ceil(capacita / 4);
     var bottom = Math.ceil(capacita / 4);
-    var left = Math.floor(capacita / 4);
-    var right = capacita - top - bottom - left;
+    var left   = Math.floor(capacita / 4);
+    var right  = capacita - top - bottom - left;
     if (right < 0) right = 0;
     var pad = sedieSize + gap;
 
     function sedieLinea(n, x1, y1, x2, y2) {
       for (var j = 0; j < n; j++) {
-        var t = n > 1 ? j / (n - 1) : 0.5;
-        var sx = x1 + t * (x2 - x1);
-        var sy = y1 + t * (y2 - y1);
-        sedie.push(<rect key={'s' + x1 + '' + y1 + '' + j} x={sx - sedieSize / 2} y={sy - sedieSize / 2} width={sedieSize} height={sedieSize} rx="2" fill={colore} opacity="0.7" />);
+        var tt = n > 1 ? j / (n - 1) : 0.5;
+        var sx = x1 + tt * (x2 - x1);
+        var sy = y1 + tt * (y2 - y1);
+        sedie.push(<rect key={'s' + x1 + y1 + j} x={sx - sedieSize / 2} y={sy - sedieSize / 2} width={sedieSize} height={sedieSize} rx="2" fill={colore} opacity="0.7" />);
       }
     }
 
-    if (top > 0) sedieLinea(top, pad, -sedieSize / 2 - gap, w - pad, -sedieSize / 2 - gap);
-    if (bottom > 0) sedieLinea(bottom, pad, h + sedieSize / 2 + gap, w - pad, h + sedieSize / 2 + gap);
-    if (left > 0) sedieLinea(left, -sedieSize / 2 - gap, pad, -sedieSize / 2 - gap, h - pad);
-    if (right > 0) sedieLinea(right, w + sedieSize / 2 + gap, pad, w + sedieSize / 2 + gap, h - pad);
+    if (top    > 0) sedieLinea(top,    pad,                  -sedieSize / 2 - gap, w - pad,                -sedieSize / 2 - gap);
+    if (bottom > 0) sedieLinea(bottom, pad,                   h + sedieSize / 2 + gap, w - pad,             h + sedieSize / 2 + gap);
+    if (left   > 0) sedieLinea(left,  -sedieSize / 2 - gap,  pad,                  -sedieSize / 2 - gap,    h - pad);
+    if (right  > 0) sedieLinea(right,  w + sedieSize / 2 + gap, pad,                w + sedieSize / 2 + gap, h - pad);
   }
 
   return (
@@ -144,8 +136,8 @@ export default function SalePage() {
   var [errore, setErrore] = useState(null);
   var [mostraSedie, setMostraSedie] = useState(true);
 
-  // 6.1 - gridSize e dimensioni griglia per sala
-  var [gridSize, setGridSize] = useState(null); // null finche non calcolato
+  var [gridSize, setGridSize] = useState(null);
+  var [gridSizeInput, setGridSizeInput] = useState('');
   var [gridCols, setGridCols] = useState(16);
   var [gridRows, setGridRows] = useState(10);
 
@@ -160,12 +152,10 @@ export default function SalePage() {
   var [showUnione, setShowUnione] = useState(false);
   var [unioneCapienza, setUnioneCapienza] = useState(0);
 
-  // 6.2 - form tipologia (ex form tavolo) - aggiunto campo quantita
   var [showFormTavolo, setShowFormTavolo] = useState(false);
   var [tavoloInEditing, setTavoloInEditing] = useState(null);
   var [formTavolo, setFormTavolo] = useState({ nome: '', capacita: 4, forma: 'rettangolo', larghezza: 2, altezza: 1, colore: '#6B7280', note: '', categoria: '', quantita: 1 });
 
-  // 6.2 - modale etichetta quando si aggiunge al layout
   var [showModaleEtichetta, setShowModaleEtichetta] = useState(false);
   var [tavoloInAttesaEtichetta, setTavoloInAttesaEtichetta] = useState(null);
   var [etichettaInput, setEtichettaInput] = useState('');
@@ -176,24 +166,25 @@ export default function SalePage() {
 
   var [gruppiEspansi, setGruppiEspansi] = useState({});
 
-  // Ostacoli
   var [ostacoli, setOstacoli] = useState([]);
   var [tipoOstacoloAttivo, setTipoOstacoloAttivo] = useState('muro');
-  var [dragOstacolo, setDragOstacolo] = useState(false);
-  var [dragStart, setDragStart] = useState(null);
-  var [dragEnd, setDragEnd] = useState(null);
+  // FIX 5: stato per dialog "quante celle" nell'editor ostacoli
+  var [dragOstacoloStart, setDragOstacoloStart] = useState(null);
+  var [dragOstacoloEnd, setDragOstacoloEnd] = useState(null);
+  var [isDraggingOstacolo, setIsDraggingOstacolo] = useState(false);
+  var [showDialogLunghezza, setShowDialogLunghezza] = useState(false);
+  var [dialogLunghezza, setDialogLunghezza] = useState('');
+  var [pendingDragInfo, setPendingDragInfo] = useState(null);
   var [servizioInizio, setServizioInizio] = useState(null);
   var [servizioFine, setServizioFine] = useState(null);
   var [draggingServizio, setDraggingServizio] = useState(false);
 
-  // Layout base
   var [layoutBase, setLayoutBase] = useState([]);
   var [showSalvaBase, setShowSalvaBase] = useState(false);
   var [nomeLayoutBase, setNomeLayoutBase] = useState('');
   var [descLayoutBase, setDescLayoutBase] = useState('');
   var [salvaBaseLoading, setSalvaBaseLoading] = useState(false);
 
-  // Mappa occupazione tipologie: tavoloId -> lista di { nomeSala, etichetta }
   var [tavoliOccupati, setTavoliOccupati] = useState({});
 
   var gridRef = useRef(null);
@@ -207,13 +198,18 @@ export default function SalePage() {
 
   useEffect(function() {
     if (salaSelezionata) {
-      aggiornaDimensioniGriglia(salaSelezionata);
       caricaLayout(salaSelezionata);
       caricaOstacoli(salaSelezionata);
       caricaLayoutBase(salaSelezionata);
       caricaOccupazioneTavoli();
     }
   }, [salaSelezionata, dataSelezionata]);
+
+  useEffect(function() {
+    if (salaSelezionata && sale.length > 0) {
+      aggiornaDimensioniGriglia(salaSelezionata);
+    }
+  }, [sale, salaSelezionata]);
 
   useEffect(function() {
     if (salaSelezionata && dataSelezionata && turnoSelezionato) {
@@ -223,27 +219,22 @@ export default function SalePage() {
     }
   }, [salaSelezionata, dataSelezionata, turnoSelezionato]);
 
-  // 6.1 - aggiorna gridCols, gridRows e calcola gridSize default in base alla larghezza schermo
   function aggiornaDimensioniGriglia(salaId) {
-    var s = sale.find(function(x) { return x.id === salaId; });
+    var s = null;
+    for (var i = 0; i < sale.length; i++) {
+      if (sale[i].id === salaId) { s = sale[i]; break; }
+    }
     if (!s) return;
     var cols = s.grid_cols || 16;
     var rows = s.grid_rows || 10;
     setGridCols(cols);
     setGridRows(rows);
-    // Calcola gridSize in modo che la griglia entri nello schermo (larghezza disponibile ~1200px)
-    var larghezzaDisp = Math.min(window.innerWidth - 320, 1200);
+    var larghezzaDisp = Math.min(VIEWPORT_W, window.innerWidth - 340);
     var calcolato = Math.floor(larghezzaDisp / cols);
     var clampato = Math.max(GRID_SIZE_MIN, Math.min(GRID_SIZE_MAX, calcolato));
     setGridSize(clampato);
+    setGridSizeInput(String(clampato));
   }
-
-  // Aggiorna dimensioni anche quando l'array sale viene popolato
-  useEffect(function() {
-    if (salaSelezionata && sale.length > 0) {
-      aggiornaDimensioniGriglia(salaSelezionata);
-    }
-  }, [sale]);
 
   function caricaSale() {
     supabase.from('sale').select('*').eq('attiva', true).order('ordine').then(function(result) {
@@ -266,9 +257,11 @@ export default function SalePage() {
       if (result.error) { setErrore(result.error.message); return; }
       var visti = {};
       var layout = [];
-      (result.data || []).forEach(function(r) {
+      var rows = result.data || [];
+      for (var i = 0; i < rows.length; i++) {
+        var r = rows[i];
         if (!visti[r.tavolo_id]) { visti[r.tavolo_id] = true; layout.push(r); }
-      });
+      }
       setLayoutAttivo(layout);
       setLayoutTemp(layout.map(function(r) { return Object.assign({}, r); }));
     });
@@ -286,81 +279,33 @@ export default function SalePage() {
     });
   }
 
-  // 6.2 - caricaOccupazioneTavoli ora conta istanze per tipologia
   function caricaOccupazioneTavoli() {
     supabase.from('layout_sala').select('tavolo_id, sala_id, etichetta, data_validita_dal, sale(nome, id)').order('data_validita_dal', { ascending: false }).then(function(result) {
       if (result.error) return;
-      // Per ogni tavolo_id raccoglie la lista di { nomeSala, etichetta } (solo il record piu recente per sala)
       var mappa = {};
       var vistiSala = {};
-      (result.data || []).forEach(function(r) {
+      var rows = result.data || [];
+      for (var i = 0; i < rows.length; i++) {
+        var r = rows[i];
         var chiave = r.tavolo_id + '_' + r.sala_id;
         if (!vistiSala[chiave]) {
           vistiSala[chiave] = true;
           if (!mappa[r.tavolo_id]) mappa[r.tavolo_id] = [];
-          mappa[r.tavolo_id].push({
-            nomeSala: r.sale ? r.sale.nome : 'altra sala',
-            salaId: r.sale ? r.sale.id : null,
-            etichetta: r.etichetta || ''
-          });
+          mappa[r.tavolo_id].push({ nomeSala: r.sale ? r.sale.nome : 'altra sala', salaId: r.sale ? r.sale.id : null, etichetta: r.etichetta || '' });
         }
-      });
+      }
       setTavoliOccupati(mappa);
     });
   }
 
-  // 6.2 - conta quante istanze di una tipologia sono usate in layout di altre sale
   function contaIstanzeAlteSale(tavoloId, salaCorrId) {
     var lista = tavoliOccupati[tavoloId];
     if (!lista) return 0;
-    return lista.filter(function(x) { return x.salaId !== salaCorrId; }).length;
-  }
-
-  function salvaLayoutBaseCorrente() {
-    if (!nomeLayoutBase.trim()) { alert('Inserisci un nome per il layout base'); return; }
-    if (layoutTemp.length === 0) { alert('Non ci sono tavoli nel layout attuale'); return; }
-    setSalvaBaseLoading(true);
-    supabase.from('layout_base').insert({ sala_id: salaSelezionata, nome: nomeLayoutBase.trim(), descrizione: descLayoutBase.trim() || null }).select().single().then(function(result) {
-      if (result.error) { alert('Errore: ' + result.error.message); setSalvaBaseLoading(false); return; }
-      var layoutBaseId = result.data.id;
-      var righe = layoutTemp.map(function(item) {
-        return { layout_base_id: layoutBaseId, tavolo_id: item.tavolo_id, pos_x: item.pos_x, pos_y: item.pos_y, rotazione: item.rotazione || 0 };
-      });
-      supabase.from('layout_base_tavoli').insert(righe).then(function(r2) {
-        setSalvaBaseLoading(false);
-        if (r2.error) { alert('Errore salvataggio posizioni: ' + r2.error.message); return; }
-        setShowSalvaBase(false);
-        setNomeLayoutBase('');
-        setDescLayoutBase('');
-        caricaLayoutBase(salaSelezionata);
-      });
-    });
-  }
-
-  function caricaLayoutBaseSuGriglia(lb) {
-    if (!window.confirm('Caricare il layout "' + lb.nome + '"? Sostituira il layout attuale in griglia. Le modifiche non salvate andranno perse.')) return;
-    var nuovoLayout = (lb.layout_base_tavoli || []).map(function(item) {
-      return {
-        id: null, sala_id: salaSelezionata,
-        tavolo_id: item.tavolo_id,
-        tavolo: item.tavolo,
-        pos_x: item.pos_x, pos_y: item.pos_y,
-        rotazione: item.rotazione || 0,
-        etichetta: item.etichetta || '',
-        data_validita_dal: dataSelezionata,
-        nuovo: true
-      };
-    });
-    setLayoutTemp(nuovoLayout);
-    setLayoutModificato(true);
-  }
-
-  function eliminaLayoutBase(lb) {
-    if (!window.confirm('Eliminare il layout base "' + lb.nome + '"?')) return;
-    supabase.from('layout_base').delete().eq('id', lb.id).then(function(result) {
-      if (result.error) { alert('Errore: ' + result.error.message); return; }
-      caricaLayoutBase(salaSelezionata);
-    });
+    var n = 0;
+    for (var i = 0; i < lista.length; i++) {
+      if (lista[i].salaId !== salaCorrId) n++;
+    }
+    return n;
   }
 
   function caricaTavoliUniti() {
@@ -384,30 +329,53 @@ export default function SalePage() {
   function getStatoTavolo(tavoloId) {
     var assegnazioni = tavoliPrenotazioni.filter(function(tp) { return tp.tavolo_id === tavoloId; });
     if (assegnazioni.length === 0) return 'libero';
-    var pren = prenotazioni.find(function(p) { return assegnazioni.some(function(a) { return a.prenotazione_id === p.id; }); });
+    var pren = null;
+    for (var i = 0; i < prenotazioni.length; i++) {
+      var p = prenotazioni[i];
+      for (var j = 0; j < assegnazioni.length; j++) {
+        if (assegnazioni[j].prenotazione_id === p.id) { pren = p; break; }
+      }
+      if (pren) break;
+    }
     if (!pren) return 'libero';
     if (pren.stato === 'arrivato' || pren.stato === 'al_tavolo') return 'occupato';
     return 'prenotato';
   }
 
   function getNomeClienteTavolo(tavoloId) {
-    var a = tavoliPrenotazioni.find(function(tp) { return tp.tavolo_id === tavoloId; });
+    var a = null;
+    for (var i = 0; i < tavoliPrenotazioni.length; i++) {
+      if (tavoliPrenotazioni[i].tavolo_id === tavoloId) { a = tavoliPrenotazioni[i]; break; }
+    }
     if (!a) return null;
-    var p = prenotazioni.find(function(x) { return x.id === a.prenotazione_id; });
+    var p = null;
+    for (var j = 0; j < prenotazioni.length; j++) {
+      if (prenotazioni[j].id === a.prenotazione_id) { p = prenotazioni[j]; break; }
+    }
     if (!p) return null;
     return p.customer ? (p.customer.first_name + ' ' + p.customer.last_name) : 'Cliente';
   }
 
   function getOspitiAssegnatiTavolo(tavoloId) {
-    return tavoliPrenotazioni.filter(function(tp) { return tp.tavolo_id === tavoloId; }).reduce(function(s, tp) { return s + (tp.n_ospiti_assegnati || 0); }, 0);
+    var tot = 0;
+    for (var i = 0; i < tavoliPrenotazioni.length; i++) {
+      if (tavoliPrenotazioni[i].tavolo_id === tavoloId) tot += (tavoliPrenotazioni[i].n_ospiti_assegnati || 0);
+    }
+    return tot;
   }
 
   function isTavoloUnito(tavoloId) {
-    return tavoliUniti.some(function(u) { return u.tavolo_secondario_id === tavoloId || u.tavolo_principale_id === tavoloId; });
+    for (var i = 0; i < tavoliUniti.length; i++) {
+      if (tavoliUniti[i].tavolo_secondario_id === tavoloId || tavoliUniti[i].tavolo_principale_id === tavoloId) return true;
+    }
+    return false;
   }
 
   function getOstacoloACella(cx, cy) {
-    return ostacoli.find(function(o) { return o.cella_x === cx && o.cella_y === cy; }) || null;
+    for (var i = 0; i < ostacoli.length; i++) {
+      if (ostacoli[i].cella_x === cx && ostacoli[i].cella_y === cy) return ostacoli[i];
+    }
+    return null;
   }
 
   function cellaBlocca(cx, cy) {
@@ -437,14 +405,17 @@ export default function SalePage() {
   function onMouseMoveGrid(e) {
     if (!draggingTavolo) return;
     var rect = gridRef.current.getBoundingClientRect();
-    var item = layoutTemp.find(function(l) { return l.tavolo_id === draggingTavolo; });
+    var item = null;
+    for (var i = 0; i < layoutTemp.length; i++) {
+      if (layoutTemp[i].tavolo_id === draggingTavolo) { item = layoutTemp[i]; break; }
+    }
     var dim = item ? getDimensioniEffettive(item) : { w: 1, h: 1 };
     var col = Math.max(0, Math.min(gridCols - dim.w, Math.round((e.clientX - rect.left - dragOffset.x) / gridSize)));
     var row = Math.max(0, Math.min(gridRows - dim.h, Math.round((e.clientY - rect.top - dragOffset.y) / gridSize)));
     setLayoutTemp(function(prev) {
-      return prev.map(function(i) {
-        if (i.tavolo_id === draggingTavolo) return Object.assign({}, i, { pos_x: col, pos_y: row });
-        return i;
+      return prev.map(function(it) {
+        if (it.tavolo_id === draggingTavolo) return Object.assign({}, it, { pos_x: col, pos_y: row });
+        return it;
       });
     });
     setLayoutModificato(true);
@@ -452,13 +423,13 @@ export default function SalePage() {
 
   function onMouseUpGrid() { setDraggingTavolo(null); }
 
-  // 6.3 - rotazione: cambia di 90 gradi e aggiorna posizione se necessario
+  // FIX 2: rotazione — valore esplicito senza || 0
   function ruotaTavoloInLayout(tavoloId) {
     setLayoutTemp(function(prev) {
       return prev.map(function(item) {
         if (item.tavolo_id !== tavoloId) return item;
-        var nuovaRot = ((item.rotazione || 0) + 90) % 360;
-        // Dopo la rotazione controlla che il tavolo non esca dalla griglia
+        var rotAttuale = (item.rotazione === null || item.rotazione === undefined) ? 0 : Number(item.rotazione);
+        var nuovaRot = (rotAttuale + 90) % 360;
         var t = item.tavolo;
         var newW = (nuovaRot === 90 || nuovaRot === 270) ? (t.altezza || 1) : (t.larghezza || 2);
         var newH = (nuovaRot === 90 || nuovaRot === 270) ? (t.larghezza || 2) : (t.altezza || 1);
@@ -470,13 +441,84 @@ export default function SalePage() {
     setLayoutModificato(true);
   }
 
-  // 6.2 - aggiunge al layout con richiesta etichetta
-  function richiediEtichettaEAggiungi(tavolo) {
-    if (layoutTemp.some(function(l) { return l.tavolo_id === tavolo.id; })) {
-      alert('Questa tipologia e\' gia\' in questo layout. Ogni istanza deve avere un tavolo_id univoco. Per ora ogni tipologia puo\' essere aggiunta una volta per sala.');
-      return;
+  // FIX 1: rimozione immediata nel DB
+  function rimuoviDalLayoutDB(layoutItem) {
+    if (!window.confirm('Rimuovere "' + ((layoutItem.etichetta && layoutItem.etichetta.trim()) ? layoutItem.etichetta : (layoutItem.tavolo ? layoutItem.tavolo.nome : 'tavolo')) + '" dal layout?')) return;
+    // Elimina tutti i record per questo tavolo in questa sala
+    supabase.from('layout_sala').delete().eq('sala_id', salaSelezionata).eq('tavolo_id', layoutItem.tavolo_id).then(function(result) {
+      if (result.error) { alert('Errore: ' + result.error.message); return; }
+      caricaLayout(salaSelezionata);
+      caricaOccupazioneTavoli();
+    });
+  }
+
+  // FIX 2: salvataggio rotazione con Number() esplicito
+  function salvaLayout() {
+    var oggi = new Date().toISOString().split('T')[0];
+    Promise.all(layoutTemp.map(function(item) {
+      var rot = (item.rotazione === null || item.rotazione === undefined) ? 0 : Number(item.rotazione);
+      return supabase.from('layout_sala').insert({
+        sala_id: salaSelezionata,
+        tavolo_id: item.tavolo_id,
+        pos_x: item.pos_x,
+        pos_y: item.pos_y,
+        rotazione: rot,
+        etichetta: item.etichetta || null,
+        data_validita_dal: oggi
+      });
+    })).then(function() {
+      setLayoutModificato(false);
+      caricaLayout(salaSelezionata);
+      caricaOccupazioneTavoli();
+      alert('Layout salvato correttamente!');
+    });
+  }
+
+  function salvaLayoutBaseCorrente() {
+    if (!nomeLayoutBase.trim()) { alert('Inserisci un nome per il layout base'); return; }
+    if (layoutTemp.length === 0) { alert('Non ci sono tavoli nel layout attuale'); return; }
+    setSalvaBaseLoading(true);
+    supabase.from('layout_base').insert({ sala_id: salaSelezionata, nome: nomeLayoutBase.trim(), descrizione: descLayoutBase.trim() || null }).select().single().then(function(result) {
+      if (result.error) { alert('Errore: ' + result.error.message); setSalvaBaseLoading(false); return; }
+      var layoutBaseId = result.data.id;
+      var righe = layoutTemp.map(function(item) {
+        return { layout_base_id: layoutBaseId, tavolo_id: item.tavolo_id, pos_x: item.pos_x, pos_y: item.pos_y, rotazione: (item.rotazione === null || item.rotazione === undefined) ? 0 : Number(item.rotazione) };
+      });
+      supabase.from('layout_base_tavoli').insert(righe).then(function(r2) {
+        setSalvaBaseLoading(false);
+        if (r2.error) { alert('Errore salvataggio posizioni: ' + r2.error.message); return; }
+        setShowSalvaBase(false); setNomeLayoutBase(''); setDescLayoutBase('');
+        caricaLayoutBase(salaSelezionata);
+      });
+    });
+  }
+
+  function caricaLayoutBaseSuGriglia(lb) {
+    if (!window.confirm('Caricare il layout "' + lb.nome + '"? Le modifiche non salvate andranno perse.')) return;
+    var nuovoLayout = (lb.layout_base_tavoli || []).map(function(item) {
+      return { id: null, sala_id: salaSelezionata, tavolo_id: item.tavolo_id, tavolo: item.tavolo, pos_x: item.pos_x, pos_y: item.pos_y, rotazione: item.rotazione || 0, etichetta: item.etichetta || '', data_validita_dal: dataSelezionata, nuovo: true };
+    });
+    setLayoutTemp(nuovoLayout);
+    setLayoutModificato(true);
+  }
+
+  function eliminaLayoutBase(lb) {
+    if (!window.confirm('Eliminare il layout base "' + lb.nome + '"?')) return;
+    supabase.from('layout_base').delete().eq('id', lb.id).then(function(result) {
+      if (result.error) { alert('Errore: ' + result.error.message); return; }
+      caricaLayoutBase(salaSelezionata);
+    });
+  }
+
+  // FIX 1: aggiunge al layout con etichetta — usa snapshot per evitare closure
+  function richiediEtichettaEAggiungi(tavoloSnap) {
+    for (var i = 0; i < layoutTemp.length; i++) {
+      if (layoutTemp[i].tavolo_id === tavoloSnap.id) {
+        alert('Questa tipologia e\' gia\' presente in questo layout.');
+        return;
+      }
     }
-    setTavoloInAttesaEtichetta(tavolo);
+    setTavoloInAttesaEtichetta(tavoloSnap);
     setEtichettaInput('');
     setShowModaleEtichetta(true);
   }
@@ -484,19 +526,8 @@ export default function SalePage() {
   function confermAggiungiConEtichetta() {
     var tavolo = tavoloInAttesaEtichetta;
     if (!tavolo) return;
-    var etichetta = etichettaInput.trim();
     setLayoutTemp(function(prev) {
-      return prev.concat([{
-        id: null,
-        sala_id: salaSelezionata,
-        tavolo_id: tavolo.id,
-        tavolo: tavolo,
-        pos_x: 0, pos_y: 0,
-        rotazione: 0,
-        etichetta: etichetta,
-        data_validita_dal: dataSelezionata,
-        nuovo: true
-      }]);
+      return prev.concat([{ id: null, sala_id: salaSelezionata, tavolo_id: tavolo.id, tavolo: tavolo, pos_x: 0, pos_y: 0, rotazione: 0, etichetta: etichettaInput.trim(), data_validita_dal: dataSelezionata, nuovo: true }]);
     });
     setLayoutModificato(true);
     setShowModaleEtichetta(false);
@@ -504,10 +535,17 @@ export default function SalePage() {
     setEtichettaInput('');
   }
 
-  function aggiungiGruppoAlLayout(listaTavoli) {
-    var daAggiungere = listaTavoli.filter(function(t) {
-      return !layoutTemp.some(function(l) { return l.tavolo_id === t.id; });
-    });
+  // FIX 1: ++Tutti usa snapshot della lista passata come argomento
+  function aggiungiGruppoAlLayout(snapList) {
+    var daAggiungere = [];
+    for (var i = 0; i < snapList.length; i++) {
+      var t = snapList[i];
+      var presente = false;
+      for (var j = 0; j < layoutTemp.length; j++) {
+        if (layoutTemp[j].tavolo_id === t.id) { presente = true; break; }
+      }
+      if (!presente) daAggiungere.push(t);
+    }
     if (daAggiungere.length === 0) return;
     setLayoutTemp(function(prev) {
       var nuovi = daAggiungere.map(function(t) {
@@ -517,95 +555,6 @@ export default function SalePage() {
     });
     setLayoutModificato(true);
   }
-
-  function rimuoviDalLayout(tavoloId) {
-    setLayoutTemp(function(prev) { return prev.filter(function(l) { return l.tavolo_id !== tavoloId; }); });
-    setLayoutModificato(true);
-  }
-
-  function salvaLayout() {
-    var oggi = new Date().toISOString().split('T')[0];
-    Promise.all(layoutTemp.map(function(item) {
-      return supabase.from('layout_sala').insert({ sala_id: salaSelezionata, tavolo_id: item.tavolo_id, pos_x: item.pos_x, pos_y: item.pos_y, rotazione: item.rotazione || 0, etichetta: item.etichetta || null, data_validita_dal: oggi });
-    })).then(function() {
-      setLayoutModificato(false);
-      caricaLayout(salaSelezionata);
-      caricaOccupazioneTavoli();
-      alert('Layout salvato correttamente!');
-    });
-  }
-
-  // ── OSTACOLI ─────────────────────────────────────────────────
-
-  function cellaFromEvent(e, ref) {
-    var rect = ref.current.getBoundingClientRect();
-    var col = Math.floor((e.clientX - rect.left) / gridSize);
-    var row = Math.floor((e.clientY - rect.top) / gridSize);
-    col = Math.max(0, Math.min(gridCols - 1, col));
-    row = Math.max(0, Math.min(gridRows - 1, row));
-    return { x: col, y: row };
-  }
-
-  function toggleOstacolo(cx, cy) {
-    var esistente = getOstacoloACella(cx, cy);
-    if (esistente) {
-      supabase.from('ostacoli_sala').delete().eq('id', esistente.id).then(function() {
-        setOstacoli(function(prev) { return prev.filter(function(o) { return o.id !== esistente.id; }); });
-      });
-    } else {
-      var nuovo = { sala_id: salaSelezionata, tipo: tipoOstacoloAttivo, cella_x: cx, cella_y: cy };
-      supabase.from('ostacoli_sala').insert(nuovo).select().single().then(function(result) {
-        if (!result.error) setOstacoli(function(prev) { return prev.concat([result.data]); });
-      });
-    }
-  }
-
-  function applicaAreaOstacoli(x1, y1, x2, y2) {
-    var minX = Math.min(x1, x2);
-    var maxX = Math.max(x1, x2);
-    var minY = Math.min(y1, y2);
-    var maxY = Math.max(y1, y2);
-    var nuovi = [];
-    for (var cx = minX; cx <= maxX; cx++) {
-      for (var cy = minY; cy <= maxY; cy++) {
-        if (!getOstacoloACella(cx, cy)) {
-          nuovi.push({ sala_id: salaSelezionata, tipo: tipoOstacoloAttivo, cella_x: cx, cella_y: cy });
-        }
-      }
-    }
-    if (nuovi.length === 0) return;
-    supabase.from('ostacoli_sala').insert(nuovi).select().then(function(result) {
-      if (!result.error) setOstacoli(function(prev) { return prev.concat(result.data || []); });
-    });
-  }
-
-  function applicaServizio(x1, y1, x2, y2) {
-    var minX = Math.min(x1, x2);
-    var maxX = Math.max(x1, x2);
-    var minY = Math.min(y1, y2);
-    var maxY = Math.max(y1, y2);
-    var nuovi = [];
-    for (var cx = minX; cx <= maxX; cx++) {
-      for (var cy = minY; cy <= maxY; cy++) {
-        if (!getOstacoloACella(cx, cy)) {
-          nuovi.push({ sala_id: salaSelezionata, tipo: 'servizio', cella_x: cx, cella_y: cy });
-        }
-      }
-    }
-    if (nuovi.length === 0) return;
-    supabase.from('ostacoli_sala').insert(nuovi).select().then(function(result) {
-      if (!result.error) setOstacoli(function(prev) { return prev.concat(result.data || []); });
-    });
-  }
-
-  function cancellaOstacoliSala() {
-    if (!window.confirm('Eliminare tutti gli ostacoli di questa sala?')) return;
-    supabase.from('ostacoli_sala').delete().eq('sala_id', salaSelezionata).then(function() {
-      setOstacoli([]);
-    });
-  }
-
-  // ── FORM TIPOLOGIA (ex form tavolo) ───────────────────────────
 
   function apriFormTavolo(tavolo) {
     if (tavolo) {
@@ -636,17 +585,17 @@ export default function SalePage() {
 
   function duplicaTavolo(tavolo) {
     var base = tavolo.nome;
-    var esistenti = tavoli.filter(function(t) { return t.nome.indexOf(base) === 0; });
-    var nuovoNome = base + ' (' + (esistenti.length + 1) + ')';
-    var dati = { nome: nuovoNome, capacita: tavolo.capacita, forma: tavolo.forma, larghezza: tavolo.larghezza, altezza: tavolo.altezza, colore: tavolo.colore, note: tavolo.note || '', categoria: tavolo.categoria || null, quantita: tavolo.quantita || 1, attivo: true };
+    var n = 0;
+    for (var i = 0; i < tavoli.length; i++) { if (tavoli[i].nome.indexOf(base) === 0) n++; }
+    var dati = { nome: base + ' (' + (n + 1) + ')', capacita: tavolo.capacita, forma: tavolo.forma, larghezza: tavolo.larghezza, altezza: tavolo.altezza, colore: tavolo.colore, note: tavolo.note || '', categoria: tavolo.categoria || null, quantita: tavolo.quantita || 1, attivo: true };
     supabase.from('tavoli').insert(dati).then(function(result) {
-      if (result.error) { alert('Errore nella duplicazione: ' + result.error.message); return; }
+      if (result.error) { alert('Errore: ' + result.error.message); return; }
       caricaTavoli();
     });
   }
 
   function eliminaTavolo(tavolo) {
-    if (!window.confirm('Eliminare la tipologia "' + tavolo.nome + '"? Verra rimossa da tutti i layout.')) return;
+    if (!window.confirm('Eliminare la tipologia "' + tavolo.nome + '"?')) return;
     supabase.from('tavoli').update({ attivo: false }).eq('id', tavolo.id).then(function(result) {
       if (result.error) { alert('Errore: ' + result.error.message); return; }
       caricaTavoli(); caricaLayout(salaSelezionata);
@@ -685,15 +634,15 @@ export default function SalePage() {
 
   function apriUnione(tavoloSecondarioId) {
     var cap1 = tavoloSelezionato && tavoloSelezionato.tavolo ? tavoloSelezionato.tavolo.capacita : 0;
-    var li2 = layoutAttivo.find(function(l) { return l.tavolo_id === tavoloSecondarioId; });
+    var li2 = null;
+    for (var i = 0; i < layoutAttivo.length; i++) { if (layoutAttivo[i].tavolo_id === tavoloSecondarioId) { li2 = layoutAttivo[i]; break; } }
     var cap2 = li2 && li2.tavolo ? li2.tavolo.capacita : 0;
     setUnioneCapienza(cap1 + cap2);
     setShowUnione(tavoloSecondarioId);
   }
 
   function confermaUnione() {
-    var tavoloSecondarioId = showUnione;
-    supabase.from('tavoli_uniti').insert({ tavolo_principale_id: tavoloSelezionato.tavolo_id, tavolo_secondario_id: tavoloSecondarioId, data: dataSelezionata, turno: turnoSelezionato, attivo: true, capacita_unione: parseInt(unioneCapienza) || 0 }).then(function(result) {
+    supabase.from('tavoli_uniti').insert({ tavolo_principale_id: tavoloSelezionato.tavolo_id, tavolo_secondario_id: showUnione, data: dataSelezionata, turno: turnoSelezionato, attivo: true, capacita_unione: parseInt(unioneCapienza) || 0 }).then(function(result) {
       if (result.error) { alert('Errore: ' + result.error.message); return; }
       caricaTavoliUniti(); setShowUnione(false);
     });
@@ -725,51 +674,162 @@ export default function SalePage() {
     });
   }
 
-  // ── SLIDER GRIGLIA ────────────────────────────────────────────
+  // ── OSTACOLI ─────────────────────────────────────────────────
+
+  function cellaFromEvent(e, ref) {
+    var rect = ref.current.getBoundingClientRect();
+    var col = Math.floor((e.clientX - rect.left) / gridSize);
+    var row = Math.floor((e.clientY - rect.top) / gridSize);
+    col = Math.max(0, Math.min(gridCols - 1, col));
+    row = Math.max(0, Math.min(gridRows - 1, row));
+    return { x: col, y: row };
+  }
+
+  function toggleOstacolo(cx, cy) {
+    var esistente = getOstacoloACella(cx, cy);
+    if (esistente) {
+      supabase.from('ostacoli_sala').delete().eq('id', esistente.id).then(function() {
+        setOstacoli(function(prev) { return prev.filter(function(o) { return o.id !== esistente.id; }); });
+      });
+    } else {
+      var nuovo = { sala_id: salaSelezionata, tipo: tipoOstacoloAttivo, cella_x: cx, cella_y: cy };
+      supabase.from('ostacoli_sala').insert(nuovo).select().single().then(function(result) {
+        if (!result.error) setOstacoli(function(prev) { return prev.concat([result.data]); });
+      });
+    }
+  }
+
+  function applicaAreaOstacoli(x1, y1, x2, y2) {
+    var minX = Math.min(x1, x2); var maxX = Math.max(x1, x2);
+    var minY = Math.min(y1, y2); var maxY = Math.max(y1, y2);
+    var nuovi = [];
+    for (var cx = minX; cx <= maxX; cx++) {
+      for (var cy = minY; cy <= maxY; cy++) {
+        if (!getOstacoloACella(cx, cy)) nuovi.push({ sala_id: salaSelezionata, tipo: tipoOstacoloAttivo, cella_x: cx, cella_y: cy });
+      }
+    }
+    if (nuovi.length === 0) return;
+    supabase.from('ostacoli_sala').insert(nuovi).select().then(function(result) {
+      if (!result.error) setOstacoli(function(prev) { return prev.concat(result.data || []); });
+    });
+  }
+
+  function applicaServizio(x1, y1, x2, y2) {
+    var minX = Math.min(x1, x2); var maxX = Math.max(x1, x2);
+    var minY = Math.min(y1, y2); var maxY = Math.max(y1, y2);
+    var nuovi = [];
+    for (var cx = minX; cx <= maxX; cx++) {
+      for (var cy = minY; cy <= maxY; cy++) {
+        if (!getOstacoloACella(cx, cy)) nuovi.push({ sala_id: salaSelezionata, tipo: 'servizio', cella_x: cx, cella_y: cy });
+      }
+    }
+    if (nuovi.length === 0) return;
+    supabase.from('ostacoli_sala').insert(nuovi).select().then(function(result) {
+      if (!result.error) setOstacoli(function(prev) { return prev.concat(result.data || []); });
+    });
+  }
+
+  function cancellaOstacoliSala() {
+    if (!window.confirm('Eliminare tutti gli ostacoli di questa sala?')) return;
+    supabase.from('ostacoli_sala').delete().eq('sala_id', salaSelezionata).then(function() { setOstacoli([]); });
+  }
+
+  // FIX 5: conferma lunghezza nel dialog ostacoli
+  // Determina la direzione del drag e calcola x2,y2 in base alla lunghezza inserita
+  function confermaDireLunghezza() {
+    var n = parseInt(dialogLunghezza);
+    if (!pendingDragInfo) return;
+    var x1 = pendingDragInfo.x1;
+    var y1 = pendingDragInfo.y1;
+    var x2raw = pendingDragInfo.x2raw;
+    var y2raw = pendingDragInfo.y2raw;
+    var tipo = pendingDragInfo.tipo;
+
+    // Determina direzione prevalente del drag
+    var dx = Math.abs(x2raw - x1);
+    var dy = Math.abs(y2raw - y1);
+
+    var x2, y2;
+    if (!isNaN(n) && n >= 1) {
+      // usa la lunghezza indicata dall'utente nella direzione del drag
+      if (dx >= dy) {
+        // direzione orizzontale
+        x2 = x1 + (x2raw >= x1 ? n - 1 : -(n - 1));
+        y2 = y1;
+      } else {
+        // direzione verticale
+        x2 = x1;
+        y2 = y1 + (y2raw >= y1 ? n - 1 : -(n - 1));
+      }
+      x2 = Math.max(0, Math.min(gridCols - 1, x2));
+      y2 = Math.max(0, Math.min(gridRows - 1, y2));
+    } else {
+      // nessun valore: usa il drag originale
+      x2 = x2raw;
+      y2 = y2raw;
+    }
+
+    setShowDialogLunghezza(false);
+    setDialogLunghezza('');
+    setPendingDragInfo(null);
+    setDragOstacoloStart(null);
+    setDragOstacoloEnd(null);
+
+    if (tipo === 'servizio') {
+      applicaServizio(x1, y1, x2, y2);
+    } else {
+      applicaAreaOstacoli(x1, y1, x2, y2);
+    }
+  }
+
+  function annullaDireLunghezza() {
+    setShowDialogLunghezza(false);
+    setDialogLunghezza('');
+    setPendingDragInfo(null);
+    setDragOstacoloStart(null);
+    setDragOstacoloEnd(null);
+    setIsDraggingOstacolo(false);
+    setDraggingServizio(false);
+    setServizioInizio(null);
+    setServizioFine(null);
+  }
+
+  // ── SLIDER ───────────────────────────────────────────────────
 
   function renderSliderGriglia() {
     if (gridSize === null) return null;
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#f3f4f6', borderRadius: '8px', padding: '6px 14px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', background: '#f3f4f6', borderRadius: '8px', padding: '6px 12px' }}>
         <span style={{ fontSize: '12px', color: '#6B7280', whiteSpace: 'nowrap' }}>Cella:</span>
-        <input
-          type="range" min={GRID_SIZE_MIN} max={GRID_SIZE_MAX} step="1"
-          value={gridSize}
-          onChange={function(e) { setGridSize(parseInt(e.target.value)); }}
-          style={{ width: '80px', cursor: 'pointer' }}
+        <input type="range" min={GRID_SIZE_MIN} max={GRID_SIZE_MAX} step="1" value={gridSize}
+          onChange={function(e) { var v = parseInt(e.target.value); setGridSize(v); setGridSizeInput(String(v)); }}
+          style={{ width: '70px', cursor: 'pointer' }}
         />
-        <span style={{ fontSize: '12px', color: '#374151', fontWeight: '700', width: '32px' }}>{gridSize}px</span>
+        <input type="number" min={GRID_SIZE_MIN} max={GRID_SIZE_MAX} value={gridSizeInput}
+          onChange={function(e) {
+            setGridSizeInput(e.target.value);
+            var v = parseInt(e.target.value);
+            if (!isNaN(v) && v >= GRID_SIZE_MIN && v <= GRID_SIZE_MAX) setGridSize(v);
+          }}
+          style={{ width: '48px', padding: '3px 6px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', fontWeight: '700', textAlign: 'center' }}
+        />
+        <span style={{ fontSize: '11px', color: '#9CA3AF' }}>px</span>
       </div>
     );
   }
 
-  // ── RENDER OVERLAY OSTACOLI ───────────────────────────────────
+  // ── OVERLAY OSTACOLI ──────────────────────────────────────────
 
   function renderOverlayOstacoli(editorMode) {
     return ostacoli.map(function(o) {
       var tipo = getTipoOstacolo(o.tipo);
       if (!tipo) return null;
-      var x = o.cella_x * gridSize;
-      var y = o.cella_y * gridSize;
       return (
-        <div
-          key={o.id}
-          style={{
-            position: 'absolute', left: x + 'px', top: y + 'px',
-            width: gridSize + 'px', height: gridSize + 'px',
-            background: tipo.colore,
-            opacity: tipo.blocca ? 0.75 : 0.45,
-            zIndex: 5,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            pointerEvents: editorMode ? 'auto' : 'none',
-            cursor: editorMode ? 'pointer' : 'default',
-            borderRadius: o.tipo === 'colonna' ? '50%' : (o.tipo === 'finestra' || o.tipo === 'porta' ? '2px' : '0px'),
-            border: editorMode ? '1px solid rgba(255,255,255,0.3)' : 'none'
-          }}
+        <div key={o.id} style={{ position: 'absolute', left: (o.cella_x * gridSize) + 'px', top: (o.cella_y * gridSize) + 'px', width: gridSize + 'px', height: gridSize + 'px', background: tipo.colore, opacity: tipo.blocca ? 0.75 : 0.45, zIndex: 5, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: editorMode ? 'auto' : 'none', cursor: editorMode ? 'pointer' : 'default', borderRadius: o.tipo === 'colonna' ? '50%' : '0px', border: editorMode ? '1px solid rgba(255,255,255,0.3)' : 'none' }}
           onClick={editorMode ? function() { toggleOstacolo(o.cella_x, o.cella_y); } : undefined}
           title={tipo.label}
         >
-          <span style={{ fontSize: '9px', color: 'white', fontWeight: '700', opacity: 0.9, textAlign: 'center', lineHeight: 1 }}>
+          <span style={{ fontSize: '9px', color: 'white', fontWeight: '700', opacity: 0.9 }}>
             {o.tipo === 'finestra' ? '⬜' : o.tipo === 'porta' ? '🚪' : o.tipo === 'bancone' ? '▬' : o.tipo === 'colonna' ? '●' : ''}
           </span>
         </div>
@@ -777,26 +837,7 @@ export default function SalePage() {
     });
   }
 
-  function renderPreviewDrag() {
-    if (!dragOstacolo || !dragStart || !dragEnd) return null;
-    var tipo = getTipoOstacolo(tipoOstacoloAttivo);
-    if (!tipo) return null;
-    var minX = Math.min(dragStart.x, dragEnd.x);
-    var maxX = Math.max(dragStart.x, dragEnd.x);
-    var minY = Math.min(dragStart.y, dragEnd.y);
-    var maxY = Math.max(dragStart.y, dragEnd.y);
-    var x = minX * gridSize;
-    var y = minY * gridSize;
-    var w = (maxX - minX + 1) * gridSize;
-    var h = (maxY - minY + 1) * gridSize;
-    return (
-      <div style={{ position: 'absolute', left: x + 'px', top: y + 'px', width: w + 'px', height: h + 'px', background: tipo.colore, opacity: 0.35, zIndex: 20, pointerEvents: 'none', border: '2px dashed ' + tipo.colore }} />
-    );
-  }
-
   // ── RENDER TAVOLO GRIGLIA ─────────────────────────────────────
-  // 6.2: mostra etichetta invece del nome tipologia
-  // 6.3: usa getDimensioniEffettive per larghezza/altezza
 
   function renderTavoloGriglia(layoutItem, editorMode) {
     var t = layoutItem.tavolo;
@@ -814,12 +855,11 @@ export default function SalePage() {
     var suOstacolo = editorMode && tavoloSuCellaBlocca(layoutItem);
     var bgColor = editorMode ? (t.colore || '#6B7280') : (stato === 'occupato' ? '#EF4444' : stato === 'prenotato' ? '#F59E0B' : '#10B981');
     var pad = mostraSedie ? 14 : 0;
-    // Etichetta: in mappa servizio mostra l'etichetta del layout, fallback sul nome tipologia
     var labelVisibile = (layoutItem.etichetta && layoutItem.etichetta.trim()) ? layoutItem.etichetta.trim() : t.nome;
+    var rotAttuale = (layoutItem.rotazione === null || layoutItem.rotazione === undefined) ? 0 : Number(layoutItem.rotazione);
 
     return (
-      <div
-        key={layoutItem.tavolo_id}
+      <div key={layoutItem.tavolo_id}
         onMouseDown={editorMode ? function(e) { onMouseDownTavolo(e, layoutItem); } : undefined}
         onClick={!editorMode ? function() { setTavoloSelezionato(layoutItem); setShowAssegna(false); setShowUnione(false); setAssegnaPrenotazione(null); setAssegnaOspiti(0); setPannelloAperto(true); } : undefined}
         style={{ position: 'absolute', left: (x - pad) + 'px', top: (y - pad) + 'px', width: (w + pad * 2) + 'px', height: (h + pad * 2) + 'px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: editorMode ? 'grab' : 'pointer', userSelect: 'none', zIndex: draggingTavolo === layoutItem.tavolo_id ? 50 : 15 }}
@@ -830,29 +870,27 @@ export default function SalePage() {
           </div>
         )}
         <div style={{ position: 'relative', width: w + 'px', height: h + 'px', backgroundColor: bgColor, borderRadius: isRound ? '50%' : '8px', boxShadow: suOstacolo ? '0 0 0 3px #EF4444' : (unito ? '0 0 0 3px #7C3AED' : '0 2px 6px rgba(0,0,0,0.25)'), display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white', overflow: 'hidden' }}>
-          <span style={{ fontSize: '12px', fontWeight: '800', textShadow: '0 1px 2px rgba(0,0,0,0.3)' }}>{labelVisibile}</span>
+          <span style={{ fontSize: '12px', fontWeight: '800', textShadow: '0 1px 2px rgba(0,0,0,0.3)', textAlign: 'center', padding: '0 2px' }}>{labelVisibile}</span>
           {!editorMode && nomeCliente && <span style={{ fontSize: '9px', opacity: 0.95, textAlign: 'center', maxWidth: '90%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>{nomeCliente}</span>}
           {!editorMode && ospiti > 0 && <span style={{ fontSize: '9px', opacity: 0.85, marginTop: '1px' }}>{ospiti} osp.</span>}
           {!editorMode && stato === 'libero' && <span style={{ fontSize: '9px', opacity: 0.8 }}>{t.capacita} posti</span>}
           {editorMode && (
             <>
-              {/* 6.3 - pulsante R per rotazione */}
-              <button onMouseDown={function(e) { e.stopPropagation(); }} onClick={function(e) { e.stopPropagation(); ruotaTavoloInLayout(layoutItem.tavolo_id); }} style={{ position: 'absolute', top: '2px', left: '3px', background: 'rgba(0,0,0,0.35)', border: 'none', color: 'white', borderRadius: '50%', width: '15px', height: '15px', fontSize: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', lineHeight: 1 }} title={'Ruota (' + (layoutItem.rotazione || 0) + 'deg)'}>R</button>
-              <button onMouseDown={function(e) { e.stopPropagation(); }} onClick={function(e) { e.stopPropagation(); rimuoviDalLayout(layoutItem.tavolo_id); }} style={{ position: 'absolute', top: '2px', right: '3px', background: 'rgba(0,0,0,0.35)', border: 'none', color: 'white', borderRadius: '50%', width: '15px', height: '15px', fontSize: '9px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', lineHeight: 1 }}>x</button>
+              <button onMouseDown={function(e) { e.stopPropagation(); }} onClick={function(e) { e.stopPropagation(); ruotaTavoloInLayout(layoutItem.tavolo_id); }} title={'Ruota (' + rotAttuale + 'deg)'} style={{ position: 'absolute', top: '2px', left: '3px', background: 'rgba(0,0,0,0.4)', border: 'none', color: 'white', borderRadius: '50%', width: '16px', height: '16px', fontSize: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', lineHeight: 1 }}>R</button>
+              <button onMouseDown={function(e) { e.stopPropagation(); }} onClick={function(e) { e.stopPropagation(); rimuoviDalLayoutDB(layoutItem); }} style={{ position: 'absolute', top: '2px', right: '3px', background: 'rgba(0,0,0,0.35)', border: 'none', color: 'white', borderRadius: '50%', width: '16px', height: '16px', fontSize: '9px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', lineHeight: 1 }}>x</button>
             </>
           )}
           {suOstacolo && <div style={{ position: 'absolute', bottom: '2px', fontSize: '8px', color: '#FEF2F2', background: '#EF4444', borderRadius: '3px', padding: '1px 4px' }}>! ostacolo</div>}
-          {editorMode && (layoutItem.rotazione || 0) !== 0 && <div style={{ position: 'absolute', bottom: '2px', fontSize: '7px', color: 'rgba(255,255,255,0.8)', background: 'rgba(0,0,0,0.3)', borderRadius: '3px', padding: '1px 3px' }}>{layoutItem.rotazione}deg</div>}
+          {editorMode && rotAttuale !== 0 && <div style={{ position: 'absolute', bottom: '2px', fontSize: '7px', color: 'rgba(255,255,255,0.85)', background: 'rgba(0,0,0,0.3)', borderRadius: '3px', padding: '1px 3px' }}>{rotAttuale}deg</div>}
         </div>
       </div>
     );
   }
 
-  // ── LEGENDA OSTACOLI ──────────────────────────────────────────
-
   function renderLegendaOstacoli() {
     var presenti = TIPI_OSTACOLO.filter(function(tipo) {
-      return ostacoli.some(function(o) { return o.tipo === tipo.value; });
+      for (var i = 0; i < ostacoli.length; i++) { if (ostacoli[i].tipo === tipo.value) return true; }
+      return false;
     });
     if (presenti.length === 0) return null;
     return (
@@ -869,13 +907,26 @@ export default function SalePage() {
     );
   }
 
+  // FIX 3: stile viewport scrollabile — larghezza NON limitata da maxWidth
+  function stileViewport() {
+    return { width: VIEWPORT_W + 'px', height: VIEWPORT_H + 'px', overflowX: 'auto', overflowY: 'auto', border: '1px solid #d1d5db', borderRadius: '8px', flexShrink: 0 };
+  }
+
+  function stileCanvas() {
+    return { position: 'relative', width: (gridCols * gridSize) + 'px', height: (gridRows * gridSize) + 'px', backgroundImage: 'linear-gradient(to right, #e5e7eb 1px, transparent 1px), linear-gradient(to bottom, #e5e7eb 1px, transparent 1px)', backgroundSize: gridSize + 'px ' + gridSize + 'px', backgroundColor: '#f9fafb', flexShrink: 0 };
+  }
+
   // ── TAB MAPPA ─────────────────────────────────────────────────
 
   function renderTabMappa() {
     if (gridSize === null) return <div style={{ padding: '20px', color: '#6B7280' }}>Caricamento griglia...</div>;
-    var liberi = layoutAttivo.filter(function(l) { return getStatoTavolo(l.tavolo_id) === 'libero'; }).length;
-    var occupati = layoutAttivo.filter(function(l) { return getStatoTavolo(l.tavolo_id) === 'occupato'; }).length;
-    var prenotati = layoutAttivo.filter(function(l) { return getStatoTavolo(l.tavolo_id) === 'prenotato'; }).length;
+    var liberi    = 0; var occupati = 0; var prenotati = 0;
+    for (var i = 0; i < layoutAttivo.length; i++) {
+      var s = getStatoTavolo(layoutAttivo[i].tavolo_id);
+      if (s === 'libero') liberi++;
+      else if (s === 'occupato') occupati++;
+      else prenotati++;
+    }
 
     return (
       <div>
@@ -893,98 +944,29 @@ export default function SalePage() {
         </div>
         {renderLegendaOstacoli()}
         <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <div style={{ position: 'relative', width: gridCols * gridSize + 'px', height: gridRows * gridSize + 'px', backgroundImage: 'linear-gradient(to right, #e5e7eb 1px, transparent 1px), linear-gradient(to bottom, #e5e7eb 1px, transparent 1px)', backgroundSize: gridSize + 'px ' + gridSize + 'px', backgroundColor: '#f9fafb', borderRadius: '8px', border: '1px solid #d1d5db', overflow: 'visible', flexShrink: 0 }}>
+          <div style={stileViewport()}>
+            <div style={stileCanvas()}>
               {renderOverlayOstacoli(false)}
               {layoutAttivo.map(function(item) { return renderTavoloGriglia(item, false); })}
             </div>
           </div>
-
-          {pannelloAperto && tavoloSelezionato && (
-            <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px', minWidth: '280px', maxWidth: '320px', flexShrink: 0 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
-                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#111827' }}>
-                  {(tavoloSelezionato.etichetta && tavoloSelezionato.etichetta.trim()) ? tavoloSelezionato.etichetta.trim() : (tavoloSelezionato.tavolo ? tavoloSelezionato.tavolo.nome : 'Tavolo')}
-                </h3>
-                <button onClick={function() { setPannelloAperto(false); setShowAssegna(false); setShowUnione(false); }} style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', color: '#9CA3AF', lineHeight: 1 }}>x</button>
-              </div>
-              {tavoloSelezionato.tavolo && (
-                <div style={{ marginBottom: '14px', padding: '10px 12px', background: '#f9fafb', borderRadius: '8px', fontSize: '13px', color: '#374151', lineHeight: '1.7' }}>
-                  <div>Tipologia: <strong>{tavoloSelezionato.tavolo.nome}</strong></div>
-                  <div>Capienza: <strong>{tavoloSelezionato.tavolo.capacita} posti</strong></div>
-                  <div>Stato: <strong style={{ color: getStatoTavolo(tavoloSelezionato.tavolo_id) === 'occupato' ? '#EF4444' : getStatoTavolo(tavoloSelezionato.tavolo_id) === 'prenotato' ? '#D97706' : '#059669' }}>{labelStato(getStatoTavolo(tavoloSelezionato.tavolo_id))}</strong></div>
-                  {getOspitiAssegnatiTavolo(tavoloSelezionato.tavolo_id) > 0 && <div>Ospiti: <strong>{getOspitiAssegnatiTavolo(tavoloSelezionato.tavolo_id)}</strong></div>}
-                </div>
-              )}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {getStatoTavolo(tavoloSelezionato.tavolo_id) === 'libero' ? (
-                  <>
-                    <button onClick={function() { setShowAssegna(true); setShowUnione(false); }} style={{ background: '#3B82F6', color: 'white', border: 'none', borderRadius: '8px', padding: '10px', fontSize: '14px', cursor: 'pointer', fontWeight: '600' }}>+ Assegna prenotazione</button>
-                    <button onClick={function() { setShowUnione('scegli'); setShowAssegna(false); }} style={{ background: '#8B5CF6', color: 'white', border: 'none', borderRadius: '8px', padding: '10px', fontSize: '14px', cursor: 'pointer', fontWeight: '600' }}>Unisci con altro tavolo</button>
-                  </>
-                ) : (
-                  <>
-                    <div style={{ fontSize: '13px', color: '#374151', padding: '6px 0' }}><strong>Cliente:</strong> {getNomeClienteTavolo(tavoloSelezionato.tavolo_id)}</div>
-                    <button onClick={function() { rimuoviAssegnazione(tavoloSelezionato.tavolo_id); setPannelloAperto(false); }} style={{ background: '#FEE2E2', color: '#DC2626', border: '1px solid #FECACA', borderRadius: '8px', padding: '10px', fontSize: '14px', cursor: 'pointer', fontWeight: '600' }}>Rimuovi assegnazione</button>
-                  </>
-                )}
-              </div>
-              {showAssegna && (
-                <div style={{ marginTop: '16px', borderTop: '1px solid #f3f4f6', paddingTop: '16px' }}>
-                  <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', fontWeight: '700', color: '#374151' }}>Assegna prenotazione</h4>
-                  <select value={assegnaPrenotazione || ''} onChange={function(e) { setAssegnaPrenotazione(e.target.value); }} style={{ width: '100%', padding: '9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box', marginBottom: '8px' }}>
-                    <option value="">-- Seleziona prenotazione --</option>
-                    {prenotazioni.map(function(p) {
-                      var nome = p.customer ? (p.customer.first_name + ' ' + p.customer.last_name) : 'Cliente';
-                      return <option key={p.id} value={p.id}>{nome} - {(p.adulti || 0) + (p.bambini || 0)} ospiti ({p.ora})</option>;
-                    })}
-                  </select>
-                  {prenotazioni.length === 0 && <p style={{ fontSize: '12px', color: '#9CA3AF', margin: '0 0 8px 0' }}>Nessuna prenotazione per questo turno</p>}
-                  <input type="number" min="1" placeholder="N. ospiti a questo tavolo" value={assegnaOspiti} onChange={function(e) { setAssegnaOspiti(e.target.value); }} style={{ width: '100%', padding: '9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box', marginBottom: '10px' }} />
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button onClick={confermaAssegna} style={{ flex: 1, background: '#10B981', color: 'white', border: 'none', borderRadius: '8px', padding: '9px', fontSize: '13px', cursor: 'pointer', fontWeight: '700' }}>Conferma</button>
-                    <button onClick={function() { setShowAssegna(false); }} style={{ flex: 1, background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: '8px', padding: '9px', fontSize: '13px', cursor: 'pointer' }}>Annulla</button>
-                  </div>
-                </div>
-              )}
-              {showUnione === 'scegli' && (
-                <div style={{ marginTop: '16px', borderTop: '1px solid #f3f4f6', paddingTop: '16px' }}>
-                  <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', fontWeight: '700', color: '#374151' }}>Unisci con:</h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                    {layoutAttivo.filter(function(l) { return l.tavolo_id !== tavoloSelezionato.tavolo_id; }).map(function(l) {
-                      var label = (l.etichetta && l.etichetta.trim()) ? l.etichetta.trim() : (l.tavolo ? l.tavolo.nome : 'Tavolo');
-                      return <button key={l.tavolo_id} onClick={function() { apriUnione(l.tavolo_id); }} style={{ background: '#faf5ff', border: '1px solid #c4b5fd', borderRadius: '6px', padding: '9px 12px', fontSize: '13px', cursor: 'pointer', textAlign: 'left', color: '#5B21B6', fontWeight: '600' }}>{label} ({l.tavolo ? l.tavolo.capacita : '-'} posti)</button>;
-                    })}
-                  </div>
-                  <button onClick={function() { setShowUnione(false); }} style={{ marginTop: '8px', width: '100%', background: 'none', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '7px', fontSize: '13px', cursor: 'pointer', color: '#6B7280' }}>Annulla</button>
-                </div>
-              )}
-              {showUnione && showUnione !== 'scegli' && showUnione !== false && (
-                <div style={{ marginTop: '16px', borderTop: '1px solid #f3f4f6', paddingTop: '16px' }}>
-                  <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '700', color: '#374151' }}>Conferma unione</h4>
-                  <div style={{ fontSize: '13px', color: '#374151', marginBottom: '8px' }}>
-                    {(tavoloSelezionato.etichetta || (tavoloSelezionato.tavolo ? tavoloSelezionato.tavolo.nome : '?'))}{' + '}{(function() { var l = layoutAttivo.find(function(x) { return x.tavolo_id === showUnione; }); return l ? (l.etichetta || (l.tavolo ? l.tavolo.nome : '?')) : '?'; })()}
-                  </div>
-                  <label style={{ display: 'block', fontSize: '12px', color: '#6B7280', marginBottom: '4px', fontWeight: '600' }}>Capienza unita <span style={{ fontWeight: '400', color: '#9CA3AF' }}>(somma auto, modificabile)</span></label>
-                  <input type="number" min="1" value={unioneCapienza} onChange={function(e) { setUnioneCapienza(e.target.value); }} style={{ width: '100%', padding: '9px', border: '2px solid #8B5CF6', borderRadius: '6px', fontSize: '15px', fontWeight: '700', boxSizing: 'border-box', marginBottom: '10px', textAlign: 'center' }} />
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button onClick={confermaUnione} style={{ flex: 1, background: '#8B5CF6', color: 'white', border: 'none', borderRadius: '8px', padding: '9px', fontSize: '13px', cursor: 'pointer', fontWeight: '700' }}>Conferma</button>
-                    <button onClick={function() { setShowUnione(false); }} style={{ flex: 1, background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: '8px', padding: '9px', fontSize: '13px', cursor: 'pointer' }}>Annulla</button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+          {pannelloAperto && tavoloSelezionato && renderPannelloTavolo()}
         </div>
         {tavoliUniti.length > 0 && (
           <div style={{ marginTop: '16px' }}>
             <h4 style={{ fontSize: '14px', fontWeight: '700', color: '#374151', marginBottom: '8px' }}>Tavoli uniti questo turno</h4>
             <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
               {tavoliUniti.map(function(u) {
-                var t1 = tavoli.find(function(t) { return t.id === u.tavolo_principale_id; });
-                var t2 = tavoli.find(function(t) { return t.id === u.tavolo_secondario_id; });
-                var l1 = layoutAttivo.find(function(l) { return l.tavolo_id === u.tavolo_principale_id; });
-                var l2 = layoutAttivo.find(function(l) { return l.tavolo_id === u.tavolo_secondario_id; });
+                var l1 = null; var l2 = null;
+                for (var i = 0; i < layoutAttivo.length; i++) {
+                  if (layoutAttivo[i].tavolo_id === u.tavolo_principale_id) l1 = layoutAttivo[i];
+                  if (layoutAttivo[i].tavolo_id === u.tavolo_secondario_id) l2 = layoutAttivo[i];
+                }
+                var t1 = null; var t2 = null;
+                for (var j = 0; j < tavoli.length; j++) {
+                  if (tavoli[j].id === u.tavolo_principale_id) t1 = tavoli[j];
+                  if (tavoli[j].id === u.tavolo_secondario_id) t2 = tavoli[j];
+                }
                 var nome1 = (l1 && l1.etichetta) ? l1.etichetta : (t1 ? t1.nome : '?');
                 var nome2 = (l2 && l2.etichetta) ? l2.etichetta : (t2 ? t2.nome : '?');
                 return (
@@ -1002,20 +984,103 @@ export default function SalePage() {
     );
   }
 
+  function renderPannelloTavolo() {
+    var ts = tavoloSelezionato;
+    var stato = getStatoTavolo(ts.tavolo_id);
+    var labelTavolo = (ts.etichetta && ts.etichetta.trim()) ? ts.etichetta.trim() : (ts.tavolo ? ts.tavolo.nome : 'Tavolo');
+    return (
+      <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px', minWidth: '280px', maxWidth: '320px', flexShrink: 0 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+          <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#111827' }}>{labelTavolo}</h3>
+          <button onClick={function() { setPannelloAperto(false); setShowAssegna(false); setShowUnione(false); }} style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', color: '#9CA3AF', lineHeight: 1 }}>x</button>
+        </div>
+        {ts.tavolo && (
+          <div style={{ marginBottom: '14px', padding: '10px 12px', background: '#f9fafb', borderRadius: '8px', fontSize: '13px', color: '#374151', lineHeight: '1.7' }}>
+            <div>Tipologia: <strong>{ts.tavolo.nome}</strong></div>
+            <div>Capienza: <strong>{ts.tavolo.capacita} posti</strong></div>
+            <div>Stato: <strong style={{ color: stato === 'occupato' ? '#EF4444' : stato === 'prenotato' ? '#D97706' : '#059669' }}>{labelStato(stato)}</strong></div>
+            {getOspitiAssegnatiTavolo(ts.tavolo_id) > 0 && <div>Ospiti: <strong>{getOspitiAssegnatiTavolo(ts.tavolo_id)}</strong></div>}
+          </div>
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          {stato === 'libero' ? (
+            <>
+              <button onClick={function() { setShowAssegna(true); setShowUnione(false); }} style={{ background: '#3B82F6', color: 'white', border: 'none', borderRadius: '8px', padding: '10px', fontSize: '14px', cursor: 'pointer', fontWeight: '600' }}>+ Assegna prenotazione</button>
+              <button onClick={function() { setShowUnione('scegli'); setShowAssegna(false); }} style={{ background: '#8B5CF6', color: 'white', border: 'none', borderRadius: '8px', padding: '10px', fontSize: '14px', cursor: 'pointer', fontWeight: '600' }}>Unisci con altro tavolo</button>
+            </>
+          ) : (
+            <>
+              <div style={{ fontSize: '13px', color: '#374151', padding: '6px 0' }}><strong>Cliente:</strong> {getNomeClienteTavolo(ts.tavolo_id)}</div>
+              <button onClick={function() { rimuoviAssegnazione(ts.tavolo_id); setPannelloAperto(false); }} style={{ background: '#FEE2E2', color: '#DC2626', border: '1px solid #FECACA', borderRadius: '8px', padding: '10px', fontSize: '14px', cursor: 'pointer', fontWeight: '600' }}>Rimuovi assegnazione</button>
+            </>
+          )}
+        </div>
+        {showAssegna && (
+          <div style={{ marginTop: '16px', borderTop: '1px solid #f3f4f6', paddingTop: '16px' }}>
+            <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', fontWeight: '700', color: '#374151' }}>Assegna prenotazione</h4>
+            <select value={assegnaPrenotazione || ''} onChange={function(e) { setAssegnaPrenotazione(e.target.value); }} style={{ width: '100%', padding: '9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box', marginBottom: '8px' }}>
+              <option value="">-- Seleziona prenotazione --</option>
+              {prenotazioni.map(function(p) {
+                var nome = p.customer ? (p.customer.first_name + ' ' + p.customer.last_name) : 'Cliente';
+                return <option key={p.id} value={p.id}>{nome} - {(p.adulti || 0) + (p.bambini || 0)} ospiti ({p.ora})</option>;
+              })}
+            </select>
+            {prenotazioni.length === 0 && <p style={{ fontSize: '12px', color: '#9CA3AF', margin: '0 0 8px 0' }}>Nessuna prenotazione per questo turno</p>}
+            <input type="number" min="1" placeholder="N. ospiti a questo tavolo" value={assegnaOspiti} onChange={function(e) { setAssegnaOspiti(e.target.value); }} style={{ width: '100%', padding: '9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box', marginBottom: '10px' }} />
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button onClick={confermaAssegna} style={{ flex: 1, background: '#10B981', color: 'white', border: 'none', borderRadius: '8px', padding: '9px', fontSize: '13px', cursor: 'pointer', fontWeight: '700' }}>Conferma</button>
+              <button onClick={function() { setShowAssegna(false); }} style={{ flex: 1, background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: '8px', padding: '9px', fontSize: '13px', cursor: 'pointer' }}>Annulla</button>
+            </div>
+          </div>
+        )}
+        {showUnione === 'scegli' && (
+          <div style={{ marginTop: '16px', borderTop: '1px solid #f3f4f6', paddingTop: '16px' }}>
+            <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', fontWeight: '700', color: '#374151' }}>Unisci con:</h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {layoutAttivo.filter(function(l) { return l.tavolo_id !== ts.tavolo_id; }).map(function(l) {
+                var lbl = (l.etichetta && l.etichetta.trim()) ? l.etichetta.trim() : (l.tavolo ? l.tavolo.nome : 'Tavolo');
+                return <button key={l.tavolo_id} onClick={function() { apriUnione(l.tavolo_id); }} style={{ background: '#faf5ff', border: '1px solid #c4b5fd', borderRadius: '6px', padding: '9px 12px', fontSize: '13px', cursor: 'pointer', textAlign: 'left', color: '#5B21B6', fontWeight: '600' }}>{lbl} ({l.tavolo ? l.tavolo.capacita : '-'} posti)</button>;
+              })}
+            </div>
+            <button onClick={function() { setShowUnione(false); }} style={{ marginTop: '8px', width: '100%', background: 'none', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '7px', fontSize: '13px', cursor: 'pointer', color: '#6B7280' }}>Annulla</button>
+          </div>
+        )}
+        {showUnione && showUnione !== 'scegli' && showUnione !== false && (
+          <div style={{ marginTop: '16px', borderTop: '1px solid #f3f4f6', paddingTop: '16px' }}>
+            <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '700', color: '#374151' }}>Conferma unione</h4>
+            <div style={{ fontSize: '13px', color: '#374151', marginBottom: '8px' }}>
+              {(ts.etichetta || (ts.tavolo ? ts.tavolo.nome : '?'))}{' + '}{(function() { for (var i = 0; i < layoutAttivo.length; i++) { if (layoutAttivo[i].tavolo_id === showUnione) { return layoutAttivo[i].etichetta || (layoutAttivo[i].tavolo ? layoutAttivo[i].tavolo.nome : '?'); } } return '?'; })()}
+            </div>
+            <input type="number" min="1" value={unioneCapienza} onChange={function(e) { setUnioneCapienza(e.target.value); }} style={{ width: '100%', padding: '9px', border: '2px solid #8B5CF6', borderRadius: '6px', fontSize: '15px', fontWeight: '700', boxSizing: 'border-box', marginBottom: '10px', textAlign: 'center' }} />
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button onClick={confermaUnione} style={{ flex: 1, background: '#8B5CF6', color: 'white', border: 'none', borderRadius: '8px', padding: '9px', fontSize: '13px', cursor: 'pointer', fontWeight: '700' }}>Conferma</button>
+              <button onClick={function() { setShowUnione(false); }} style={{ flex: 1, background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: '8px', padding: '9px', fontSize: '13px', cursor: 'pointer' }}>Annulla</button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   // ── TAB EDITOR LAYOUT ─────────────────────────────────────────
 
   function renderTabEditor() {
     if (gridSize === null) return <div style={{ padding: '20px', color: '#6B7280' }}>Caricamento griglia...</div>;
-    var tavoliNonInLayout = tavoli.filter(function(t) { return !layoutTemp.some(function(l) { return l.tavolo_id === t.id; }); });
+
+    // FIX 1: costruiamo snapshot delle liste UNA VOLTA sola — nessuna closure stantia
+    var tavoliNonInLayout = [];
+    for (var i = 0; i < tavoli.length; i++) {
+      var t = tavoli[i];
+      var presente = false;
+      for (var j = 0; j < layoutTemp.length; j++) { if (layoutTemp[j].tavolo_id === t.id) { presente = true; break; } }
+      if (!presente) tavoliNonInLayout.push(t);
+    }
+
     var tavoliDisponibili = tavoliNonInLayout.filter(function(t) {
-      var istanzeAlteSale = contaIstanzeAlteSale(t.id, salaSelezionata);
-      var quantita = t.quantita || 1;
-      return istanzeAlteSale < quantita;
+      return contaIstanzeAlteSale(t.id, salaSelezionata) < (t.quantita || 1);
     });
     var tavoliAlteSale = tavoliNonInLayout.filter(function(t) {
-      var istanzeAlteSale = contaIstanzeAlteSale(t.id, salaSelezionata);
-      var quantita = t.quantita || 1;
-      return istanzeAlteSale >= quantita;
+      return contaIstanzeAlteSale(t.id, salaSelezionata) >= (t.quantita || 1);
     });
     var gruppi = raggruppaPerCategoria(tavoliDisponibili);
 
@@ -1023,21 +1088,22 @@ export default function SalePage() {
       <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
         <div>
           <div style={{ marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-            <span style={{ fontSize: '13px', color: '#6B7280' }}>Trascina i tavoli per posizionarli. [R] per ruotare.</span>
+            <span style={{ fontSize: '13px', color: '#6B7280' }}>Trascina i tavoli. [R] per ruotare.</span>
             {renderSliderGriglia()}
             {layoutModificato && <button onClick={salvaLayout} style={{ background: '#10B981', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 18px', fontSize: '14px', cursor: 'pointer', fontWeight: '700' }}>Salva layout</button>}
             <button onClick={function() { setShowSalvaBase(true); setNomeLayoutBase(''); setDescLayoutBase(''); }} style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '7px 14px', fontSize: '13px', cursor: 'pointer', fontWeight: '600' }}>📐 Salva come layout base</button>
           </div>
           {renderLegendaOstacoli()}
-          <div ref={gridRef} onMouseMove={onMouseMoveGrid} onMouseUp={onMouseUpGrid} onMouseLeave={onMouseUpGrid} style={{ position: 'relative', width: gridCols * gridSize + 'px', height: gridRows * gridSize + 'px', backgroundImage: 'linear-gradient(to right, #e5e7eb 1px, transparent 1px), linear-gradient(to bottom, #e5e7eb 1px, transparent 1px)', backgroundSize: gridSize + 'px ' + gridSize + 'px', backgroundColor: '#f9fafb', borderRadius: '8px', border: '1px solid #d1d5db', overflow: 'visible', flexShrink: 0 }}>
-            {renderOverlayOstacoli(false)}
-            {layoutTemp.map(function(item) { return renderTavoloGriglia(item, true); })}
+          {/* FIX 3: viewport con doppia scrollbar */}
+          <div style={stileViewport()}>
+            <div ref={gridRef} onMouseMove={onMouseMoveGrid} onMouseUp={onMouseUpGrid} onMouseLeave={onMouseUpGrid} style={stileCanvas()}>
+              {renderOverlayOstacoli(false)}
+              {layoutTemp.map(function(item) { return renderTavoloGriglia(item, true); })}
+            </div>
           </div>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', minWidth: '250px', maxWidth: '280px' }}>
-
-          {/* Pannello Layout Base */}
           {layoutBase.length > 0 && (
             <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', padding: '14px' }}>
               <h4 style={{ margin: '0 0 10px 0', fontSize: '13px', fontWeight: '700', color: '#166534' }}>📐 Layout base salvati</h4>
@@ -1050,8 +1116,8 @@ export default function SalePage() {
                         <div style={{ fontSize: '12px', fontWeight: '700', color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lb.nome}</div>
                         <div style={{ fontSize: '11px', color: '#6B7280' }}>{nTavoli} tavol{nTavoli === 1 ? 'o' : 'i'}{lb.descrizione ? ' - ' + lb.descrizione : ''}</div>
                       </div>
-                      <button onClick={function() { caricaLayoutBaseSuGriglia(lb); }} title="Carica in griglia" style={{ background: '#10B981', color: 'white', border: 'none', borderRadius: '5px', padding: '4px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: '700', flexShrink: 0 }}>Carica</button>
-                      <button onClick={function() { eliminaLayoutBase(lb); }} title="Elimina" style={{ background: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA', borderRadius: '5px', padding: '4px 7px', fontSize: '11px', cursor: 'pointer', flexShrink: 0 }}>x</button>
+                      <button onClick={function() { caricaLayoutBaseSuGriglia(lb); }} style={{ background: '#10B981', color: 'white', border: 'none', borderRadius: '5px', padding: '4px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: '700', flexShrink: 0 }}>Carica</button>
+                      <button onClick={function() { eliminaLayoutBase(lb); }} style={{ background: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA', borderRadius: '5px', padding: '4px 7px', fontSize: '11px', cursor: 'pointer', flexShrink: 0 }}>x</button>
                     </div>
                   );
                 })}
@@ -1059,36 +1125,49 @@ export default function SalePage() {
             </div>
           )}
 
-          {/* Pannello Tipologie disponibili (6.2) */}
           <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '16px' }}>
             <h4 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: '700', color: '#374151' }}>
               Tipologie disponibili
               {tavoliDisponibili.length > 0 && <span style={{ color: '#9CA3AF', fontWeight: '400', fontSize: '12px', marginLeft: '6px' }}>({tavoliDisponibili.length})</span>}
             </h4>
-            {tavoliDisponibili.length === 0 && tavoliAlteSale.length === 0 ? (
+
+            {gruppi.length === 0 && tavoliAlteSale.length === 0 ? (
               <p style={{ fontSize: '13px', color: '#9CA3AF', margin: 0 }}>Tutte le tipologie sono in sala</p>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                 {gruppi.map(function(gruppo) {
-                  var espanso = gruppiEspansi[gruppo.categoria];
-                  var disponibili = gruppo.tavoli.filter(function(t) { return !layoutTemp.some(function(l) { return l.tavolo_id === t.id; }); });
+                  var catKey = gruppo.categoria;
+                  var espanso = gruppiEspansi[catKey];
+                  // FIX 1: snapshot locale di disponibili per questo gruppo
+                  var dispGruppo = [];
+                  for (var gi = 0; gi < gruppo.tavoli.length; gi++) {
+                    var gt = gruppo.tavoli[gi];
+                    var inLay = false;
+                    for (var li = 0; li < layoutTemp.length; li++) { if (layoutTemp[li].tavolo_id === gt.id) { inLay = true; break; } }
+                    if (!inLay) dispGruppo.push(Object.assign({}, gt));
+                  }
+                  var dispSnap = dispGruppo.slice();
                   return (
-                    <div key={gruppo.categoria} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 10px', background: '#f9fafb', cursor: 'pointer' }} onClick={function() { toggleGruppo(gruppo.categoria); }}>
+                    <div key={catKey} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', overflow: 'hidden' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 10px', background: '#f9fafb', cursor: 'pointer' }} onClick={function() { toggleGruppo(catKey); }}>
                         <span style={{ fontSize: '11px', color: '#6B7280', transform: espanso ? 'rotate(90deg)' : 'none', display: 'inline-block', flexShrink: 0 }}>▶</span>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: '12px', fontWeight: '700', color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{gruppo.categoria}</div>
-                          <div style={{ fontSize: '11px', color: '#9CA3AF' }}>{disponibili.length} di {gruppo.tavoli.length} disponibili</div>
+                          <div style={{ fontSize: '12px', fontWeight: '700', color: '#374151', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{catKey}</div>
+                          <div style={{ fontSize: '11px', color: '#9CA3AF' }}>{dispGruppo.length} di {gruppo.tavoli.length} disponibili</div>
                         </div>
-                        {disponibili.length > 1 && <button onClick={function(e) { e.stopPropagation(); aggiungiGruppoAlLayout(disponibili); }} style={{ background: '#3B82F6', color: 'white', border: 'none', borderRadius: '5px', padding: '3px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: '700', flexShrink: 0 }}>++ Tutti</button>}
+                        {dispGruppo.length > 1 && (
+                          <button onClick={function(e) { e.stopPropagation(); aggiungiGruppoAlLayout(dispSnap); }} style={{ background: '#3B82F6', color: 'white', border: 'none', borderRadius: '5px', padding: '3px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: '700', flexShrink: 0 }}>++ Tutti</button>
+                        )}
                       </div>
                       {espanso && (
                         <div style={{ padding: '6px 8px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
                           {gruppo.tavoli.map(function(t) {
-                            var inLayout = layoutTemp.some(function(l) { return l.tavolo_id === t.id; });
+                            var tSnap = Object.assign({}, t);
+                            var inLayout = false;
+                            for (var li = 0; li < layoutTemp.length; li++) { if (layoutTemp[li].tavolo_id === t.id) { inLayout = true; break; } }
                             var istanzeAlteSale = contaIstanzeAlteSale(t.id, salaSelezionata);
                             var quantita = t.quantita || 1;
-                            var usate = layoutTemp.filter(function(l) { return l.tavolo_id === t.id; }).length + istanzeAlteSale;
+                            var usate = (inLayout ? 1 : 0) + istanzeAlteSale;
                             return (
                               <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: '7px', padding: '6px 8px', background: inLayout ? '#f0fdf4' : '#f9fafb', borderRadius: '6px', border: '1px solid ' + (inLayout ? '#bbf7d0' : '#e5e7eb'), opacity: inLayout ? 0.6 : 1 }}>
                                 <div style={{ width: '12px', height: '12px', borderRadius: t.forma === 'rotondo' ? '50%' : '2px', background: t.colore || '#6B7280', flexShrink: 0 }}></div>
@@ -1096,7 +1175,10 @@ export default function SalePage() {
                                   <div style={{ fontSize: '12px', fontWeight: '700', color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.nome}</div>
                                   <div style={{ fontSize: '10px', color: '#9CA3AF' }}>{t.capacita} posti &middot; {usate}/{quantita} usati</div>
                                 </div>
-                                {inLayout ? <span style={{ fontSize: '10px', color: '#16a34a', fontWeight: '600' }}>in sala</span> : <button onClick={function() { richiediEtichettaEAggiungi(t); }} style={{ background: '#3B82F6', color: 'white', border: 'none', borderRadius: '5px', padding: '3px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: '700' }}>+</button>}
+                                {inLayout
+                                  ? <span style={{ fontSize: '10px', color: '#16a34a', fontWeight: '600' }}>in sala</span>
+                                  : <button onClick={function() { richiediEtichettaEAggiungi(tSnap); }} style={{ background: '#3B82F6', color: 'white', border: 'none', borderRadius: '5px', padding: '3px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: '700' }}>+</button>
+                                }
                               </div>
                             );
                           })}
@@ -1108,20 +1190,19 @@ export default function SalePage() {
               </div>
             )}
 
-            {/* Tipologie esaurite in altre sale */}
             {tavoliAlteSale.length > 0 && (
               <div style={{ marginTop: '12px', borderTop: '1px solid #f3f4f6', paddingTop: '12px' }}>
-                <div style={{ fontSize: '11px', color: '#9CA3AF', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Esaurite (tutte usate in altre sale)</div>
+                <div style={{ fontSize: '11px', color: '#9CA3AF', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Esaurite</div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                   {tavoliAlteSale.map(function(t) {
                     return (
                       <div key={t.id} style={{ display: 'flex', alignItems: 'center', gap: '7px', padding: '6px 8px', background: '#fafafa', borderRadius: '6px', border: '1px solid #f3f4f6', opacity: 0.7 }}>
                         <div style={{ width: '12px', height: '12px', borderRadius: t.forma === 'rotondo' ? '50%' : '2px', background: t.colore || '#6B7280', flexShrink: 0 }}></div>
                         <div style={{ flex: 1, minWidth: 0 }}>
-                          <div style={{ fontSize: '12px', fontWeight: '700', color: '#6B7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.nome}</div>
+                          <div style={{ fontSize: '12px', fontWeight: '700', color: '#6B7280' }}>{t.nome}</div>
                           <div style={{ fontSize: '10px', color: '#9CA3AF' }}>{contaIstanzeAlteSale(t.id, salaSelezionata)}/{t.quantita || 1} usate</div>
                         </div>
-                        <span style={{ fontSize: '10px', color: '#9CA3AF', flexShrink: 0 }}>esaurita</span>
+                        <span style={{ fontSize: '10px', color: '#9CA3AF' }}>esaurita</span>
                       </div>
                     );
                   })}
@@ -1135,20 +1216,19 @@ export default function SalePage() {
           </div>
         </div>
 
-        {/* Modale salva layout base */}
         {showSalvaBase && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
             <div style={{ background: 'white', borderRadius: '16px', padding: '28px', width: '400px', maxWidth: '100%' }}>
-              <h3 style={{ margin: '0 0 6px 0', fontSize: '18px', fontWeight: '800', color: '#111827' }}>Salva come layout base</h3>
-              <p style={{ margin: '0 0 20px 0', fontSize: '13px', color: '#6B7280' }}>Salva la configurazione attuale ({layoutTemp.length} tavoli) come template riutilizzabile per questa sala.</p>
+              <h3 style={{ margin: '0 0 6px 0', fontSize: '18px', fontWeight: '800' }}>Salva come layout base</h3>
+              <p style={{ margin: '0 0 20px 0', fontSize: '13px', color: '#6B7280' }}>Configurazione attuale: {layoutTemp.length} tavoli.</p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '13px', color: '#374151', marginBottom: '4px', fontWeight: '700' }}>Nome *</label>
-                  <input type="text" value={nomeLayoutBase} onChange={function(e) { setNomeLayoutBase(e.target.value); }} autoFocus placeholder="es. Configurazione standard, Evento privato..." style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }} />
+                  <input type="text" value={nomeLayoutBase} onChange={function(e) { setNomeLayoutBase(e.target.value); }} autoFocus placeholder="es. Configurazione standard..." style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }} />
                 </div>
                 <div>
                   <label style={{ display: 'block', fontSize: '13px', color: '#374151', marginBottom: '4px', fontWeight: '700' }}>Descrizione (opzionale)</label>
-                  <input type="text" value={descLayoutBase} onChange={function(e) { setDescLayoutBase(e.target.value); }} placeholder="es. 10 tavoli, massimo 40 coperti..." style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }} />
+                  <input type="text" value={descLayoutBase} onChange={function(e) { setDescLayoutBase(e.target.value); }} style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }} />
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
@@ -1159,21 +1239,12 @@ export default function SalePage() {
           </div>
         )}
 
-        {/* 6.2 - Modale etichetta */}
         {showModaleEtichetta && tavoloInAttesaEtichetta && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
             <div style={{ background: 'white', borderRadius: '16px', padding: '28px', width: '360px', maxWidth: '100%' }}>
-              <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '800', color: '#111827' }}>Assegna etichetta al tavolo</h3>
-              <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#6B7280' }}>Tipologia: <strong>{tavoloInAttesaEtichetta.nome}</strong><br />L\'etichetta identifica questa istanza nella sala (es. T50, VIP1).</p>
-              <input
-                type="text"
-                value={etichettaInput}
-                onChange={function(e) { setEtichettaInput(e.target.value); }}
-                onKeyDown={function(e) { if (e.key === 'Enter') confermAggiungiConEtichetta(); }}
-                autoFocus
-                placeholder="es. T50, T51, VIP1..."
-                style={{ width: '100%', padding: '12px', border: '2px solid #3B82F6', borderRadius: '8px', fontSize: '16px', fontWeight: '700', boxSizing: 'border-box', textAlign: 'center', marginBottom: '16px' }}
-              />
+              <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '800', color: '#111827' }}>Etichetta tavolo</h3>
+              <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#6B7280' }}>Tipologia: <strong>{tavoloInAttesaEtichetta.nome}</strong><br />Etichetta visibile sulla mappa (es. T50). Lascia vuoto per usare il nome.</p>
+              <input type="text" value={etichettaInput} onChange={function(e) { setEtichettaInput(e.target.value); }} onKeyDown={function(e) { if (e.key === 'Enter') confermAggiungiConEtichetta(); }} autoFocus placeholder="es. T50, T51, VIP1..." style={{ width: '100%', padding: '12px', border: '2px solid #3B82F6', borderRadius: '8px', fontSize: '15px', fontWeight: '700', boxSizing: 'border-box', textAlign: 'center', marginBottom: '16px' }} />
               <div style={{ display: 'flex', gap: '10px' }}>
                 <button onClick={confermAggiungiConEtichetta} style={{ flex: 1, background: '#3B82F6', color: 'white', border: 'none', borderRadius: '8px', padding: '12px', fontSize: '15px', cursor: 'pointer', fontWeight: '800' }}>Aggiungi</button>
                 <button onClick={function() { setShowModaleEtichetta(false); setTavoloInAttesaEtichetta(null); }} style={{ flex: 1, background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: '8px', padding: '12px', fontSize: '15px', cursor: 'pointer' }}>Annulla</button>
@@ -1196,20 +1267,16 @@ export default function SalePage() {
       e.preventDefault();
       var cella = cellaFromEvent(e, gridOstacoliRef);
       if (isServizio) {
-        setDraggingServizio(true);
-        setServizioInizio(cella);
-        setServizioFine(cella);
+        setDraggingServizio(true); setServizioInizio(cella); setServizioFine(cella);
       } else {
         var esistente = getOstacoloACella(cella.x, cella.y);
-        if (esistente && !dragOstacolo) {
+        if (esistente && !isDraggingOstacolo) {
           supabase.from('ostacoli_sala').delete().eq('id', esistente.id).then(function() {
             setOstacoli(function(prev) { return prev.filter(function(o) { return o.id !== esistente.id; }); });
           });
           return;
         }
-        setDragOstacolo(true);
-        setDragStart(cella);
-        setDragEnd(cella);
+        setIsDraggingOstacolo(true); setDragOstacoloStart(cella); setDragOstacoloEnd(cella);
       }
     }
 
@@ -1217,34 +1284,61 @@ export default function SalePage() {
       if (!gridOstacoliRef.current) return;
       var cella = cellaFromEvent(e, gridOstacoliRef);
       if (isServizio && draggingServizio) { setServizioFine(cella); return; }
-      if (dragOstacolo) setDragEnd(cella);
+      if (isDraggingOstacolo) setDragOstacoloEnd(cella);
     }
 
+    // FIX 5: al mouseup, se e' un drag (non un click singolo) apre il dialog lunghezza
     function handleMouseUp(e) {
       if (isServizio && draggingServizio) {
-        if (servizioInizio && servizioFine) applicaServizio(servizioInizio.x, servizioInizio.y, servizioFine.x, servizioFine.y);
-        setDraggingServizio(false); setServizioInizio(null); setServizioFine(null);
+        if (servizioInizio && servizioFine) {
+          var dx = Math.abs(servizioFine.x - servizioInizio.x);
+          var dy = Math.abs(servizioFine.y - servizioInizio.y);
+          if (dx === 0 && dy === 0) {
+            // click singolo: applica subito
+            applicaServizio(servizioInizio.x, servizioInizio.y, servizioFine.x, servizioFine.y);
+            setDraggingServizio(false); setServizioInizio(null); setServizioFine(null);
+          } else {
+            // drag: chiedi lunghezza
+            setPendingDragInfo({ x1: servizioInizio.x, y1: servizioInizio.y, x2raw: servizioFine.x, y2raw: servizioFine.y, tipo: 'servizio' });
+            setDraggingServizio(false); setServizioInizio(null); setServizioFine(null);
+            setDialogLunghezza('');
+            setShowDialogLunghezza(true);
+          }
+        }
         return;
       }
-      if (dragOstacolo && dragStart && dragEnd) {
-        if (dragStart.x === dragEnd.x && dragStart.y === dragEnd.y) {
-          toggleOstacolo(dragStart.x, dragStart.y);
+      if (isDraggingOstacolo && dragOstacoloStart && dragOstacoloEnd) {
+        var ddx = Math.abs(dragOstacoloEnd.x - dragOstacoloStart.x);
+        var ddy = Math.abs(dragOstacoloEnd.y - dragOstacoloStart.y);
+        if (ddx === 0 && ddy === 0) {
+          // click singolo
+          toggleOstacolo(dragOstacoloStart.x, dragOstacoloStart.y);
+          setIsDraggingOstacolo(false); setDragOstacoloStart(null); setDragOstacoloEnd(null);
         } else {
-          applicaAreaOstacoli(dragStart.x, dragStart.y, dragEnd.x, dragEnd.y);
+          // drag: chiedi lunghezza
+          setPendingDragInfo({ x1: dragOstacoloStart.x, y1: dragOstacoloStart.y, x2raw: dragOstacoloEnd.x, y2raw: dragOstacoloEnd.y, tipo: 'normale' });
+          setIsDraggingOstacolo(false); setDragOstacoloStart(null); setDragOstacoloEnd(null);
+          setDialogLunghezza('');
+          setShowDialogLunghezza(true);
         }
       }
-      setDragOstacolo(false); setDragStart(null); setDragEnd(null);
     }
 
-    function renderPreviewServizio() {
-      if (!draggingServizio || !servizioInizio || !servizioFine) return null;
-      var minX = Math.min(servizioInizio.x, servizioFine.x);
-      var maxX = Math.max(servizioInizio.x, servizioFine.x);
-      var minY = Math.min(servizioInizio.y, servizioFine.y);
-      var maxY = Math.max(servizioInizio.y, servizioFine.y);
-      var tipo = getTipoOstacolo('servizio');
+    // preview area drag
+    function renderPreviewDrag() {
+      var start = isDraggingOstacolo ? dragOstacoloStart : (draggingServizio ? servizioInizio : null);
+      var end   = isDraggingOstacolo ? dragOstacoloEnd   : (draggingServizio ? servizioFine   : null);
+      if (!start || !end) return null;
+      if (start.x === end.x && start.y === end.y) return null;
+      var tipo = isServizio ? getTipoOstacolo('servizio') : tipoAttivo;
+      if (!tipo) return null;
+      var minX = Math.min(start.x, end.x); var maxX = Math.max(start.x, end.x);
+      var minY = Math.min(start.y, end.y); var maxY = Math.max(start.y, end.y);
+      var cellCount = (maxX - minX + 1) * (maxY - minY + 1);
       return (
-        <div style={{ position: 'absolute', left: (minX * gridSize) + 'px', top: (minY * gridSize) + 'px', width: ((maxX - minX + 1) * gridSize) + 'px', height: ((maxY - minY + 1) * gridSize) + 'px', background: tipo.colore, opacity: 0.4, zIndex: 20, pointerEvents: 'none', border: '2px dashed ' + tipo.colore }} />
+        <div style={{ position: 'absolute', left: (minX * gridSize) + 'px', top: (minY * gridSize) + 'px', width: ((maxX - minX + 1) * gridSize) + 'px', height: ((maxY - minY + 1) * gridSize) + 'px', background: tipo.colore, opacity: 0.35, zIndex: 20, pointerEvents: 'none', border: '2px dashed ' + tipo.colore, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <span style={{ background: 'white', borderRadius: '4px', padding: '2px 6px', fontSize: '11px', fontWeight: '700', color: '#374151' }}>{cellCount} celle</span>
+        </div>
       );
     }
 
@@ -1254,12 +1348,11 @@ export default function SalePage() {
           {renderSliderGriglia()}
           <button onClick={cancellaOstacoliSala} style={{ background: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA', borderRadius: '8px', padding: '7px 14px', fontSize: '13px', cursor: 'pointer', fontWeight: '600' }}>🗑 Cancella tutto</button>
         </div>
-
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '14px' }}>
           {TIPI_OSTACOLO.map(function(tipo) {
             var sel = tipoOstacoloAttivo === tipo.value;
             return (
-              <button key={tipo.value} onClick={function() { setTipoOstacoloAttivo(tipo.value); }} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px', border: sel ? '2px solid #111827' : '2px solid #e5e7eb', background: sel ? tipo.colore : 'white', color: sel ? 'white' : '#374151', cursor: 'pointer', fontSize: '13px', fontWeight: sel ? '700' : '500', transition: 'all 0.15s' }}>
+              <button key={tipo.value} onClick={function() { setTipoOstacoloAttivo(tipo.value); }} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '7px 14px', borderRadius: '8px', border: sel ? '2px solid #111827' : '2px solid #e5e7eb', background: sel ? tipo.colore : 'white', color: sel ? 'white' : '#374151', cursor: 'pointer', fontSize: '13px', fontWeight: sel ? '700' : '500' }}>
                 <div style={{ width: '12px', height: '12px', background: sel ? 'rgba(255,255,255,0.6)' : tipo.colore, borderRadius: tipo.value === 'colonna' ? '50%' : '2px', flexShrink: 0 }}></div>
                 {tipo.label}
                 {!tipo.blocca && <span style={{ fontSize: '10px', opacity: 0.8 }}>(non blocca)</span>}
@@ -1267,30 +1360,24 @@ export default function SalePage() {
             );
           })}
         </div>
-
         <div style={{ background: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '8px', padding: '8px 14px', marginBottom: '14px', fontSize: '12px', color: '#92400E' }}>
-          {isServizio
-            ? 'Tavolo di servizio: clicca e trascina per disegnare l\'area.'
-            : 'Click su una cella per aggiungere/rimuovere. Click e trascina per area rettangolare.'}
-          {tipoAttivo && !tipoAttivo.blocca && ' — Le aperture (' + tipoAttivo.label + ') non bloccano il posizionamento tavoli.'}
+          Click = cella singola. Trascina = area: dopo il rilascio ti chiede la lunghezza esatta in celle.
+          {tipoAttivo && !tipoAttivo.blocca && ' — Le aperture non bloccano il posizionamento tavoli.'}
         </div>
 
-        <div
-          ref={gridOstacoliRef}
-          onMouseDown={handleMouseDown}
-          onMouseMove={handleMouseMove}
-          onMouseUp={handleMouseUp}
-          onMouseLeave={handleMouseUp}
-          style={{ position: 'relative', width: gridCols * gridSize + 'px', height: gridRows * gridSize + 'px', backgroundImage: 'linear-gradient(to right, #e5e7eb 1px, transparent 1px), linear-gradient(to bottom, #e5e7eb 1px, transparent 1px)', backgroundSize: gridSize + 'px ' + gridSize + 'px', backgroundColor: '#f9fafb', borderRadius: '8px', border: '1px solid #d1d5db', overflow: 'visible', cursor: 'crosshair', userSelect: 'none' }}
-        >
-          {renderOverlayOstacoli(true)}
-          {renderPreviewDrag()}
-          {renderPreviewServizio()}
+        <div style={stileViewport()}>
+          <div ref={gridOstacoliRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
+            style={Object.assign({}, stileCanvas(), { cursor: 'crosshair', userSelect: 'none' })}
+          >
+            {renderOverlayOstacoli(true)}
+            {renderPreviewDrag()}
+          </div>
         </div>
 
         <div style={{ marginTop: '14px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           {TIPI_OSTACOLO.map(function(tipo) {
-            var n = ostacoli.filter(function(o) { return o.tipo === tipo.value; }).length;
+            var n = 0;
+            for (var i = 0; i < ostacoli.length; i++) { if (ostacoli[i].tipo === tipo.value) n++; }
             if (n === 0) return null;
             return (
               <div key={tipo.value} style={{ display: 'flex', alignItems: 'center', gap: '5px', background: 'white', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '5px 10px', fontSize: '12px', color: '#374151' }}>
@@ -1300,11 +1387,37 @@ export default function SalePage() {
             );
           })}
         </div>
+
+        {/* FIX 5: dialog lunghezza linea */}
+        {showDialogLunghezza && pendingDragInfo && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+            <div style={{ background: 'white', borderRadius: '16px', padding: '28px', width: '340px', maxWidth: '100%' }}>
+              <h3 style={{ margin: '0 0 8px 0', fontSize: '18px', fontWeight: '800', color: '#111827' }}>Lunghezza linea</h3>
+              <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#6B7280' }}>
+                Hai trascinato {Math.abs(pendingDragInfo.x2raw - pendingDragInfo.x1) + Math.abs(pendingDragInfo.y2raw - pendingDragInfo.y1) + 1} celle circa.<br />
+                Inserisci la lunghezza esatta (in celle) oppure premi Conferma per usare il drag.
+              </p>
+              <input
+                type="number" min="1" max="300"
+                value={dialogLunghezza}
+                onChange={function(e) { setDialogLunghezza(e.target.value); }}
+                onKeyDown={function(e) { if (e.key === 'Enter') confermaDireLunghezza(); }}
+                autoFocus
+                placeholder="es. 13 celle"
+                style={{ width: '100%', padding: '12px', border: '2px solid #3B82F6', borderRadius: '8px', fontSize: '20px', fontWeight: '700', boxSizing: 'border-box', textAlign: 'center', marginBottom: '16px' }}
+              />
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={confermaDireLunghezza} style={{ flex: 1, background: '#3B82F6', color: 'white', border: 'none', borderRadius: '8px', padding: '12px', fontSize: '15px', cursor: 'pointer', fontWeight: '800' }}>Conferma</button>
+                <button onClick={annullaDireLunghezza} style={{ flex: 1, background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: '8px', padding: '12px', fontSize: '15px', cursor: 'pointer' }}>Annulla</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
 
-  // ── TAB GESTIONE TIPOLOGIE (ex "Gestione tavoli") ─────────────
+  // ── TAB GESTIONE TIPOLOGIE ────────────────────────────────────
 
   function renderTabGestione() {
     var gruppi = raggruppaPerCategoria(tavoli);
@@ -1315,7 +1428,7 @@ export default function SalePage() {
           <button onClick={function() { apriFormTavolo(null); }} style={{ background: '#3B82F6', color: 'white', border: 'none', borderRadius: '8px', padding: '9px 18px', fontSize: '14px', cursor: 'pointer', fontWeight: '700' }}>+ Nuova tipologia</button>
         </div>
         <div style={{ marginBottom: '16px', padding: '12px 16px', background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: '10px', fontSize: '13px', color: '#1E40AF', lineHeight: '1.6' }}>
-          <strong>Come funzionano le tipologie:</strong> Definisci il tipo di tavolo (es. "Rovere 90x90") e quante unita fisiche hai disponibili. Nell\'Editor layout aggiungi ogni istanza assegnando un\'etichetta (es. T50, T51).
+          <strong>Come funzionano le tipologie:</strong> Definisci il tipo di tavolo e quante unita fisiche hai. Nell\'Editor layout aggiungi ogni istanza con un\'etichetta (es. T50, T51).
         </div>
         {tavoli.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '40px', background: 'white', borderRadius: '12px', border: '1px dashed #d1d5db' }}>
@@ -1343,17 +1456,16 @@ export default function SalePage() {
                             <div style={{ width: '36px', height: '28px', borderRadius: t.forma === 'rotondo' ? '50%' : '5px', background: t.colore || '#6B7280', flexShrink: 0 }}></div>
                             <div style={{ flex: 1, minWidth: 0 }}>
                               <div style={{ fontWeight: '800', fontSize: '15px', color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.nome}</div>
-                              <div style={{ fontSize: '12px', color: '#6B7280' }}>{t.forma} - {t.capacita} posti</div>
+                              <div style={{ fontSize: '12px', color: '#6B7280' }}>{t.forma} — {t.capacita} posti</div>
                             </div>
                           </div>
-                          <div style={{ fontSize: '12px', color: '#9CA3AF', marginBottom: '6px' }}>Griglia: {t.larghezza} x {t.altezza} celle{t.note ? (' - ' + t.note) : ''}</div>
-                          {/* 6.2 - contatore disponibilita */}
+                          <div style={{ fontSize: '12px', color: '#9CA3AF', marginBottom: '6px' }}>Griglia: {t.larghezza} x {t.altezza} celle{t.note ? (' — ' + t.note) : ''}</div>
                           <div style={{ fontSize: '12px', marginBottom: '12px', padding: '6px 10px', background: istanzeUsate >= quantita ? '#FEF2F2' : '#F0FDF4', border: '1px solid ' + (istanzeUsate >= quantita ? '#FECACA' : '#BBF7D0'), borderRadius: '6px', color: istanzeUsate >= quantita ? '#DC2626' : '#166534', fontWeight: '600' }}>
-                            {istanzeUsate} / {quantita} unita usate{istanzeUsate >= quantita ? ' — ESAURITA' : (' — ' + (quantita - istanzeUsate) + ' disponibili')}
+                            {istanzeUsate}/{quantita} unita usate{istanzeUsate >= quantita ? ' — ESAURITA' : (' — ' + (quantita - istanzeUsate) + ' dispon.')}
                           </div>
                           <div style={{ display: 'flex', gap: '6px' }}>
                             <button onClick={function() { apriFormTavolo(t); }} style={{ flex: 1, background: '#f3f4f6', color: '#374151', border: '1px solid #e5e7eb', borderRadius: '7px', padding: '7px', fontSize: '12px', cursor: 'pointer', fontWeight: '600' }}>Modifica</button>
-                            <button onClick={function() { duplicaTavolo(t); }} title="Duplica tipologia" style={{ background: '#eff6ff', color: '#3B82F6', border: '1px solid #bfdbfe', borderRadius: '7px', padding: '7px 10px', fontSize: '12px', cursor: 'pointer', fontWeight: '700' }}>⧉</button>
+                            <button onClick={function() { duplicaTavolo(t); }} style={{ background: '#eff6ff', color: '#3B82F6', border: '1px solid #bfdbfe', borderRadius: '7px', padding: '7px 10px', fontSize: '12px', cursor: 'pointer', fontWeight: '700' }}>⧉</button>
                             <button onClick={function() { eliminaTavolo(t); }} style={{ background: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA', borderRadius: '7px', padding: '7px 10px', fontSize: '12px', cursor: 'pointer' }}>x</button>
                           </div>
                         </div>
@@ -1366,24 +1478,22 @@ export default function SalePage() {
           </div>
         )}
 
-        {/* Form Tipologia */}
         {showFormTavolo && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
             <div style={{ background: 'white', borderRadius: '16px', padding: '28px', width: '440px', maxWidth: '100%', maxHeight: '90vh', overflowY: 'auto' }}>
               <h3 style={{ margin: '0 0 20px 0', fontSize: '18px', fontWeight: '800', color: '#111827' }}>{tavoloInEditing ? 'Modifica tipologia' : 'Nuova tipologia'}</h3>
-              <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '20px', background: '#f9fafb', borderRadius: '10px', minHeight: '80px' }}>
+              <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'center', padding: '20px', background: '#f9fafb', borderRadius: '10px', minHeight: '80px', alignItems: 'center' }}>
                 <div style={{ width: (formTavolo.larghezza * 40) + 'px', height: (formTavolo.altezza * 40) + 'px', background: formTavolo.colore || '#6B7280', borderRadius: formTavolo.forma === 'rotondo' ? '50%' : '6px', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'white', fontSize: '11px', fontWeight: '800', boxShadow: '0 2px 8px rgba(0,0,0,0.2)' }}>{formTavolo.nome || '-'}</div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
                 <div>
                   <label style={{ display: 'block', fontSize: '13px', color: '#374151', marginBottom: '4px', fontWeight: '700' }}>Nome tipologia *</label>
-                  <input type="text" value={formTavolo.nome} onChange={function(e) { setFormTavolo(Object.assign({}, formTavolo, { nome: e.target.value })); }} style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }} placeholder="es. Rovere quadrato 90x90, Rotondo 80..." />
+                  <input type="text" value={formTavolo.nome} onChange={function(e) { setFormTavolo(Object.assign({}, formTavolo, { nome: e.target.value })); }} style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }} placeholder="es. Rovere 90x90..." />
                 </div>
-                {/* 6.2 - campo quantita */}
                 <div>
                   <label style={{ display: 'block', fontSize: '13px', color: '#374151', marginBottom: '4px', fontWeight: '700' }}>Quantita disponibili *</label>
                   <input type="number" min="1" max="100" value={formTavolo.quantita} onChange={function(e) { setFormTavolo(Object.assign({}, formTavolo, { quantita: parseInt(e.target.value) || 1 })); }} style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }} />
-                  <div style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '3px' }}>Quante unita fisiche hai di questo tavolo (es. 13 tavoli rovere 90x90)</div>
+                  <div style={{ fontSize: '11px', color: '#9CA3AF', marginTop: '3px' }}>Quante unita fisiche hai (es. 13)</div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                   <div>
@@ -1410,23 +1520,20 @@ export default function SalePage() {
                   </div>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', color: '#374151', marginBottom: '8px', fontWeight: '700' }}>Colore identificativo</label>
+                  <label style={{ display: 'block', fontSize: '13px', color: '#374151', marginBottom: '8px', fontWeight: '700' }}>Colore</label>
                   <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                     {COLORI_TAVOLO.map(function(c) {
-                      return <button key={c.value} onClick={function() { setFormTavolo(Object.assign({}, formTavolo, { colore: c.value })); }} title={c.label} style={{ width: '34px', height: '34px', borderRadius: '50%', background: c.value, cursor: 'pointer', border: formTavolo.colore === c.value ? '3px solid #111827' : '2px solid transparent', transition: 'all 0.15s' }} />;
+                      return <button key={c.value} onClick={function() { setFormTavolo(Object.assign({}, formTavolo, { colore: c.value })); }} title={c.label} style={{ width: '34px', height: '34px', borderRadius: '50%', background: c.value, cursor: 'pointer', border: formTavolo.colore === c.value ? '3px solid #111827' : '2px solid transparent' }} />;
                     })}
                   </div>
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', color: '#374151', marginBottom: '4px', fontWeight: '700' }}>
-                    Categoria
-                    <span style={{ color: '#9CA3AF', fontWeight: '400', marginLeft: '6px', fontSize: '12px' }}>opzionale - per raggruppamento</span>
-                  </label>
-                  <input type="text" value={formTavolo.categoria} onChange={function(e) { setFormTavolo(Object.assign({}, formTavolo, { categoria: e.target.value })); }} style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }} placeholder="es. Tavoli interni, Dehors, VIP..." />
+                  <label style={{ display: 'block', fontSize: '13px', color: '#374151', marginBottom: '4px', fontWeight: '700' }}>Categoria <span style={{ color: '#9CA3AF', fontWeight: '400', fontSize: '12px' }}>opzionale</span></label>
+                  <input type="text" value={formTavolo.categoria} onChange={function(e) { setFormTavolo(Object.assign({}, formTavolo, { categoria: e.target.value })); }} style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }} placeholder="es. Interni, Dehors, VIP..." />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '13px', color: '#374151', marginBottom: '4px', fontWeight: '700' }}>Note (opzionale)</label>
-                  <input type="text" value={formTavolo.note} onChange={function(e) { setFormTavolo(Object.assign({}, formTavolo, { note: e.target.value })); }} style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }} placeholder="es. solo per eventi, uso interno..." />
+                  <label style={{ display: 'block', fontSize: '13px', color: '#374151', marginBottom: '4px', fontWeight: '700' }}>Note <span style={{ color: '#9CA3AF', fontWeight: '400', fontSize: '12px' }}>opzionale</span></label>
+                  <input type="text" value={formTavolo.note} onChange={function(e) { setFormTavolo(Object.assign({}, formTavolo, { note: e.target.value })); }} style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }} />
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '10px', marginTop: '22px' }}>
@@ -1455,9 +1562,8 @@ export default function SalePage() {
               <div key={s.id} style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: '800', fontSize: '15px', color: '#111827' }}>{s.nome}</div>
-                  {/* 6.1 - mostra dimensioni griglia */}
                   <div style={{ fontSize: '12px', color: '#9CA3AF', marginTop: '2px' }}>
-                    Ordine: {s.ordine} &middot; Griglia: {s.grid_cols || 16} x {s.grid_rows || 10} celle
+                    Ordine: {s.ordine} &middot; Griglia: {s.grid_cols || 16} x {s.grid_rows || 10} celle ({((s.grid_cols || 16) / 10).toFixed(1)}m x {((s.grid_rows || 10) / 10).toFixed(1)}m)
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '8px' }}>
@@ -1470,10 +1576,9 @@ export default function SalePage() {
         </div>
         <div style={{ marginTop: '20px', padding: '14px 16px', background: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '10px', maxWidth: '560px' }}>
           <p style={{ margin: 0, fontSize: '13px', color: '#92400E', lineHeight: '1.6' }}>
-            <strong>Nota:</strong> Usa <strong>Modifica</strong> per impostare nome, ordine e dimensioni griglia. Valori consigliati per I Cacciagalli: 130 x 170 celle (ogni cella = ~10cm reali).
+            <strong>Nota:</strong> Ogni cella = ~10cm reali. Per I Cacciagalli si consiglia 130 x 170 celle (13m x 17m).
           </p>
         </div>
-        {/* Form Sala - 6.1: aggiunta grid_cols e grid_rows */}
         {showFormSala && (
           <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
             <div style={{ background: 'white', borderRadius: '16px', padding: '28px', width: '420px', maxWidth: '100%' }}>
@@ -1487,10 +1592,9 @@ export default function SalePage() {
                   <label style={{ display: 'block', fontSize: '13px', color: '#374151', marginBottom: '4px', fontWeight: '700' }}>Ordine di visualizzazione</label>
                   <input type="number" min="1" value={formSala.ordine} onChange={function(e) { setFormSala(Object.assign({}, formSala, { ordine: parseInt(e.target.value) || 1 })); }} style={{ width: '100%', padding: '10px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px', boxSizing: 'border-box' }} />
                 </div>
-                {/* 6.1 - Dimensioni griglia */}
                 <div style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: '10px', padding: '14px' }}>
-                  <div style={{ fontSize: '13px', fontWeight: '700', color: '#1D4ED8', marginBottom: '10px' }}>Dimensioni griglia</div>
-                  <div style={{ fontSize: '12px', color: '#3B82F6', marginBottom: '10px' }}>Ogni cella = ~10cm reali. Per I Cacciagalli si consiglia 130 x 170.</div>
+                  <div style={{ fontSize: '13px', fontWeight: '700', color: '#1D4ED8', marginBottom: '6px' }}>Dimensioni griglia</div>
+                  <div style={{ fontSize: '12px', color: '#3B82F6', marginBottom: '10px' }}>Ogni cella = ~10cm. Consigliato: 130 x 170.</div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                     <div>
                       <label style={{ display: 'block', fontSize: '12px', color: '#374151', marginBottom: '4px', fontWeight: '700' }}>Larghezza (celle)</label>
@@ -1502,7 +1606,7 @@ export default function SalePage() {
                     </div>
                   </div>
                   <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '8px' }}>
-                    Area risultante: {formSala.grid_cols * 10}cm x {formSala.grid_rows * 10}cm ({(formSala.grid_cols * 10 / 100).toFixed(1)}m x {(formSala.grid_rows * 10 / 100).toFixed(1)}m)
+                    Area: {formSala.grid_cols / 10}m x {formSala.grid_rows / 10}m
                   </div>
                 </div>
               </div>
@@ -1528,15 +1632,15 @@ export default function SalePage() {
   }
 
   var TABS = [
-    { key: 'mappa',       label: 'Mappa servizio',     admin: false },
-    { key: 'editor',      label: 'Editor layout',      admin: true  },
-    { key: 'ostacoli',    label: 'Editor ostacoli',    admin: true  },
-    { key: 'gestione',    label: 'Gestione tipologie', admin: true  },
-    { key: 'impostazioni',label: 'Impostazioni sala',  admin: true  }
+    { key: 'mappa',        label: 'Mappa servizio',     admin: false },
+    { key: 'editor',       label: 'Editor layout',      admin: true  },
+    { key: 'ostacoli',     label: 'Editor ostacoli',    admin: true  },
+    { key: 'gestione',     label: 'Gestione tipologie', admin: true  },
+    { key: 'impostazioni', label: 'Impostazioni sala',  admin: true  }
   ];
 
   return (
-    <div style={{ padding: '20px', maxWidth: '1300px', margin: '0 auto' }}>
+    <div style={{ padding: '20px', maxWidth: '1400px', margin: '0 auto' }}>
       <div style={{ marginBottom: '22px' }}>
         <h1 style={{ margin: '0 0 4px 0', fontSize: '24px', fontWeight: '800', color: '#111827' }}>Mappa Sale</h1>
         <p style={{ margin: 0, fontSize: '14px', color: '#6B7280' }}>Gestione tipologie, layout, ostacoli e assegnazione prenotazioni</p>
