@@ -22,7 +22,7 @@ var TIPI_OSTACOLO = [
   { value: 'muro',     label: 'Muro',              colore: '#374151', blocca: true  },
   { value: 'colonna',  label: 'Colonna',            colore: '#92400E', blocca: true  },
   { value: 'tramezzo', label: 'Tramezzo',           colore: '#64748B', blocca: true  },
-  { value: 'finestra', label: 'Finestra',           colore: '#38BDF8', blocca: false },
+  { value: 'finestra', label: 'Finestra',           colore: '#3B82F6', blocca: false },
   { value: 'porta',    label: 'Porta',              colore: '#F97316', blocca: false },
   { value: 'bancone',  label: 'Bancone / Bar',      colore: '#8B5CF6', blocca: true  },
   { value: 'servizio', label: 'Tavolo di servizio', colore: '#9CA3AF', blocca: true  }
@@ -189,6 +189,37 @@ export default function SalePage() {
 
   var gridRef = useRef(null);
   var gridOstacoliRef = useRef(null);
+
+  // Resetta tutti i modali quando cambia l'utente (login/logout)
+  // Questo impedisce che un modale aperto prima del logout rimanga visibile dopo il login
+  function chiudiTuttiIModali() {
+    setShowFormTavolo(false);
+    setShowFormSala(false);
+    setShowModaleEtichetta(false);
+    setShowSalvaBase(false);
+    setShowDialogLunghezza(false);
+    setPannelloAperto(false);
+    setShowAssegna(false);
+    setShowUnione(false);
+    setTavoloInAttesaEtichetta(null);
+    setPendingDragInfo(null);
+    setIsDraggingOstacolo(false);
+    setDraggingServizio(false);
+    setDraggingTavolo(null);
+  }
+
+  useEffect(function() {
+    chiudiTuttiIModali();
+  }, [profile]);
+
+  // ESC chiude qualunque modale aperto
+  useEffect(function() {
+    function handleKeyDown(e) {
+      if (e.key === 'Escape') chiudiTuttiIModali();
+    }
+    window.addEventListener('keydown', handleKeyDown);
+    return function() { window.removeEventListener('keydown', handleKeyDown); };
+  }, []);
 
   useEffect(function() {
     caricaSale();
