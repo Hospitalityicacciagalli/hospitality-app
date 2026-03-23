@@ -38,6 +38,13 @@ var TIPI_OSTACOLO = [
   { value: 'servizio', label: 'Tavolo di servizio', colore: '#9CA3AF', blocca: true  }
 ];
 
+// Converte il turno interno ('pranzo'/'cena') nel valore usato nel DB reservations
+function turnoToMealType(turno) {
+  if (turno === 'pranzo') return 'lunch';
+  if (turno === 'cena') return 'dinner';
+  return turno;
+}
+
 function getTipoOstacolo(value) {
   for (var i = 0; i < TIPI_OSTACOLO.length; i++) {
     if (TIPI_OSTACOLO[i].value === value) return TIPI_OSTACOLO[i];
@@ -375,7 +382,7 @@ export default function SalePage() {
   }
 
   function caricaPrenotazioni() {
-    supabase.from('reservations').select('id, adulti, bambini, note, stato, ora, customer:customers(first_name, last_name)').eq('data', dataSelezionata).eq('tipo_pasto', turnoSelezionato).then(function(result) {
+    supabase.from('reservations').select('id, adulti, bambini, note, stato, ora, customer:customers(first_name, last_name)').eq('data', dataSelezionata).eq('tipo_pasto', turnoToMealType(turnoSelezionato)).then(function(result) {
       if (!result.error) setPrenotazioni(result.data || []);
     });
   }
@@ -439,8 +446,37 @@ export default function SalePage() {
   }
 
   // Restituisce l'etichetta di servizio per un'istanza (o valori di default)
+  // Se il tavolo fa parte di un'unione, propaga l'etichetta del tavolo principale
   function getEtichettaServizio(istanzaId) {
+    // Cerca il layoutItem corrispondente a questa istanza
+    var item = null;
+    for (var i = 0; i < layoutAttivo.length; i++) {
+      if (layoutAttivo[i].istanza_id === istanzaId) { item = layoutAttivo[i]; break; }
+    }
+    // Se ha una sua etichetta diretta, usala
     if (etichetteServizio[istanzaId]) return etichetteServizio[istanzaId];
+    // Se fa parte di un'unione, cerca l'etichetta del tavolo principale o secondario
+    if (item) {
+      for (var j = 0; j < tavoliUniti.length; j++) {
+        var u = tavoliUniti[j];
+        // Questo tavolo e' il secondario: prendi etichetta del principale
+        if (u.tavolo_secondario_id === item.tavolo_id) {
+          for (var k = 0; k < layoutAttivo.length; k++) {
+            if (layoutAttivo[k].tavolo_id === u.tavolo_principale_id) {
+              if (etichetteServizio[layoutAttivo[k].istanza_id]) return etichetteServizio[layoutAttivo[k].istanza_id];
+            }
+          }
+        }
+        // Questo tavolo e' il principale: prendi etichetta del secondario se il principale non ne ha
+        if (u.tavolo_principale_id === item.tavolo_id) {
+          for (var m = 0; m < layoutAttivo.length; m++) {
+            if (layoutAttivo[m].tavolo_id === u.tavolo_secondario_id) {
+              if (etichetteServizio[layoutAttivo[m].istanza_id]) return etichetteServizio[layoutAttivo[m].istanza_id];
+            }
+          }
+        }
+      }
+    }
     return { etichetta: '', colore: '#9CA3AF' };
   }
 
@@ -1268,11 +1304,24 @@ export default function SalePage() {
         )}
         {showUnione === 'scegli' && (
           <div style={{ marginTop: '16px', borderTop: '1px solid #f3f4f6', paddingTop: '16px' }}>
-            <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', fontWeight: '700', color: '#374151' }}>Unisci con:</h4>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <h4 style={{ margin: '0 0 6px 0', fontSize: '14px', fontWeight: '700', color: '#374151' }}>Unisci con:</h4>
+            <p style={{ margin: '0 0 10px 0', fontSize: '12px', color: '#6B7280' }}>Ogni tavolo mostra: etichetta · tipologia · posizione nella griglia</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '220px', overflowY: 'auto' }}>
               {layoutAttivo.filter(function(l) { return l.istanza_id !== ts.istanza_id; }).map(function(l) {
-                var lbl = (l.etichetta && l.etichetta.trim()) ? l.etichetta.trim() : (l.tavolo ? l.tavolo.nome : 'Tavolo');
-                return <button key={l.istanza_id} onClick={function() { apriUnione(l.tavolo_id); }} style={{ background: '#faf5ff', border: '1px solid #c4b5fd', borderRadius: '6px', padding: '9px 12px', fontSize: '13px', cursor: 'pointer', textAlign: 'left', color: '#5B21B6', fontWeight: '600' }}>{lbl} ({l.tavolo ? l.tavolo.capacita : '-'} posti)</button>;
+                var etichetta = (l.etichetta && l.etichetta.trim()) ? l.etichetta.trim() : '—';
+                var tipologia = l.tavolo ? l.tavolo.nome : 'Tavolo';
+                var posizione = 'col ' + (l.pos_x + 1) + ' riga ' + (l.pos_y + 1);
+                var esServizio = getEtichettaServizio(l.istanza_id);
+                return (
+                  <button key={l.istanza_id} onClick={function() { apriUnione(l.tavolo_id); }} style={{ background: '#faf5ff', border: '1px solid #c4b5fd', borderRadius: '6px', padding: '9px 12px', fontSize: '13px', cursor: 'pointer', textAlign: 'left', color: '#5B21B6', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: esServizio.colore, flexShrink: 0 }}></div>
+                    <div>
+                      <div style={{ fontWeight: '800' }}>{etichetta}</div>
+                      <div style={{ fontSize: '11px', fontWeight: '400', color: '#7C3AED' }}>{tipologia} · {l.tavolo ? l.tavolo.capacita : '-'} posti · {posizione}</div>
+                      {esServizio.etichetta && <div style={{ fontSize: '11px', fontWeight: '400', color: '#6B7280' }}>"{esServizio.etichetta}"</div>}
+                    </div>
+                  </button>
+                );
               })}
             </div>
             <button onClick={function() { setShowUnione(false); }} style={{ marginTop: '8px', width: '100%', background: 'none', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '7px', fontSize: '13px', cursor: 'pointer', color: '#6B7280' }}>Annulla</button>
