@@ -229,6 +229,12 @@ export default function SalePage() {
   var [editColoreServizio, setEditColoreServizio] = useState('#9CA3AF');
   var [salvandoEtichetta, setSalvandoEtichetta] = useState(false);
 
+  // ── UNIONE CON CLICK ─────────────────────────────────────────
+  // modalitaUnione: false | 'scegli' | 'conferma'
+  var [modalitaUnione, setModalitaUnione] = useState(false);
+  var [secondoTavoloUnione, setSecondoTavoloUnione] = useState(null);
+  var [posizioneOriginaleUnione, setPosizioneOriginaleUnione] = useState(null);
+
   var gridRef = useRef(null);
   var gridOstacoliRef = useRef(null);
 
@@ -241,6 +247,9 @@ export default function SalePage() {
     setPannelloAperto(false);
     setShowAssegna(false);
     setShowUnione(false);
+    setModalitaUnione(false);
+    setSecondoTavoloUnione(null);
+    setPosizioneOriginaleUnione(null);
     setTavoloInAttesaEtichetta(null);
     setPendingDragInfo(null);
     setIsDraggingOstacolo(false);
@@ -382,7 +391,7 @@ export default function SalePage() {
   }
 
   function caricaPrenotazioni() {
-    supabase.from('reservations').select('id, adulti, bambini, note, stato, ora, customer:customers(first_name, last_name)').eq('data', dataSelezionata).eq('tipo_pasto', turnoToMealType(turnoSelezionato)).then(function(result) {
+    supabase.from('reservations').select('id, adulti, bambini, note, stato, ora, customer:customers(first_name, last_name)').eq('data', dataSelezionata).eq('meal_type', turnoToMealType(turnoSelezionato)).then(function(result) {
       if (!result.error) setPrenotazioni(result.data || []);
     });
   }
@@ -849,19 +858,120 @@ export default function SalePage() {
     });
   }
 
-  function apriUnione(tavoloSecondarioId) {
-    var cap1 = tavoloSelezionato && tavoloSelezionato.tavolo ? tavoloSelezionato.tavolo.capacita : 0;
-    var li2 = null;
-    for (var i = 0; i < layoutAttivo.length; i++) { if (layoutAttivo[i].tavolo_id === tavoloSecondarioId) { li2 = layoutAttivo[i]; break; } }
-    var cap2 = li2 && li2.tavolo ? li2.tavolo.capacita : 0;
+  function avviaModalitaUnione() {
+    setModalitaUnione('scegli');
+    setSecondoTavoloUnione(null);
+    setPosizioneOriginaleUnione(null);
+    setShowUnione(false);
+  }
+
+  // Calcola la posizione affiancata: mette il secondo tavolo a destra del primo
+  function calcolaPosAffiancata(primo, secondo) {
+    var dimPrimo = getDimensioniEffettive(primo);
+    var dimSecondo = getDimensioniEffettive(secondo);
+    // Prova a destra
+    var nuovoX = primo.pos_x + dimPrimo.w;
+    var nuovoY = primo.pos_y;
+    // Se esce dalla griglia prova a sinistra
+    if (nuovoX + dimSecondo.w > gridCols) {
+      nuovoX = primo.pos_x - dimSecondo.w;
+    }
+    // Se ancora fuori prova sotto
+    if (nuovoX < 0) {
+      nuovoX = primo.pos_x;
+      nuovoY = primo.pos_y + dimPrimo.h;
+    }
+    // Clamp finale
+    nuovoX = Math.max(0, Math.min(gridCols - dimSecondo.w, nuovoX));
+    nuovoY = Math.max(0, Math.min(gridRows - dimSecondo.h, nuovoY));
+    return { x: nuovoX, y: nuovoY };
+  }
+
+  function sonoDaAffiancati(primo, secondo) {
+    var dimPrimo = getDimensioniEffettive(primo);
+    var dimSecondo = getDimensioniEffettive(secondo);
+    // Controllare se sono gia' adiacenti (si toccano)
+    var toccaDestra  = primo.pos_x + dimPrimo.w === secondo.pos_x && primo.pos_y === secondo.pos_y;
+    var toccaSinistra = secondo.pos_x + dimSecondo.w === primo.pos_x && primo.pos_y === secondo.pos_y;
+    var toccaSotto   = primo.pos_y + dimPrimo.h === secondo.pos_y && primo.pos_x === secondo.pos_x;
+    var toccaSopra   = secondo.pos_y + dimSecondo.h === primo.pos_y && primo.pos_x === secondo.pos_x;
+    return toccaDestra || toccaSinistra || toccaSotto || toccaSopra;
+  }
+
+  function selezionaSecondoTavoloUnione(layoutItem) {
+    if (!tavoloSelezionato) return;
+    var posOrig = { x: layoutItem.pos_x, y: layoutItem.pos_y };
+    setPosizioneOriginaleUnione(posOrig);
+    // Se non sono adiacenti, sposta il secondo affiancandolo al primo
+    if (!sonoDaAffiancati(tavoloSelezionato, layoutItem)) {
+      var nuovaPos = calcolaPosAffiancata(tavoloSelezionato, layoutItem);
+      // Aggiorna layoutAttivo visivamente (non salva ancora sul DB)
+      setLayoutAttivo(function(prev) {
+        return prev.map(function(it) {
+          if (it.istanza_id === layoutItem.istanza_id) {
+            return Object.assign({}, it, { pos_x: nuovaPos.x, pos_y: nuovaPos.y });
+          }
+          return it;
+        });
+      });
+      setSecondoTavoloUnione(Object.assign({}, layoutItem, { pos_x: nuovaPos.x, pos_y: nuovaPos.y }));
+    } else {
+      setSecondoTavoloUnione(layoutItem);
+    }
+    var cap1 = tavoloSelezionato.tavolo ? tavoloSelezionato.tavolo.capacita : 0;
+    var cap2 = layoutItem.tavolo ? layoutItem.tavolo.capacita : 0;
     setUnioneCapienza(cap1 + cap2);
-    setShowUnione(tavoloSecondarioId);
+    setModalitaUnione('conferma');
+  }
+
+  function annullaUnione() {
+    // Ripristina posizione originale del secondo tavolo se era stato spostato
+    if (secondoTavoloUnione && posizioneOriginaleUnione) {
+      setLayoutAttivo(function(prev) {
+        return prev.map(function(it) {
+          if (it.istanza_id === secondoTavoloUnione.istanza_id) {
+            return Object.assign({}, it, { pos_x: posizioneOriginaleUnione.x, pos_y: posizioneOriginaleUnione.y });
+          }
+          return it;
+        });
+      });
+    }
+    setModalitaUnione(false);
+    setSecondoTavoloUnione(null);
+    setPosizioneOriginaleUnione(null);
   }
 
   function confermaUnione() {
-    supabase.from('tavoli_uniti').insert({ tavolo_principale_id: tavoloSelezionato.tavolo_id, tavolo_secondario_id: showUnione, data: dataSelezionata, turno: turnoSelezionato, attivo: true, capacita_unione: parseInt(unioneCapienza) || 0 }).then(function(result) {
+    if (!tavoloSelezionato || !secondoTavoloUnione) return;
+    // Se il secondo tavolo e' stato spostato, salva la nuova posizione sul DB
+    if (posizioneOriginaleUnione &&
+        (secondoTavoloUnione.pos_x !== posizioneOriginaleUnione.x ||
+         secondoTavoloUnione.pos_y !== posizioneOriginaleUnione.y)) {
+      supabase.from('layout_sala').insert({
+        sala_id: salaSelezionata,
+        tavolo_id: secondoTavoloUnione.tavolo_id,
+        pos_x: secondoTavoloUnione.pos_x,
+        pos_y: secondoTavoloUnione.pos_y,
+        rotazione: secondoTavoloUnione.rotazione || 0,
+        etichetta: secondoTavoloUnione.etichetta || null,
+        istanza_id: secondoTavoloUnione.istanza_id,
+        data_validita_dal: new Date().toISOString().split('T')[0]
+      }).then(function() {});
+    }
+    supabase.from('tavoli_uniti').insert({
+      tavolo_principale_id: tavoloSelezionato.tavolo_id,
+      tavolo_secondario_id: secondoTavoloUnione.tavolo_id,
+      data: dataSelezionata,
+      turno: turnoSelezionato,
+      attivo: true,
+      capacita_unione: parseInt(unioneCapienza) || 0
+    }).then(function(result) {
       if (result.error) { alert('Errore: ' + result.error.message); return; }
-      caricaTavoliUniti(); setShowUnione(false);
+      caricaTavoliUniti();
+      setModalitaUnione(false);
+      setSecondoTavoloUnione(null);
+      setPosizioneOriginaleUnione(null);
+      setPannelloAperto(false);
     });
   }
 
@@ -1058,10 +1168,36 @@ export default function SalePage() {
     var borderRadiusTavolo = isRound ? '50%' : ((t.border_radius || 0) + 'px');
     var rotAttuale = (layoutItem.rotazione === null || layoutItem.rotazione === undefined) ? 0 : Number(layoutItem.rotazione);
 
+    // Evidenziazione in modalita unione
+    var isPrimo = tavoloSelezionato && tavoloSelezionato.istanza_id === layoutItem.istanza_id;
+    var isSecondo = secondoTavoloUnione && secondoTavoloUnione.istanza_id === layoutItem.istanza_id;
+    var boxShadowMappa;
+    if (isSecondo) {
+      boxShadowMappa = '0 0 0 4px #7C3AED, 0 0 0 7px rgba(124,58,237,0.3)';
+    } else if (isPrimo && modalitaUnione) {
+      boxShadowMappa = '0 0 0 4px #3B82F6, 0 0 0 7px rgba(59,130,246,0.3)';
+    } else if (unito) {
+      boxShadowMappa = '0 0 0 3px #7C3AED';
+    } else if (suOstacolo) {
+      boxShadowMappa = '0 0 0 3px #EF4444';
+    } else {
+      boxShadowMappa = '0 2px 6px rgba(0,0,0,0.25)';
+    }
+
+    // Cursore: in modalita scegli, mostra crosshair su tutti i tavoli tranne il primo
+    var cursoreMappa = 'pointer';
+    if (modalitaUnione === 'scegli' && !isPrimo) cursoreMappa = 'crosshair';
+
     return (
       <div key={layoutItem.istanza_id}
         onMouseDown={editorMode ? function(e) { onMouseDownTavolo(e, layoutItem); } : undefined}
         onClick={!editorMode ? function() {
+          // In modalita scegli secondo tavolo
+          if (modalitaUnione === 'scegli') {
+            if (!isPrimo) selezionaSecondoTavoloUnione(layoutItem);
+            return;
+          }
+          // Click normale
           var es3 = getEtichettaServizio(layoutItem.istanza_id);
           setEditEtichettaServizio(es3.etichetta || '');
           setEditColoreServizio(es3.colore || '#9CA3AF');
@@ -1072,14 +1208,14 @@ export default function SalePage() {
           setAssegnaOspiti(0);
           setPannelloAperto(true);
         } : undefined}
-        style={{ position: 'absolute', left: (x - pad) + 'px', top: (y - pad) + 'px', width: (w + pad * 2) + 'px', height: (h + pad * 2) + 'px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: editorMode ? 'grab' : 'pointer', userSelect: 'none', zIndex: draggingIstanza === layoutItem.istanza_id ? 50 : 15 }}
+        style={{ position: 'absolute', left: (x - pad) + 'px', top: (y - pad) + 'px', width: (w + pad * 2) + 'px', height: (h + pad * 2) + 'px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: editorMode ? 'grab' : cursoreMappa, userSelect: 'none', zIndex: draggingIstanza === layoutItem.istanza_id ? 50 : 15 }}
       >
         {mostraSedie && (
           <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
             <SedieSVG w={w + pad * 2} h={h + pad * 2} capacita={t.capacita} forma={t.forma} colore={bgColor} />
           </div>
         )}
-        <div style={{ position: 'relative', width: w + 'px', height: h + 'px', backgroundColor: bgColor, borderRadius: borderRadiusTavolo, boxShadow: suOstacolo ? '0 0 0 3px #EF4444' : (unito ? '0 0 0 3px #7C3AED' : '0 2px 6px rgba(0,0,0,0.25)'), display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white', overflow: 'hidden' }}>
+        <div style={{ position: 'relative', width: w + 'px', height: h + 'px', backgroundColor: bgColor, borderRadius: borderRadiusTavolo, boxShadow: editorMode ? (suOstacolo ? '0 0 0 3px #EF4444' : '0 2px 6px rgba(0,0,0,0.25)') : boxShadowMappa, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white', overflow: 'hidden' }}>
           {/* Etichetta strutturale del tavolo (es. T50) */}
           <span style={{ fontSize: '12px', fontWeight: '800', textShadow: '0 1px 2px rgba(0,0,0,0.3)', textAlign: 'center', padding: '0 2px' }}>{labelVisibile}</span>
           {/* Testo di servizio (es. nome cliente scritto a mano) */}
@@ -1171,6 +1307,45 @@ export default function SalePage() {
           })}
         </div>
         {renderLegendaOstacoli()}
+        {/* Banner modalita selezione secondo tavolo */}
+        {modalitaUnione === 'scegli' && (
+          <div style={{ marginBottom: '10px', padding: '12px 16px', background: '#EDE9FE', border: '2px solid #8B5CF6', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '20px' }}>👆</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '14px', fontWeight: '800', color: '#5B21B6' }}>Seleziona il secondo tavolo sulla mappa</div>
+              <div style={{ fontSize: '12px', color: '#7C3AED', marginTop: '2px' }}>Clicca il tavolo da unire a <strong>{tavoloSelezionato ? ((tavoloSelezionato.etichetta && tavoloSelezionato.etichetta.trim()) ? tavoloSelezionato.etichetta : (tavoloSelezionato.tavolo ? tavoloSelezionato.tavolo.nome : 'Tavolo')) : ''}</strong>. Se non sono vicini li affiancheremo automaticamente.</div>
+            </div>
+            <button onClick={annullaUnione} style={{ background: 'white', color: '#5B21B6', border: '1px solid #c4b5fd', borderRadius: '7px', padding: '7px 14px', fontSize: '13px', cursor: 'pointer', fontWeight: '700', flexShrink: 0 }}>Annulla</button>
+          </div>
+        )}
+        {/* Pannello conferma unione — sopra la mappa */}
+        {modalitaUnione === 'conferma' && secondoTavoloUnione && tavoloSelezionato && (
+          <div style={{ marginBottom: '10px', padding: '16px', background: 'white', border: '2px solid #7C3AED', borderRadius: '12px', maxWidth: '500px' }}>
+            <div style={{ fontSize: '15px', fontWeight: '800', color: '#111827', marginBottom: '10px' }}>Conferma unione tavoli</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '14px', padding: '10px', background: '#F5F3FF', borderRadius: '8px' }}>
+              <div style={{ textAlign: 'center', flex: 1 }}>
+                <div style={{ fontSize: '13px', fontWeight: '800', color: '#5B21B6' }}>{(tavoloSelezionato.etichetta && tavoloSelezionato.etichetta.trim()) ? tavoloSelezionato.etichetta : (tavoloSelezionato.tavolo ? tavoloSelezionato.tavolo.nome : 'Tavolo')}</div>
+                <div style={{ fontSize: '11px', color: '#7C3AED' }}>{tavoloSelezionato.tavolo ? tavoloSelezionato.tavolo.capacita : 0} posti</div>
+              </div>
+              <div style={{ fontSize: '20px', color: '#7C3AED', fontWeight: '800' }}>+</div>
+              <div style={{ textAlign: 'center', flex: 1 }}>
+                <div style={{ fontSize: '13px', fontWeight: '800', color: '#5B21B6' }}>{(secondoTavoloUnione.etichetta && secondoTavoloUnione.etichetta.trim()) ? secondoTavoloUnione.etichetta : (secondoTavoloUnione.tavolo ? secondoTavoloUnione.tavolo.nome : 'Tavolo')}</div>
+                <div style={{ fontSize: '11px', color: '#7C3AED' }}>{secondoTavoloUnione.tavolo ? secondoTavoloUnione.tavolo.capacita : 0} posti</div>
+              </div>
+            </div>
+            {posizioneOriginaleUnione && (secondoTavoloUnione.pos_x !== posizioneOriginaleUnione.x || secondoTavoloUnione.pos_y !== posizioneOriginaleUnione.y) && (
+              <div style={{ fontSize: '12px', color: '#92400E', background: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '6px', padding: '6px 10px', marginBottom: '10px' }}>
+                Il secondo tavolo è stato avvicinato al primo. Se non ti piace la posizione annulla e spostalo manualmente dall'Editor Layout.
+              </div>
+            )}
+            <div style={{ fontSize: '13px', color: '#374151', marginBottom: '6px', fontWeight: '700' }}>Capienza totale combinata:</div>
+            <input type="number" min="1" value={unioneCapienza} onChange={function(e) { setUnioneCapienza(e.target.value); }} style={{ width: '100%', padding: '10px', border: '2px solid #8B5CF6', borderRadius: '7px', fontSize: '18px', fontWeight: '800', boxSizing: 'border-box', marginBottom: '12px', textAlign: 'center', color: '#5B21B6' }} />
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button onClick={confermaUnione} style={{ flex: 1, background: '#7C3AED', color: 'white', border: 'none', borderRadius: '8px', padding: '11px', fontSize: '14px', cursor: 'pointer', fontWeight: '800' }}>✓ Conferma unione</button>
+              <button onClick={annullaUnione} style={{ flex: 1, background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: '8px', padding: '11px', fontSize: '14px', cursor: 'pointer', fontWeight: '600' }}>Annulla</button>
+            </div>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
           <div style={stileViewport()}>
             <div style={stileCanvas()}>
@@ -1178,7 +1353,7 @@ export default function SalePage() {
               {layoutAttivo.map(function(item) { return renderTavoloGriglia(item, false); })}
             </div>
           </div>
-          {pannelloAperto && tavoloSelezionato && renderPannelloTavolo()}
+          {pannelloAperto && tavoloSelezionato && !modalitaUnione && renderPannelloTavolo()}
         </div>
         {tavoliUniti.length > 0 && (
           <div style={{ marginTop: '16px' }}>
@@ -1274,8 +1449,8 @@ export default function SalePage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           {stato === 'libero' ? (
             <>
-              <button onClick={function() { setShowAssegna(true); setShowUnione(false); }} style={{ background: '#3B82F6', color: 'white', border: 'none', borderRadius: '8px', padding: '10px', fontSize: '14px', cursor: 'pointer', fontWeight: '600' }}>+ Assegna prenotazione</button>
-              <button onClick={function() { setShowUnione('scegli'); setShowAssegna(false); }} style={{ background: '#8B5CF6', color: 'white', border: 'none', borderRadius: '8px', padding: '10px', fontSize: '14px', cursor: 'pointer', fontWeight: '600' }}>Unisci con altro tavolo</button>
+              <button onClick={function() { setShowAssegna(true); }} style={{ background: '#3B82F6', color: 'white', border: 'none', borderRadius: '8px', padding: '10px', fontSize: '14px', cursor: 'pointer', fontWeight: '600' }}>+ Assegna prenotazione</button>
+              <button onClick={function() { setPannelloAperto(false); avviaModalitaUnione(); }} style={{ background: '#8B5CF6', color: 'white', border: 'none', borderRadius: '8px', padding: '10px', fontSize: '14px', cursor: 'pointer', fontWeight: '600' }}>🔗 Unisci con altro tavolo</button>
             </>
           ) : (
             <>
@@ -1299,44 +1474,6 @@ export default function SalePage() {
             <div style={{ display: 'flex', gap: '8px' }}>
               <button onClick={confermaAssegna} style={{ flex: 1, background: '#10B981', color: 'white', border: 'none', borderRadius: '8px', padding: '9px', fontSize: '13px', cursor: 'pointer', fontWeight: '700' }}>Conferma</button>
               <button onClick={function() { setShowAssegna(false); }} style={{ flex: 1, background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: '8px', padding: '9px', fontSize: '13px', cursor: 'pointer' }}>Annulla</button>
-            </div>
-          </div>
-        )}
-        {showUnione === 'scegli' && (
-          <div style={{ marginTop: '16px', borderTop: '1px solid #f3f4f6', paddingTop: '16px' }}>
-            <h4 style={{ margin: '0 0 6px 0', fontSize: '14px', fontWeight: '700', color: '#374151' }}>Unisci con:</h4>
-            <p style={{ margin: '0 0 10px 0', fontSize: '12px', color: '#6B7280' }}>Ogni tavolo mostra: etichetta · tipologia · posizione nella griglia</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '220px', overflowY: 'auto' }}>
-              {layoutAttivo.filter(function(l) { return l.istanza_id !== ts.istanza_id; }).map(function(l) {
-                var etichetta = (l.etichetta && l.etichetta.trim()) ? l.etichetta.trim() : '—';
-                var tipologia = l.tavolo ? l.tavolo.nome : 'Tavolo';
-                var posizione = 'col ' + (l.pos_x + 1) + ' riga ' + (l.pos_y + 1);
-                var esServizio = getEtichettaServizio(l.istanza_id);
-                return (
-                  <button key={l.istanza_id} onClick={function() { apriUnione(l.tavolo_id); }} style={{ background: '#faf5ff', border: '1px solid #c4b5fd', borderRadius: '6px', padding: '9px 12px', fontSize: '13px', cursor: 'pointer', textAlign: 'left', color: '#5B21B6', fontWeight: '600', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: esServizio.colore, flexShrink: 0 }}></div>
-                    <div>
-                      <div style={{ fontWeight: '800' }}>{etichetta}</div>
-                      <div style={{ fontSize: '11px', fontWeight: '400', color: '#7C3AED' }}>{tipologia} · {l.tavolo ? l.tavolo.capacita : '-'} posti · {posizione}</div>
-                      {esServizio.etichetta && <div style={{ fontSize: '11px', fontWeight: '400', color: '#6B7280' }}>"{esServizio.etichetta}"</div>}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
-            <button onClick={function() { setShowUnione(false); }} style={{ marginTop: '8px', width: '100%', background: 'none', border: '1px solid #e5e7eb', borderRadius: '6px', padding: '7px', fontSize: '13px', cursor: 'pointer', color: '#6B7280' }}>Annulla</button>
-          </div>
-        )}
-        {showUnione && showUnione !== 'scegli' && showUnione !== false && (
-          <div style={{ marginTop: '16px', borderTop: '1px solid #f3f4f6', paddingTop: '16px' }}>
-            <h4 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: '700', color: '#374151' }}>Conferma unione</h4>
-            <div style={{ fontSize: '13px', color: '#374151', marginBottom: '8px' }}>
-              {labelTavolo}{' + '}{(function() { for (var i = 0; i < layoutAttivo.length; i++) { if (layoutAttivo[i].tavolo_id === showUnione) { return layoutAttivo[i].etichetta || (layoutAttivo[i].tavolo ? layoutAttivo[i].tavolo.nome : '?'); } } return '?'; })()}
-            </div>
-            <input type="number" min="1" value={unioneCapienza} onChange={function(e) { setUnioneCapienza(e.target.value); }} style={{ width: '100%', padding: '9px', border: '2px solid #8B5CF6', borderRadius: '6px', fontSize: '15px', fontWeight: '700', boxSizing: 'border-box', marginBottom: '10px', textAlign: 'center' }} />
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button onClick={confermaUnione} style={{ flex: 1, background: '#8B5CF6', color: 'white', border: 'none', borderRadius: '8px', padding: '9px', fontSize: '13px', cursor: 'pointer', fontWeight: '700' }}>Conferma</button>
-              <button onClick={function() { setShowUnione(false); }} style={{ flex: 1, background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: '8px', padding: '9px', fontSize: '13px', cursor: 'pointer' }}>Annulla</button>
             </div>
           </div>
         )}
