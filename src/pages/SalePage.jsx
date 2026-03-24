@@ -391,7 +391,7 @@ export default function SalePage() {
   }
 
   function caricaPrenotazioni() {
-    supabase.from('reservations').select('id, adulti, bambini, note, stato, ora, customer:customers(first_name, last_name)').eq('data', dataSelezionata).eq('meal_type', turnoToMealType(turnoSelezionato)).then(function(result) {
+    supabase.from('reservations').select('id, adults_count, children_count, notes, status, requested_time, customer:customers(first_name, last_name)').eq('reservation_date', dataSelezionata).eq('meal_type', turnoToMealType(turnoSelezionato)).then(function(result) {
       if (!result.error) setPrenotazioni(result.data || []);
     });
   }
@@ -525,7 +525,7 @@ export default function SalePage() {
       if (pren) break;
     }
     if (!pren) return 'libero';
-    if (pren.stato === 'arrivato' || pren.stato === 'al_tavolo') return 'occupato';
+    if (pren.status === 'arrivato' || pren.status === 'al_tavolo' || pren.status === 'seated' || pren.status === 'arrived') return 'occupato';
     return 'prenotato';
   }
 
@@ -1466,7 +1466,7 @@ export default function SalePage() {
               <option value="">-- Seleziona prenotazione --</option>
               {prenotazioni.map(function(p) {
                 var nome = p.customer ? (p.customer.first_name + ' ' + p.customer.last_name) : 'Cliente';
-                return <option key={p.id} value={p.id}>{nome} - {(p.adulti || 0) + (p.bambini || 0)} ospiti ({p.ora})</option>;
+                return <option key={p.id} value={p.id}>{nome} - {(p.adults_count || 0) + (p.children_count || 0)} ospiti ({p.requested_time ? p.requested_time.substring(0, 5) : ''})</option>;
               })}
             </select>
             {prenotazioni.length === 0 && <p style={{ fontSize: '12px', color: '#9CA3AF', margin: '0 0 8px 0' }}>Nessuna prenotazione per questo turno</p>}
