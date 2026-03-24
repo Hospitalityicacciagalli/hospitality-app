@@ -391,9 +391,34 @@ export default function SalePage() {
   }
 
   function caricaPrenotazioni() {
-    supabase.from('reservations').select('id, adults_count, children_count, notes, status, requested_time, customer:customers(first_name, last_name)').eq('reservation_date', dataSelezionata).eq('meal_type', turnoToMealType(turnoSelezionato)).then(function(result) {
-      if (!result.error) setPrenotazioni(result.data || []);
-    });
+    supabase.from('reservations')
+      .select('id, adults_count, children_count, notes, status, requested_time, customer_id')
+      .eq('reservation_date', dataSelezionata)
+      .eq('meal_type', turnoToMealType(turnoSelezionato))
+      .then(function(result) {
+        if (result.error) { return; }
+        var rows = result.data || [];
+        if (rows.length === 0) { setPrenotazioni([]); return; }
+        // Carica i clienti separatamente
+        var customerIds = [];
+        for (var i = 0; i < rows.length; i++) {
+          if (rows[i].customer_id) customerIds.push(rows[i].customer_id);
+        }
+        supabase.from('customers')
+          .select('id, first_name, last_name')
+          .in('id', customerIds)
+          .then(function(result2) {
+            var clientiMap = {};
+            var clienti = result2.data || [];
+            for (var j = 0; j < clienti.length; j++) {
+              clientiMap[clienti[j].id] = clienti[j];
+            }
+            var prenotazioniConClienti = rows.map(function(p) {
+              return Object.assign({}, p, { customer: clientiMap[p.customer_id] || null });
+            });
+            setPrenotazioni(prenotazioniConClienti);
+          });
+      });
   }
 
   function caricaTavoliPrenotazioni() {
