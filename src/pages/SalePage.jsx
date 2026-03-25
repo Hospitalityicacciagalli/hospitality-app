@@ -482,33 +482,17 @@ export default function SalePage() {
   // Restituisce l'etichetta di servizio per un'istanza (o valori di default)
   // Se il tavolo fa parte di un'unione, propaga l'etichetta del tavolo principale
   function getEtichettaServizio(istanzaId) {
-    // Cerca il layoutItem corrispondente a questa istanza
-    var item = null;
-    for (var i = 0; i < layoutAttivo.length; i++) {
-      if (layoutAttivo[i].istanza_id === istanzaId) { item = layoutAttivo[i]; break; }
-    }
-    // Se ha una sua etichetta diretta, usala
     if (etichetteServizio[istanzaId]) return etichetteServizio[istanzaId];
-    // Se fa parte di un'unione, cerca l'etichetta del tavolo principale o secondario
-    if (item) {
-      for (var j = 0; j < tavoliUniti.length; j++) {
-        var u = tavoliUniti[j];
-        // Questo tavolo e' il secondario: prendi etichetta del principale
-        if (u.tavolo_secondario_id === item.tavolo_id) {
-          for (var k = 0; k < layoutAttivo.length; k++) {
-            if (layoutAttivo[k].tavolo_id === u.tavolo_principale_id) {
-              if (etichetteServizio[layoutAttivo[k].istanza_id]) return etichetteServizio[layoutAttivo[k].istanza_id];
-            }
-          }
-        }
-        // Questo tavolo e' il principale: prendi etichetta del secondario se il principale non ne ha
-        if (u.tavolo_principale_id === item.tavolo_id) {
-          for (var m = 0; m < layoutAttivo.length; m++) {
-            if (layoutAttivo[m].tavolo_id === u.tavolo_secondario_id) {
-              if (etichetteServizio[layoutAttivo[m].istanza_id]) return etichetteServizio[layoutAttivo[m].istanza_id];
-            }
-          }
-        }
+    // Se fa parte di un'unione, cerca l'etichetta dell'altro tavolo del gruppo
+    for (var j = 0; j < tavoliUniti.length; j++) {
+      var u = tavoliUniti[j];
+      // Questo e' il secondario: prendi etichetta del principale
+      if (u.istanza_secondaria_id === istanzaId) {
+        if (etichetteServizio[u.istanza_principale_id]) return etichetteServizio[u.istanza_principale_id];
+      }
+      // Questo e' il principale: prendi etichetta del secondario se disponibile
+      if (u.istanza_principale_id === istanzaId) {
+        if (etichetteServizio[u.istanza_secondaria_id]) return etichetteServizio[u.istanza_secondaria_id];
       }
     }
     return { etichetta: '', colore: '#9CA3AF' };
@@ -534,12 +518,7 @@ export default function SalePage() {
   }
 
   function getStatoTavolo(istanzaId) {
-    var item = null;
-    for (var i = 0; i < layoutAttivo.length; i++) {
-      if (layoutAttivo[i].istanza_id === istanzaId) { item = layoutAttivo[i]; break; }
-    }
-    if (!item) return 'libero';
-    var assegnazioni = tavoliPrenotazioni.filter(function(tp) { return tp.tavolo_id === item.tavolo_id; });
+    var assegnazioni = tavoliPrenotazioni.filter(function(tp) { return tp.istanza_id === istanzaId; });
     if (assegnazioni.length === 0) return 'libero';
     var pren = null;
     for (var j = 0; j < prenotazioni.length; j++) {
@@ -555,14 +534,9 @@ export default function SalePage() {
   }
 
   function getNomeClienteIstanza(istanzaId) {
-    var item = null;
-    for (var i = 0; i < layoutAttivo.length; i++) {
-      if (layoutAttivo[i].istanza_id === istanzaId) { item = layoutAttivo[i]; break; }
-    }
-    if (!item) return null;
     var a = null;
     for (var j = 0; j < tavoliPrenotazioni.length; j++) {
-      if (tavoliPrenotazioni[j].tavolo_id === item.tavolo_id) { a = tavoliPrenotazioni[j]; break; }
+      if (tavoliPrenotazioni[j].istanza_id === istanzaId) { a = tavoliPrenotazioni[j]; break; }
     }
     if (!a) return null;
     var p = null;
@@ -574,14 +548,9 @@ export default function SalePage() {
   }
 
   function getOspitiAssegnatiIstanza(istanzaId) {
-    var item = null;
-    for (var i = 0; i < layoutAttivo.length; i++) {
-      if (layoutAttivo[i].istanza_id === istanzaId) { item = layoutAttivo[i]; break; }
-    }
-    if (!item) return 0;
     var tot = 0;
     for (var j = 0; j < tavoliPrenotazioni.length; j++) {
-      if (tavoliPrenotazioni[j].tavolo_id === item.tavolo_id) tot += (tavoliPrenotazioni[j].n_ospiti_assegnati || 0);
+      if (tavoliPrenotazioni[j].istanza_id === istanzaId) tot += (tavoliPrenotazioni[j].n_ospiti_assegnati || 0);
     }
     return tot;
   }
@@ -597,19 +566,19 @@ export default function SalePage() {
     return tot;
   }
 
-  // Restituisce quanti ospiti di una prenotazione sono assegnati a un tavolo specifico
-  function getOspitiSuTavolo(prenotazioneId, tavoloId) {
+  // Restituisce quanti ospiti di una prenotazione sono assegnati a una istanza specifica
+  function getOspitiSuIstanza(prenotazioneId, istanzaId) {
     for (var i = 0; i < tavoliPrenotazioni.length; i++) {
-      if (tavoliPrenotazioni[i].prenotazione_id === prenotazioneId && tavoliPrenotazioni[i].tavolo_id === tavoloId) {
+      if (tavoliPrenotazioni[i].prenotazione_id === prenotazioneId && tavoliPrenotazioni[i].istanza_id === istanzaId) {
         return tavoliPrenotazioni[i].n_ospiti_assegnati || 0;
       }
     }
     return 0;
   }
 
-  function isIstanzaUnita(tavoloId) {
+  function isIstanzaUnita(istanzaId) {
     for (var i = 0; i < tavoliUniti.length; i++) {
-      if (tavoliUniti[i].tavolo_secondario_id === tavoloId || tavoliUniti[i].tavolo_principale_id === tavoloId) return true;
+      if (tavoliUniti[i].istanza_secondaria_id === istanzaId || tavoliUniti[i].istanza_principale_id === istanzaId) return true;
     }
     return false;
   }
@@ -948,30 +917,46 @@ export default function SalePage() {
     if (!tavoloSelezionato) return;
     var posOrig = { x: layoutItem.pos_x, y: layoutItem.pos_y };
     setPosizioneOriginaleUnione(posOrig);
-    // Se non sono adiacenti, sposta il secondo affiancandolo al primo
-    if (!sonoDaAffiancati(tavoloSelezionato, layoutItem)) {
-      var nuovaPos = calcolaPosAffiancata(tavoloSelezionato, layoutItem);
-      // Aggiorna layoutAttivo visivamente (non salva ancora sul DB)
-      setLayoutAttivo(function(prev) {
-        return prev.map(function(it) {
-          if (it.istanza_id === layoutItem.istanza_id) {
-            return Object.assign({}, it, { pos_x: nuovaPos.x, pos_y: nuovaPos.y });
-          }
-          return it;
-        });
-      });
-      setSecondoTavoloUnione(Object.assign({}, layoutItem, { pos_x: nuovaPos.x, pos_y: nuovaPos.y }));
-    } else {
-      setSecondoTavoloUnione(layoutItem);
-    }
+    setSecondoTavoloUnione(Object.assign({}, layoutItem));
     var cap1 = tavoloSelezionato.tavolo ? tavoloSelezionato.tavolo.capacita : 0;
     var cap2 = layoutItem.tavolo ? layoutItem.tavolo.capacita : 0;
     setUnioneCapienza(cap1 + cap2);
-    setModalitaUnione('conferma');
+    // Entra in modalita posizionamento libero
+    setModalitaUnione('posiziona');
+  }
+
+  // Drag del secondo tavolo in modalita posizionamento unione
+  function onMouseDownSecondoTavolo(e) {
+    e.preventDefault();
+    if (modalitaUnione !== 'posiziona' || !secondoTavoloUnione) return;
+    var rect = gridRef.current.getBoundingClientRect();
+    setDraggingIstanza(secondoTavoloUnione.istanza_id);
+    setDragOffset({ x: e.clientX - rect.left - secondoTavoloUnione.pos_x * gridSize, y: e.clientY - rect.top - secondoTavoloUnione.pos_y * gridSize });
+  }
+
+  function onMouseMoveUnione(e) {
+    if (modalitaUnione !== 'posiziona' || !draggingIstanza || !secondoTavoloUnione) return;
+    if (draggingIstanza !== secondoTavoloUnione.istanza_id) return;
+    var rect = gridRef.current.getBoundingClientRect();
+    var dim = getDimensioniEffettive(secondoTavoloUnione);
+    var col = Math.max(0, Math.min(gridCols - dim.w, Math.round((e.clientX - rect.left - dragOffset.x) / gridSize)));
+    var row = Math.max(0, Math.min(gridRows - dim.h, Math.round((e.clientY - rect.top - dragOffset.y) / gridSize)));
+    setSecondoTavoloUnione(function(prev) { return Object.assign({}, prev, { pos_x: col, pos_y: row }); });
+    // Aggiorna anche layoutAttivo visivamente
+    setLayoutAttivo(function(prev) {
+      return prev.map(function(it) {
+        if (it.istanza_id === secondoTavoloUnione.istanza_id) return Object.assign({}, it, { pos_x: col, pos_y: row });
+        return it;
+      });
+    });
+  }
+
+  function onMouseUpUnione() {
+    if (modalitaUnione === 'posiziona') setDraggingIstanza(null);
   }
 
   function annullaUnione() {
-    // Ripristina posizione originale del secondo tavolo se era stato spostato
+    // Ripristina posizione originale del secondo tavolo
     if (secondoTavoloUnione && posizioneOriginaleUnione) {
       setLayoutAttivo(function(prev) {
         return prev.map(function(it) {
@@ -985,11 +970,11 @@ export default function SalePage() {
     setModalitaUnione(false);
     setSecondoTavoloUnione(null);
     setPosizioneOriginaleUnione(null);
+    setDraggingIstanza(null);
   }
 
   function confermaUnione() {
     if (!tavoloSelezionato || !secondoTavoloUnione) return;
-    // Se il secondo tavolo e' stato spostato, salva la nuova posizione sul DB
     if (posizioneOriginaleUnione &&
         (secondoTavoloUnione.pos_x !== posizioneOriginaleUnione.x ||
          secondoTavoloUnione.pos_y !== posizioneOriginaleUnione.y)) {
@@ -1007,6 +992,8 @@ export default function SalePage() {
     supabase.from('tavoli_uniti').insert({
       tavolo_principale_id: tavoloSelezionato.tavolo_id,
       tavolo_secondario_id: secondoTavoloUnione.tavolo_id,
+      istanza_principale_id: tavoloSelezionato.istanza_id,
+      istanza_secondaria_id: secondoTavoloUnione.istanza_id,
       data: dataSelezionata,
       turno: turnoSelezionato,
       attivo: true,
@@ -1029,35 +1016,42 @@ export default function SalePage() {
     if (!assegnaPrenotazione) { alert('Seleziona una prenotazione'); return; }
     var n = parseInt(assegnaOspiti);
     if (!n || n <= 0) { alert('Inserisci il numero di ospiti'); return; }
-    // Cerca se esiste gia' un record per questa prenotazione su questo tavolo
+    var istanzaId = tavoloSelezionato.istanza_id;
+    var tavoloId = tavoloSelezionato.tavolo_id;
+    // Cerca se esiste gia' un record per questa prenotazione su questa istanza
     var esistente = null;
     for (var i = 0; i < tavoliPrenotazioni.length; i++) {
-      if (tavoliPrenotazioni[i].prenotazione_id === assegnaPrenotazione && tavoliPrenotazioni[i].tavolo_id === tavoloSelezionato.tavolo_id) {
+      if (tavoliPrenotazioni[i].prenotazione_id === assegnaPrenotazione && tavoliPrenotazioni[i].istanza_id === istanzaId) {
         esistente = tavoliPrenotazioni[i];
         break;
       }
     }
     if (esistente) {
-      // Aggiorna il record esistente
       supabase.from('tavoli_prenotazioni').update({ n_ospiti_assegnati: n }).eq('id', esistente.id).then(function(result) {
         if (result.error) { alert('Errore: ' + result.error.message); return; }
         caricaTavoliPrenotazioni(); setShowAssegna(false); setAssegnaPrenotazione(null); setAssegnaOspiti(0);
       });
     } else {
-      // Inserisce nuovo record
-      supabase.from('tavoli_prenotazioni').insert({ prenotazione_id: assegnaPrenotazione, tavolo_id: tavoloSelezionato.tavolo_id, n_ospiti_assegnati: n, data: dataSelezionata, turno: turnoSelezionato }).then(function(result) {
+      supabase.from('tavoli_prenotazioni').insert({
+        prenotazione_id: assegnaPrenotazione,
+        tavolo_id: tavoloId,
+        istanza_id: istanzaId,
+        n_ospiti_assegnati: n,
+        data: dataSelezionata,
+        turno: turnoSelezionato
+      }).then(function(result) {
         if (result.error) { alert('Errore: ' + result.error.message); return; }
         caricaTavoliPrenotazioni(); setShowAssegna(false); setAssegnaPrenotazione(null); setAssegnaOspiti(0);
       });
     }
   }
 
-  function rimuoviAssegnazione(tavoloId, prenotazioneId) {
+  function rimuoviAssegnazione(istanzaId, prenotazioneId) {
     if (!window.confirm('Rimuovere questa assegnazione dal tavolo?')) return;
     if (prenotazioneId) {
-      supabase.from('tavoli_prenotazioni').delete().eq('tavolo_id', tavoloId).eq('prenotazione_id', prenotazioneId).eq('data', dataSelezionata).eq('turno', turnoSelezionato).then(function() { caricaTavoliPrenotazioni(); });
+      supabase.from('tavoli_prenotazioni').delete().eq('istanza_id', istanzaId).eq('prenotazione_id', prenotazioneId).then(function() { caricaTavoliPrenotazioni(); });
     } else {
-      supabase.from('tavoli_prenotazioni').delete().eq('tavolo_id', tavoloId).eq('data', dataSelezionata).eq('turno', turnoSelezionato).then(function() { caricaTavoliPrenotazioni(); });
+      supabase.from('tavoli_prenotazioni').delete().eq('istanza_id', istanzaId).then(function() { caricaTavoliPrenotazioni(); });
     }
   }
 
@@ -1252,19 +1246,23 @@ export default function SalePage() {
       boxShadowMappa = '0 2px 6px rgba(0,0,0,0.25)';
     }
 
-    // Cursore: in modalita scegli, mostra crosshair su tutti i tavoli tranne il primo
+    // Cursore: in modalita scegli crosshair, in posiziona grab sul secondo tavolo
     var cursoreMappa = 'pointer';
     if (modalitaUnione === 'scegli' && !isPrimo) cursoreMappa = 'crosshair';
+    if (modalitaUnione === 'posiziona' && isSecondo) cursoreMappa = 'grab';
+    if (modalitaUnione === 'posiziona' && !isSecondo && !isPrimo) cursoreMappa = 'default';
 
     return (
       <div key={layoutItem.istanza_id}
-        onMouseDown={editorMode ? function(e) { onMouseDownTavolo(e, layoutItem); } : undefined}
+        onMouseDown={editorMode ? function(e) { onMouseDownTavolo(e, layoutItem); } : (modalitaUnione === 'posiziona' && isSecondo ? onMouseDownSecondoTavolo : undefined)}
         onClick={!editorMode ? function() {
           // In modalita scegli secondo tavolo
           if (modalitaUnione === 'scegli') {
             if (!isPrimo) selezionaSecondoTavoloUnione(layoutItem);
             return;
           }
+          // In modalita posiziona non fare nulla al click
+          if (modalitaUnione === 'posiziona') return;
           // Click normale
           var es3 = getEtichettaServizio(layoutItem.istanza_id);
           setEditEtichettaServizio(es3.etichetta || '');
@@ -1375,18 +1373,35 @@ export default function SalePage() {
           })}
         </div>
         {renderLegendaOstacoli()}
+
         {/* Banner modalita selezione secondo tavolo */}
         {modalitaUnione === 'scegli' && (
           <div style={{ marginBottom: '10px', padding: '12px 16px', background: '#EDE9FE', border: '2px solid #8B5CF6', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '12px' }}>
             <span style={{ fontSize: '20px' }}>👆</span>
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: '14px', fontWeight: '800', color: '#5B21B6' }}>Seleziona il secondo tavolo sulla mappa</div>
-              <div style={{ fontSize: '12px', color: '#7C3AED', marginTop: '2px' }}>Clicca il tavolo da unire a <strong>{tavoloSelezionato ? ((tavoloSelezionato.etichetta && tavoloSelezionato.etichetta.trim()) ? tavoloSelezionato.etichetta : (tavoloSelezionato.tavolo ? tavoloSelezionato.tavolo.nome : 'Tavolo')) : ''}</strong>. Se non sono vicini li affiancheremo automaticamente.</div>
+              <div style={{ fontSize: '12px', color: '#7C3AED', marginTop: '2px' }}>Clicca il tavolo da unire a <strong>{tavoloSelezionato ? ((tavoloSelezionato.etichetta && tavoloSelezionato.etichetta.trim()) ? tavoloSelezionato.etichetta : (tavoloSelezionato.tavolo ? tavoloSelezionato.tavolo.nome : 'Tavolo')) : ''}</strong>.</div>
             </div>
             <button onClick={annullaUnione} style={{ background: 'white', color: '#5B21B6', border: '1px solid #c4b5fd', borderRadius: '7px', padding: '7px 14px', fontSize: '13px', cursor: 'pointer', fontWeight: '700', flexShrink: 0 }}>Annulla</button>
           </div>
         )}
-        {/* Pannello conferma unione — sopra la mappa */}
+
+        {/* Banner modalita posizionamento libero secondo tavolo */}
+        {modalitaUnione === 'posiziona' && secondoTavoloUnione && (
+          <div style={{ marginBottom: '10px', padding: '12px 16px', background: '#FEF3C7', border: '2px solid #F59E0B', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '20px' }}>✋</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '14px', fontWeight: '800', color: '#92400E' }}>Posiziona il secondo tavolo</div>
+              <div style={{ fontSize: '12px', color: '#92400E', marginTop: '2px' }}>
+                Trascina <strong>{(secondoTavoloUnione.etichetta && secondoTavoloUnione.etichetta.trim()) ? secondoTavoloUnione.etichetta : (secondoTavoloUnione.tavolo ? secondoTavoloUnione.tavolo.nome : 'Tavolo')}</strong> nella posizione desiderata, poi conferma.
+              </div>
+            </div>
+            <button onClick={function() { setModalitaUnione('conferma'); }} style={{ background: '#F59E0B', color: 'white', border: 'none', borderRadius: '7px', padding: '7px 14px', fontSize: '13px', cursor: 'pointer', fontWeight: '800', flexShrink: 0 }}>✓ Posizione OK</button>
+            <button onClick={annullaUnione} style={{ background: 'white', color: '#92400E', border: '1px solid #FDE68A', borderRadius: '7px', padding: '7px 14px', fontSize: '13px', cursor: 'pointer', fontWeight: '700', flexShrink: 0 }}>Annulla</button>
+          </div>
+        )}
+
+        {/* Pannello conferma unione */}
         {modalitaUnione === 'conferma' && secondoTavoloUnione && tavoloSelezionato && (
           <div style={{ marginBottom: '10px', padding: '16px', background: 'white', border: '2px solid #7C3AED', borderRadius: '12px', maxWidth: '500px' }}>
             <div style={{ fontSize: '15px', fontWeight: '800', color: '#111827', marginBottom: '10px' }}>Conferma unione tavoli</div>
@@ -1401,11 +1416,9 @@ export default function SalePage() {
                 <div style={{ fontSize: '11px', color: '#7C3AED' }}>{secondoTavoloUnione.tavolo ? secondoTavoloUnione.tavolo.capacita : 0} posti</div>
               </div>
             </div>
-            {posizioneOriginaleUnione && (secondoTavoloUnione.pos_x !== posizioneOriginaleUnione.x || secondoTavoloUnione.pos_y !== posizioneOriginaleUnione.y) && (
-              <div style={{ fontSize: '12px', color: '#92400E', background: '#FEF3C7', border: '1px solid #FDE68A', borderRadius: '6px', padding: '6px 10px', marginBottom: '10px' }}>
-                Il secondo tavolo è stato avvicinato al primo. Se non ti piace la posizione annulla e spostalo manualmente dall'Editor Layout.
-              </div>
-            )}
+            <button onClick={function() { setModalitaUnione('posiziona'); }} style={{ width: '100%', background: '#FEF3C7', color: '#92400E', border: '1px solid #FDE68A', borderRadius: '7px', padding: '7px', fontSize: '12px', cursor: 'pointer', fontWeight: '600', marginBottom: '10px' }}>
+              ✋ Torna a riposizionare il tavolo
+            </button>
             <div style={{ fontSize: '13px', color: '#374151', marginBottom: '6px', fontWeight: '700' }}>Capienza totale combinata:</div>
             <input type="number" min="1" value={unioneCapienza} onChange={function(e) { setUnioneCapienza(e.target.value); }} style={{ width: '100%', padding: '10px', border: '2px solid #8B5CF6', borderRadius: '7px', fontSize: '18px', fontWeight: '800', boxSizing: 'border-box', marginBottom: '12px', textAlign: 'center', color: '#5B21B6' }} />
             <div style={{ display: 'flex', gap: '10px' }}>
@@ -1414,9 +1427,16 @@ export default function SalePage() {
             </div>
           </div>
         )}
+
         <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
           <div style={stileViewport()}>
-            <div style={stileCanvas()}>
+            <div
+              ref={gridRef}
+              onMouseMove={modalitaUnione === 'posiziona' ? onMouseMoveUnione : undefined}
+              onMouseUp={modalitaUnione === 'posiziona' ? onMouseUpUnione : undefined}
+              onMouseLeave={modalitaUnione === 'posiziona' ? onMouseUpUnione : undefined}
+              style={Object.assign({}, stileCanvas(), { cursor: modalitaUnione === 'posiziona' ? 'default' : 'default' })}
+            >
               {renderOverlayOstacoli(false)}
               {layoutAttivo.map(function(item) { return renderTavoloGriglia(item, false); })}
             </div>
@@ -1518,7 +1538,7 @@ export default function SalePage() {
 
           {/* Assegnazioni esistenti su questo tavolo */}
           {(function() {
-            var assegnazioniTavolo = tavoliPrenotazioni.filter(function(tp) { return tp.tavolo_id === ts.tavolo_id; });
+            var assegnazioniTavolo = tavoliPrenotazioni.filter(function(tp) { return tp.istanza_id === ts.istanza_id; });
             if (assegnazioniTavolo.length === 0) return null;
             return (
               <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: '8px', padding: '10px 12px' }}>
@@ -1548,7 +1568,7 @@ export default function SalePage() {
                             </span>
                           </div>
                         </div>
-                        <button onClick={function() { rimuoviAssegnazione(ts.tavolo_id, tp.prenotazione_id); }} style={{ background: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA', borderRadius: '5px', padding: '3px 8px', fontSize: '11px', cursor: 'pointer', flexShrink: 0, marginLeft: '8px' }}>✕</button>
+                        <button onClick={function() { rimuoviAssegnazione(ts.istanza_id, tp.prenotazione_id); }} style={{ background: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA', borderRadius: '5px', padding: '3px 8px', fontSize: '11px', cursor: 'pointer', flexShrink: 0, marginLeft: '8px' }}>✕</button>
                       </div>
                     </div>
                   );
@@ -1571,7 +1591,7 @@ export default function SalePage() {
             <select value={assegnaPrenotazione || ''} onChange={function(e) {
               setAssegnaPrenotazione(e.target.value);
               if (e.target.value) {
-                var gia = getOspitiSuTavolo(e.target.value, ts.tavolo_id);
+                var gia = getOspitiSuIstanza(e.target.value, ts.istanza_id);
                 setAssegnaOspiti(gia > 0 ? gia : 0);
               } else {
                 setAssegnaOspiti(0);
@@ -1599,7 +1619,7 @@ export default function SalePage() {
               }
               if (!pren) return null;
               var tot = (pren.adults_count || 0) + (pren.children_count || 0);
-              var assegnatiAltrove = getOspitiAssegnatiPrenotazione(assegnaPrenotazione) - getOspitiSuTavolo(assegnaPrenotazione, ts.tavolo_id);
+              var assegnatiAltrove = getOspitiAssegnatiPrenotazione(assegnaPrenotazione) - getOspitiSuIstanza(assegnaPrenotazione, ts.istanza_id);
               var restanti = tot - assegnatiAltrove;
               var capienza = ts.tavolo ? ts.tavolo.capacita : 0;
               return (
