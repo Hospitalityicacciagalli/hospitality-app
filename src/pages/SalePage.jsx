@@ -454,26 +454,44 @@ export default function SalePage() {
   function salvaEtichettaServizio(istanzaId, testo, colore) {
     if (!salaSelezionata || !dataSelezionata || !turnoSelezionato) return;
     setSalvandoEtichetta(true);
-    supabase
-      .from('etichette_servizio')
-      .upsert({
-        istanza_id: istanzaId,
+
+    // Trova se questo tavolo e' unito — in quel caso salva l'etichetta su entrambe le istanze
+    var istanzeTarget = [istanzaId];
+    for (var i = 0; i < tavoliUniti.length; i++) {
+      var u = tavoliUniti[i];
+      if (u.istanza_principale_id === istanzaId && u.istanza_secondaria_id) {
+        istanzeTarget.push(u.istanza_secondaria_id);
+      } else if (u.istanza_secondaria_id === istanzaId && u.istanza_principale_id) {
+        istanzeTarget.push(u.istanza_principale_id);
+      }
+    }
+
+    var righe = istanzeTarget.map(function(iid) {
+      return {
+        istanza_id: iid,
         sala_id: salaSelezionata,
         data_servizio: dataSelezionata,
         turno: turnoSelezionato,
         etichetta: testo || '',
         colore: colore || '#9CA3AF'
-      }, { onConflict: 'istanza_id,sala_id,data_servizio,turno' })
+      };
+    });
+
+    supabase
+      .from('etichette_servizio')
+      .upsert(righe, { onConflict: 'istanza_id,sala_id,data_servizio,turno' })
       .then(function(result) {
         setSalvandoEtichetta(false);
         if (result.error) {
           alert('Errore salvataggio etichetta: ' + result.error.message);
           return;
         }
-        // Aggiorna lo stato locale immediatamente senza ricaricare tutto
+        // Aggiorna lo stato locale per tutte le istanze coinvolte
         setEtichetteServizio(function(prev) {
           var nuovo = Object.assign({}, prev);
-          nuovo[istanzaId] = { etichetta: testo || '', colore: colore || '#9CA3AF' };
+          for (var j = 0; j < istanzeTarget.length; j++) {
+            nuovo[istanzeTarget[j]] = { etichetta: testo || '', colore: colore || '#9CA3AF' };
+          }
           return nuovo;
         });
       });
@@ -1239,7 +1257,7 @@ export default function SalePage() {
     } else if (isPrimo && modalitaUnione) {
       boxShadowMappa = '0 0 0 4px #3B82F6, 0 0 0 7px rgba(59,130,246,0.3)';
     } else if (unito) {
-      boxShadowMappa = '0 0 0 3px #7C3AED';
+      boxShadowMappa = '0 0 0 5px #7C3AED, inset 0 0 0 2px rgba(124,58,237,0.15)';
     } else if (suOstacolo) {
       boxShadowMappa = '0 0 0 3px #EF4444';
     } else {
@@ -1282,18 +1300,24 @@ export default function SalePage() {
           </div>
         )}
         <div style={{ position: 'relative', width: w + 'px', height: h + 'px', backgroundColor: bgColor, borderRadius: borderRadiusTavolo, boxShadow: editorMode ? (suOstacolo ? '0 0 0 3px #EF4444' : '0 2px 6px rgba(0,0,0,0.25)') : boxShadowMappa, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white', overflow: 'hidden' }}>
-          {/* Etichetta strutturale del tavolo (es. T50) */}
-          <span style={{ fontSize: '12px', fontWeight: '800', textShadow: '0 1px 2px rgba(0,0,0,0.3)', textAlign: 'center', padding: '0 2px' }}>{labelVisibile}</span>
-          {/* Testo di servizio (es. nome cliente scritto a mano) */}
+          {/* Etichetta strutturale (T50) — sempre visibile in alto */}
+          {labelVisibile !== '' && (
+            <span style={{ fontSize: '13px', fontWeight: '900', textShadow: '0 1px 3px rgba(0,0,0,0.5)', textAlign: 'center', padding: '0 2px', letterSpacing: '0.02em', lineHeight: 1.1 }}>{labelVisibile}</span>
+          )}
+          {/* Testo di servizio (nome cliente scritto a mano) */}
           {!editorMode && testoServizio !== '' && (
-            <span style={{ fontSize: '9px', fontWeight: '600', opacity: 0.95, textAlign: 'center', maxWidth: '90%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px', background: 'rgba(0,0,0,0.18)', borderRadius: '3px', padding: '0 3px' }}>{testoServizio}</span>
+            <span style={{ fontSize: '9px', fontWeight: '700', opacity: 1, textAlign: 'center', maxWidth: '94%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '2px', background: 'rgba(0,0,0,0.25)', borderRadius: '3px', padding: '1px 4px' }}>{testoServizio}</span>
           )}
           {/* Nome cliente da prenotazione */}
           {!editorMode && nomeCliente && (
-            <span style={{ fontSize: '9px', opacity: 0.9, textAlign: 'center', maxWidth: '90%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px' }}>{nomeCliente}</span>
+            <span style={{ fontSize: '9px', opacity: 0.95, textAlign: 'center', maxWidth: '94%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: '1px', fontStyle: 'italic' }}>{nomeCliente}</span>
           )}
           {!editorMode && ospiti > 0 && <span style={{ fontSize: '9px', opacity: 0.85, marginTop: '1px' }}>{ospiti} osp.</span>}
-          {!editorMode && stato === 'libero' && testoServizio === '' && !nomeCliente && <span style={{ fontSize: '9px', opacity: 0.8 }}>{t.capacita} posti</span>}
+          {!editorMode && stato === 'libero' && testoServizio === '' && !nomeCliente && labelVisibile === '' && <span style={{ fontSize: '9px', opacity: 0.8 }}>{t.capacita} posti</span>}
+          {/* Indicatore tavolo unito */}
+          {!editorMode && unito && (
+            <div style={{ position: 'absolute', top: '2px', right: '3px', width: '8px', height: '8px', borderRadius: '50%', background: '#7C3AED', border: '1px solid white' }}></div>
+          )}
           {editorMode && (
             <>
               <button onMouseDown={function(e) { e.stopPropagation(); }} onClick={function(e) { e.stopPropagation(); ruotaIstanzaInLayout(layoutItem.istanza_id); }} title={'Ruota (' + rotAttuale + 'deg)'} style={{ position: 'absolute', top: '2px', left: '3px', background: 'rgba(0,0,0,0.4)', border: 'none', color: 'white', borderRadius: '50%', width: '16px', height: '16px', fontSize: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', lineHeight: 1 }}>R</button>
@@ -1450,9 +1474,12 @@ export default function SalePage() {
               {tavoliUniti.map(function(u) {
                 var l1 = null; var l2 = null;
                 for (var i = 0; i < layoutAttivo.length; i++) {
-                  if (layoutAttivo[i].tavolo_id === u.tavolo_principale_id) l1 = layoutAttivo[i];
-                  if (layoutAttivo[i].tavolo_id === u.tavolo_secondario_id) l2 = layoutAttivo[i];
+                  if (layoutAttivo[i].istanza_id === u.istanza_principale_id) l1 = layoutAttivo[i];
+                  if (layoutAttivo[i].istanza_id === u.istanza_secondaria_id) l2 = layoutAttivo[i];
                 }
+                // Fallback a tavolo_id se istanza non trovata
+                if (!l1) { for (var ii = 0; ii < layoutAttivo.length; ii++) { if (layoutAttivo[ii].tavolo_id === u.tavolo_principale_id) { l1 = layoutAttivo[ii]; break; } } }
+                if (!l2) { for (var jj = 0; jj < layoutAttivo.length; jj++) { if (layoutAttivo[jj].tavolo_id === u.tavolo_secondario_id) { l2 = layoutAttivo[jj]; break; } } }
                 var nome1 = (l1 && l1.etichetta) ? l1.etichetta : (l1 && l1.tavolo ? l1.tavolo.nome : '?');
                 var nome2 = (l2 && l2.etichetta) ? l2.etichetta : (l2 && l2.tavolo ? l2.tavolo.nome : '?');
                 return (
@@ -1466,6 +1493,79 @@ export default function SalePage() {
             </div>
           </div>
         )}
+
+        {/* Riepilogo prenotazioni su più tavoli */}
+        {(function() {
+          // Raggruppa tavoliPrenotazioni per prenotazione_id
+          var mappa = {};
+          for (var i = 0; i < tavoliPrenotazioni.length; i++) {
+            var tp = tavoliPrenotazioni[i];
+            if (!mappa[tp.prenotazione_id]) mappa[tp.prenotazione_id] = [];
+            mappa[tp.prenotazione_id].push(tp);
+          }
+          var righe = [];
+          var keys = Object.keys(mappa);
+          for (var k = 0; k < keys.length; k++) {
+            var pid = keys[k];
+            var assegnazioni = mappa[pid];
+            // Solo prenotazioni su più tavoli o con almeno un'assegnazione
+            if (assegnazioni.length === 0) continue;
+            var pren = null;
+            for (var p = 0; p < prenotazioni.length; p++) {
+              if (prenotazioni[p].id === pid) { pren = prenotazioni[p]; break; }
+            }
+            var nomePren = pren && pren.customer ? (pren.customer.first_name + ' ' + pren.customer.last_name) : 'Cliente';
+            var totale = pren ? ((pren.adults_count || 0) + (pren.children_count || 0)) : 0;
+            var assegnatiTot = 0;
+            var tavoliAssegnati = [];
+            for (var a = 0; a < assegnazioni.length; a++) {
+              assegnatiTot += (assegnazioni[a].n_ospiti_assegnati || 0);
+              // Trova etichetta strutturale dell'istanza
+              var labelT = assegnazioni[a].istanza_id;
+              for (var la = 0; la < layoutAttivo.length; la++) {
+                if (layoutAttivo[la].istanza_id === assegnazioni[a].istanza_id) {
+                  labelT = (layoutAttivo[la].etichetta && layoutAttivo[la].etichetta.trim()) ? layoutAttivo[la].etichetta.trim() : (layoutAttivo[la].tavolo ? layoutAttivo[la].tavolo.nome : assegnazioni[a].istanza_id);
+                  break;
+                }
+              }
+              tavoliAssegnati.push({ label: labelT, ospiti: assegnazioni[a].n_ospiti_assegnati || 0 });
+            }
+            var restanti = totale - assegnatiTot;
+            righe.push({ pid: pid, nome: nomePren, totale: totale, assegnati: assegnatiTot, restanti: restanti, tavoli: tavoliAssegnati });
+          }
+          if (righe.length === 0) return null;
+          return (
+            <div style={{ marginTop: '20px' }}>
+              <h4 style={{ fontSize: '14px', fontWeight: '700', color: '#374151', marginBottom: '10px' }}>Riepilogo assegnazioni prenotazioni</h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {righe.map(function(r) {
+                  return (
+                    <div key={r.pid} style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '10px', padding: '12px 14px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                        <span style={{ fontSize: '14px', fontWeight: '800', color: '#111827' }}>{r.nome}</span>
+                        <span style={{ fontSize: '12px', fontWeight: '700', color: r.restanti <= 0 ? '#059669' : '#D97706', background: r.restanti <= 0 ? '#F0FDF4' : '#FEF3C7', border: '1px solid ' + (r.restanti <= 0 ? '#BBF7D0' : '#FDE68A'), borderRadius: '20px', padding: '2px 10px' }}>
+                          {r.restanti <= 0 ? '✓ Completa' : r.restanti + ' da sistemare'}
+                        </span>
+                      </div>
+                      <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '4px' }}>
+                        {r.tavoli.map(function(tv, idx) {
+                          return (
+                            <span key={idx} style={{ fontSize: '12px', background: '#EFF6FF', color: '#1D4ED8', border: '1px solid #BFDBFE', borderRadius: '6px', padding: '2px 8px', fontWeight: '700' }}>
+                              {tv.label} <span style={{ fontWeight: '400' }}>({tv.ospiti})</span>
+                            </span>
+                          );
+                        })}
+                      </div>
+                      <div style={{ fontSize: '11px', color: '#6B7280' }}>
+                        {r.assegnati} assegnati su {r.totale} totali
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })()}
       </div>
     );
   }
@@ -1474,16 +1574,45 @@ export default function SalePage() {
     var ts = tavoloSelezionato;
     var stato = getStatoTavolo(ts.istanza_id);
     var labelTavolo = (ts.etichetta && ts.etichetta.trim()) ? ts.etichetta.trim() : (ts.tavolo ? ts.tavolo.nome : 'Tavolo');
+
+    // Trova eventuale unione di cui fa parte questo tavolo
+    var unioneAttiva = null;
+    var partnerIstanza = null;
+    for (var i = 0; i < tavoliUniti.length; i++) {
+      var u = tavoliUniti[i];
+      if (u.istanza_principale_id === ts.istanza_id || u.istanza_secondaria_id === ts.istanza_id) {
+        unioneAttiva = u;
+        var partnerId = u.istanza_principale_id === ts.istanza_id ? u.istanza_secondaria_id : u.istanza_principale_id;
+        for (var j = 0; j < layoutAttivo.length; j++) {
+          if (layoutAttivo[j].istanza_id === partnerId) { partnerIstanza = layoutAttivo[j]; break; }
+        }
+        break;
+      }
+    }
+    var labelPartner = partnerIstanza ? ((partnerIstanza.etichetta && partnerIstanza.etichetta.trim()) ? partnerIstanza.etichetta.trim() : (partnerIstanza.tavolo ? partnerIstanza.tavolo.nome : 'Tavolo')) : null;
+
     return (
-      <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px', minWidth: '290px', maxWidth: '330px', flexShrink: 0 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+      <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px', minWidth: '290px', maxWidth: '330px', flexShrink: 0, maxHeight: '85vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
           <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#111827' }}>{labelTavolo}</h3>
           <button onClick={function() { setPannelloAperto(false); setShowAssegna(false); setShowUnione(false); }} style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', color: '#9CA3AF', lineHeight: 1 }}>x</button>
         </div>
+
+        {/* Banner unione attiva */}
+        {unioneAttiva && labelPartner && (
+          <div style={{ marginBottom: '10px', padding: '8px 12px', background: '#EDE9FE', border: '1px solid #C4B5FD', borderRadius: '8px', fontSize: '12px', color: '#5B21B6', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <div>
+              <span style={{ fontWeight: '800' }}>🔗 Unito con {labelPartner}</span>
+              {unioneAttiva.capacita_unione > 0 && <span style={{ fontWeight: '400', marginLeft: '6px' }}>— {unioneAttiva.capacita_unione} posti totali</span>}
+            </div>
+            <button onClick={function() { sciogliUnione(unioneAttiva.id); }} style={{ background: 'none', border: '1px solid #8B5CF6', borderRadius: '5px', padding: '2px 8px', fontSize: '11px', cursor: 'pointer', color: '#5B21B6', fontWeight: '700', flexShrink: 0, marginLeft: '8px' }}>Sciogli</button>
+          </div>
+        )}
+
         {ts.tavolo && (
           <div style={{ marginBottom: '14px', padding: '10px 12px', background: '#f9fafb', borderRadius: '8px', fontSize: '13px', color: '#374151', lineHeight: '1.7' }}>
             <div>Tipologia: <strong>{ts.tavolo.nome}</strong></div>
-            <div>Capienza: <strong>{ts.tavolo.capacita} posti</strong></div>
+            <div>Capienza: <strong>{unioneAttiva && unioneAttiva.capacita_unione > 0 ? unioneAttiva.capacita_unione + ' posti (unione)' : ts.tavolo.capacita + ' posti'}</strong></div>
             <div>Stato: <strong style={{ color: stato === 'occupato' ? '#EF4444' : stato === 'prenotato' ? '#D97706' : '#059669' }}>{labelStato(stato)}</strong></div>
             {getOspitiAssegnatiIstanza(ts.istanza_id) > 0 && <div>Ospiti: <strong>{getOspitiAssegnatiIstanza(ts.istanza_id)}</strong></div>}
           </div>
