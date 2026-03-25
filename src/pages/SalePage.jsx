@@ -586,6 +586,27 @@ export default function SalePage() {
     return tot;
   }
 
+  // Restituisce quanti ospiti di una prenotazione sono gia' assegnati su tutti i tavoli
+  function getOspitiAssegnatiPrenotazione(prenotazioneId) {
+    var tot = 0;
+    for (var i = 0; i < tavoliPrenotazioni.length; i++) {
+      if (tavoliPrenotazioni[i].prenotazione_id === prenotazioneId) {
+        tot += (tavoliPrenotazioni[i].n_ospiti_assegnati || 0);
+      }
+    }
+    return tot;
+  }
+
+  // Restituisce quanti ospiti di una prenotazione sono assegnati a un tavolo specifico
+  function getOspitiSuTavolo(prenotazioneId, tavoloId) {
+    for (var i = 0; i < tavoliPrenotazioni.length; i++) {
+      if (tavoliPrenotazioni[i].prenotazione_id === prenotazioneId && tavoliPrenotazioni[i].tavolo_id === tavoloId) {
+        return tavoliPrenotazioni[i].n_ospiti_assegnati || 0;
+      }
+    }
+    return 0;
+  }
+
   function isIstanzaUnita(tavoloId) {
     for (var i = 0; i < tavoliUniti.length; i++) {
       if (tavoliUniti[i].tavolo_secondario_id === tavoloId || tavoliUniti[i].tavolo_principale_id === tavoloId) return true;
@@ -1006,16 +1027,38 @@ export default function SalePage() {
 
   function confermaAssegna() {
     if (!assegnaPrenotazione) { alert('Seleziona una prenotazione'); return; }
-    if (!assegnaOspiti || parseInt(assegnaOspiti) <= 0) { alert('Inserisci il numero di ospiti'); return; }
-    supabase.from('tavoli_prenotazioni').insert({ prenotazione_id: assegnaPrenotazione, tavolo_id: tavoloSelezionato.tavolo_id, n_ospiti_assegnati: parseInt(assegnaOspiti), data: dataSelezionata, turno: turnoSelezionato }).then(function(result) {
-      if (result.error) { alert('Errore: ' + result.error.message); return; }
-      caricaTavoliPrenotazioni(); setShowAssegna(false); setPannelloAperto(false);
-    });
+    var n = parseInt(assegnaOspiti);
+    if (!n || n <= 0) { alert('Inserisci il numero di ospiti'); return; }
+    // Cerca se esiste gia' un record per questa prenotazione su questo tavolo
+    var esistente = null;
+    for (var i = 0; i < tavoliPrenotazioni.length; i++) {
+      if (tavoliPrenotazioni[i].prenotazione_id === assegnaPrenotazione && tavoliPrenotazioni[i].tavolo_id === tavoloSelezionato.tavolo_id) {
+        esistente = tavoliPrenotazioni[i];
+        break;
+      }
+    }
+    if (esistente) {
+      // Aggiorna il record esistente
+      supabase.from('tavoli_prenotazioni').update({ n_ospiti_assegnati: n }).eq('id', esistente.id).then(function(result) {
+        if (result.error) { alert('Errore: ' + result.error.message); return; }
+        caricaTavoliPrenotazioni(); setShowAssegna(false); setAssegnaPrenotazione(null); setAssegnaOspiti(0);
+      });
+    } else {
+      // Inserisce nuovo record
+      supabase.from('tavoli_prenotazioni').insert({ prenotazione_id: assegnaPrenotazione, tavolo_id: tavoloSelezionato.tavolo_id, n_ospiti_assegnati: n, data: dataSelezionata, turno: turnoSelezionato }).then(function(result) {
+        if (result.error) { alert('Errore: ' + result.error.message); return; }
+        caricaTavoliPrenotazioni(); setShowAssegna(false); setAssegnaPrenotazione(null); setAssegnaOspiti(0);
+      });
+    }
   }
 
-  function rimuoviAssegnazione(tavoloId) {
-    if (!window.confirm('Rimuovere l\'assegnazione da questo tavolo?')) return;
-    supabase.from('tavoli_prenotazioni').delete().eq('tavolo_id', tavoloId).eq('data', dataSelezionata).eq('turno', turnoSelezionato).then(function() { caricaTavoliPrenotazioni(); });
+  function rimuoviAssegnazione(tavoloId, prenotazioneId) {
+    if (!window.confirm('Rimuovere questa assegnazione dal tavolo?')) return;
+    if (prenotazioneId) {
+      supabase.from('tavoli_prenotazioni').delete().eq('tavolo_id', tavoloId).eq('prenotazione_id', prenotazioneId).eq('data', dataSelezionata).eq('turno', turnoSelezionato).then(function() { caricaTavoliPrenotazioni(); });
+    } else {
+      supabase.from('tavoli_prenotazioni').delete().eq('tavolo_id', tavoloId).eq('data', dataSelezionata).eq('turno', turnoSelezionato).then(function() { caricaTavoliPrenotazioni(); });
+    }
   }
 
   function toggleGruppo(cat) {
@@ -1472,33 +1515,122 @@ export default function SalePage() {
 
         {/* ── SEZIONE PRENOTAZIONE ── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          {stato === 'libero' ? (
-            <>
-              <button onClick={function() { setShowAssegna(true); }} style={{ background: '#3B82F6', color: 'white', border: 'none', borderRadius: '8px', padding: '10px', fontSize: '14px', cursor: 'pointer', fontWeight: '600' }}>+ Assegna prenotazione</button>
-              <button onClick={function() { setPannelloAperto(false); avviaModalitaUnione(); }} style={{ background: '#8B5CF6', color: 'white', border: 'none', borderRadius: '8px', padding: '10px', fontSize: '14px', cursor: 'pointer', fontWeight: '600' }}>🔗 Unisci con altro tavolo</button>
-            </>
-          ) : (
-            <>
-              <div style={{ fontSize: '13px', color: '#374151', padding: '6px 0' }}><strong>Cliente:</strong> {getNomeClienteIstanza(ts.istanza_id)}</div>
-              <button onClick={function() { rimuoviAssegnazione(ts.tavolo_id); setPannelloAperto(false); }} style={{ background: '#FEE2E2', color: '#DC2626', border: '1px solid #FECACA', borderRadius: '8px', padding: '10px', fontSize: '14px', cursor: 'pointer', fontWeight: '600' }}>Rimuovi assegnazione</button>
-            </>
-          )}
+
+          {/* Assegnazioni esistenti su questo tavolo */}
+          {(function() {
+            var assegnazioniTavolo = tavoliPrenotazioni.filter(function(tp) { return tp.tavolo_id === ts.tavolo_id; });
+            if (assegnazioniTavolo.length === 0) return null;
+            return (
+              <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: '8px', padding: '10px 12px' }}>
+                <div style={{ fontSize: '12px', fontWeight: '700', color: '#166534', marginBottom: '6px' }}>Prenotazioni assegnate a questo tavolo:</div>
+                {assegnazioniTavolo.map(function(tp) {
+                  var pren = null;
+                  for (var i = 0; i < prenotazioni.length; i++) {
+                    if (prenotazioni[i].id === tp.prenotazione_id) { pren = prenotazioni[i]; break; }
+                  }
+                  var nomeCliente = pren && pren.customer ? (pren.customer.first_name + ' ' + pren.customer.last_name) : 'Cliente';
+                  var totale = pren ? ((pren.adults_count || 0) + (pren.children_count || 0)) : 0;
+                  var assegnatiTotale = pren ? getOspitiAssegnatiPrenotazione(tp.prenotazione_id) : 0;
+                  var restanti = totale - assegnatiTotale;
+                  return (
+                    <div key={tp.id} style={{ background: 'white', border: '1px solid #D1FAE5', borderRadius: '6px', padding: '8px 10px', marginBottom: '4px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div>
+                          <div style={{ fontSize: '13px', fontWeight: '800', color: '#111827' }}>{nomeCliente}</div>
+                          <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '2px' }}>
+                            {tp.n_ospiti_assegnati} ospiti su questo tavolo
+                          </div>
+                          <div style={{ fontSize: '11px', marginTop: '2px' }}>
+                            <span style={{ color: '#374151' }}>Totale prenotazione: <strong>{totale}</strong></span>
+                            {' · '}
+                            <span style={{ color: assegnatiTotale >= totale ? '#059669' : '#D97706', fontWeight: '700' }}>
+                              {assegnatiTotale >= totale ? '✓ Completa' : restanti + ' ancora da sistemare'}
+                            </span>
+                          </div>
+                        </div>
+                        <button onClick={function() { rimuoviAssegnazione(ts.tavolo_id, tp.prenotazione_id); }} style={{ background: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA', borderRadius: '5px', padding: '3px 8px', fontSize: '11px', cursor: 'pointer', flexShrink: 0, marginLeft: '8px' }}>✕</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          {/* Bottoni azione */}
+          <button onClick={function() { setShowAssegna(!showAssegna); setAssegnaPrenotazione(null); setAssegnaOspiti(0); }} style={{ background: '#3B82F6', color: 'white', border: 'none', borderRadius: '8px', padding: '10px', fontSize: '14px', cursor: 'pointer', fontWeight: '600' }}>
+            + Assegna prenotazione
+          </button>
+          <button onClick={function() { setPannelloAperto(false); avviaModalitaUnione(); }} style={{ background: '#8B5CF6', color: 'white', border: 'none', borderRadius: '8px', padding: '10px', fontSize: '14px', cursor: 'pointer', fontWeight: '600' }}>🔗 Unisci con altro tavolo</button>
         </div>
+
+        {/* Form assegnazione con contatore frazionamento */}
         {showAssegna && (
-          <div style={{ marginTop: '16px', borderTop: '1px solid #f3f4f6', paddingTop: '16px' }}>
+          <div style={{ marginTop: '12px', borderTop: '1px solid #f3f4f6', paddingTop: '14px' }}>
             <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', fontWeight: '700', color: '#374151' }}>Assegna prenotazione</h4>
-            <select value={assegnaPrenotazione || ''} onChange={function(e) { setAssegnaPrenotazione(e.target.value); }} style={{ width: '100%', padding: '9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box', marginBottom: '8px' }}>
+            <select value={assegnaPrenotazione || ''} onChange={function(e) {
+              setAssegnaPrenotazione(e.target.value);
+              if (e.target.value) {
+                var gia = getOspitiSuTavolo(e.target.value, ts.tavolo_id);
+                setAssegnaOspiti(gia > 0 ? gia : 0);
+              } else {
+                setAssegnaOspiti(0);
+              }
+            }} style={{ width: '100%', padding: '9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box', marginBottom: '8px' }}>
               <option value="">-- Seleziona prenotazione --</option>
               {prenotazioni.map(function(p) {
                 var nome = p.customer ? (p.customer.first_name + ' ' + p.customer.last_name) : 'Cliente';
-                return <option key={p.id} value={p.id}>{nome} - {(p.adults_count || 0) + (p.children_count || 0)} ospiti ({p.requested_time ? p.requested_time.substring(0, 5) : ''})</option>;
+                var tot = (p.adults_count || 0) + (p.children_count || 0);
+                var assegnati = getOspitiAssegnatiPrenotazione(p.id);
+                var restanti = tot - assegnati;
+                var label = nome + ' (' + tot + ' ospiti';
+                if (assegnati > 0) label = label + ' · ' + restanti + ' da sistemare';
+                label = label + ')';
+                return <option key={p.id} value={p.id}>{label}</option>;
               })}
             </select>
             {prenotazioni.length === 0 && <p style={{ fontSize: '12px', color: '#9CA3AF', margin: '0 0 8px 0' }}>Nessuna prenotazione per questo turno</p>}
-            <input type="number" min="1" placeholder="N. ospiti a questo tavolo" value={assegnaOspiti} onChange={function(e) { setAssegnaOspiti(e.target.value); }} style={{ width: '100%', padding: '9px', border: '1px solid #d1d5db', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box', marginBottom: '10px' }} />
+
+            {/* Contatore frazionamento — appare solo dopo aver scelto una prenotazione */}
+            {assegnaPrenotazione && (function() {
+              var pren = null;
+              for (var i = 0; i < prenotazioni.length; i++) {
+                if (prenotazioni[i].id === assegnaPrenotazione) { pren = prenotazioni[i]; break; }
+              }
+              if (!pren) return null;
+              var tot = (pren.adults_count || 0) + (pren.children_count || 0);
+              var assegnatiAltrove = getOspitiAssegnatiPrenotazione(assegnaPrenotazione) - getOspitiSuTavolo(assegnaPrenotazione, ts.tavolo_id);
+              var restanti = tot - assegnatiAltrove;
+              var capienza = ts.tavolo ? ts.tavolo.capacita : 0;
+              return (
+                <div style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: '8px', padding: '10px 12px', marginBottom: '10px', fontSize: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ color: '#374151' }}>Totale prenotazione:</span>
+                    <strong style={{ color: '#111827' }}>{tot} ospiti</strong>
+                  </div>
+                  {assegnatiAltrove > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                      <span style={{ color: '#374151' }}>Già assegnati altrove:</span>
+                      <strong style={{ color: '#374151' }}>{assegnatiAltrove}</strong>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px', paddingTop: '4px', borderTop: '1px solid #BFDBFE' }}>
+                    <span style={{ color: '#1D4ED8', fontWeight: '700' }}>Da sistemare:</span>
+                    <strong style={{ color: restanti <= 0 ? '#059669' : '#1D4ED8' }}>{restanti <= 0 ? '✓ Tutti sistemati' : restanti}</strong>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ color: '#374151' }}>Capienza tavolo:</span>
+                    <strong style={{ color: '#374151' }}>{capienza} posti</strong>
+                  </div>
+                </div>
+              );
+            })()}
+
+            <div style={{ marginBottom: '6px', fontSize: '12px', color: '#374151', fontWeight: '700' }}>Ospiti su questo tavolo:</div>
+            <input type="number" min="1" placeholder="Quanti ospiti siedono qui?" value={assegnaOspiti || ''} onChange={function(e) { setAssegnaOspiti(e.target.value); }} style={{ width: '100%', padding: '10px', border: '2px solid #3B82F6', borderRadius: '6px', fontSize: '16px', fontWeight: '800', boxSizing: 'border-box', marginBottom: '10px', textAlign: 'center', color: '#1D4ED8' }} />
             <div style={{ display: 'flex', gap: '8px' }}>
-              <button onClick={confermaAssegna} style={{ flex: 1, background: '#10B981', color: 'white', border: 'none', borderRadius: '8px', padding: '9px', fontSize: '13px', cursor: 'pointer', fontWeight: '700' }}>Conferma</button>
-              <button onClick={function() { setShowAssegna(false); }} style={{ flex: 1, background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: '8px', padding: '9px', fontSize: '13px', cursor: 'pointer' }}>Annulla</button>
+              <button onClick={confermaAssegna} style={{ flex: 1, background: '#10B981', color: 'white', border: 'none', borderRadius: '8px', padding: '9px', fontSize: '13px', cursor: 'pointer', fontWeight: '700' }}>✓ Conferma</button>
+              <button onClick={function() { setShowAssegna(false); setAssegnaPrenotazione(null); setAssegnaOspiti(0); }} style={{ flex: 1, background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: '8px', padding: '9px', fontSize: '13px', cursor: 'pointer' }}>Annulla</button>
             </div>
           </div>
         )}
