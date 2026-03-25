@@ -536,7 +536,9 @@ export default function SalePage() {
   }
 
   function getStatoTavolo(istanzaId) {
-    var assegnazioni = tavoliPrenotazioni.filter(function(tp) { return tp.istanza_id === istanzaId; });
+    // Se fa parte di un'unione, usa l'istanza principale come riferimento
+    var rappresentante = getIstanzaRappresentante(istanzaId);
+    var assegnazioni = tavoliPrenotazioni.filter(function(tp) { return tp.istanza_id === rappresentante; });
     if (assegnazioni.length === 0) return 'libero';
     var pren = null;
     for (var j = 0; j < prenotazioni.length; j++) {
@@ -552,9 +554,10 @@ export default function SalePage() {
   }
 
   function getNomeClienteIstanza(istanzaId) {
+    var rappresentante = getIstanzaRappresentante(istanzaId);
     var a = null;
     for (var j = 0; j < tavoliPrenotazioni.length; j++) {
-      if (tavoliPrenotazioni[j].istanza_id === istanzaId) { a = tavoliPrenotazioni[j]; break; }
+      if (tavoliPrenotazioni[j].istanza_id === rappresentante) { a = tavoliPrenotazioni[j]; break; }
     }
     if (!a) return null;
     var p = null;
@@ -566,9 +569,10 @@ export default function SalePage() {
   }
 
   function getOspitiAssegnatiIstanza(istanzaId) {
+    var rappresentante = getIstanzaRappresentante(istanzaId);
     var tot = 0;
     for (var j = 0; j < tavoliPrenotazioni.length; j++) {
-      if (tavoliPrenotazioni[j].istanza_id === istanzaId) tot += (tavoliPrenotazioni[j].n_ospiti_assegnati || 0);
+      if (tavoliPrenotazioni[j].istanza_id === rappresentante) tot += (tavoliPrenotazioni[j].n_ospiti_assegnati || 0);
     }
     return tot;
   }
@@ -584,21 +588,43 @@ export default function SalePage() {
     return tot;
   }
 
-  // Restituisce quanti ospiti di una prenotazione sono assegnati a una istanza specifica
+  // Restituisce quanti ospiti di una prenotazione sono assegnati a una istanza (o alla sua unione)
   function getOspitiSuIstanza(prenotazioneId, istanzaId) {
+    var rappresentante = getIstanzaRappresentante(istanzaId);
     for (var i = 0; i < tavoliPrenotazioni.length; i++) {
-      if (tavoliPrenotazioni[i].prenotazione_id === prenotazioneId && tavoliPrenotazioni[i].istanza_id === istanzaId) {
+      if (tavoliPrenotazioni[i].prenotazione_id === prenotazioneId && tavoliPrenotazioni[i].istanza_id === rappresentante) {
         return tavoliPrenotazioni[i].n_ospiti_assegnati || 0;
       }
     }
     return 0;
   }
 
-  function isIstanzaUnita(istanzaId) {
+  // Restituisce il record di unione attiva per una istanza, oppure null
+  function getUnionePerIstanza(istanzaId) {
     for (var i = 0; i < tavoliUniti.length; i++) {
-      if (tavoliUniti[i].istanza_secondaria_id === istanzaId || tavoliUniti[i].istanza_principale_id === istanzaId) return true;
+      var u = tavoliUniti[i];
+      if (u.istanza_principale_id === istanzaId || u.istanza_secondaria_id === istanzaId) return u;
     }
-    return false;
+    return null;
+  }
+
+  function isIstanzaUnita(istanzaId) {
+    return getUnionePerIstanza(istanzaId) !== null;
+  }
+
+  // Restituisce l'istanza_id "principale" dell'unione per registrare le assegnazioni
+  // Se il tavolo e' il secondario, restituisce il principale; altrimenti se stesso
+  function getIstanzaRappresentante(istanzaId) {
+    var u = getUnionePerIstanza(istanzaId);
+    if (!u) return istanzaId;
+    return u.istanza_principale_id;
+  }
+
+  // Restituisce la capienza effettiva del tavolo (unione se unito, altrimenti propria)
+  function getCapienzaEffettiva(istanzaId, capienzaBase) {
+    var u = getUnionePerIstanza(istanzaId);
+    if (u && u.capacita_unione > 0) return u.capacita_unione;
+    return capienzaBase;
   }
 
   function getOstacoloACella(cx, cy) {
@@ -1034,9 +1060,14 @@ export default function SalePage() {
     if (!assegnaPrenotazione) { alert('Seleziona una prenotazione'); return; }
     var n = parseInt(assegnaOspiti);
     if (!n || n <= 0) { alert('Inserisci il numero di ospiti'); return; }
-    var istanzaId = tavoloSelezionato.istanza_id;
+    // Usa sempre l'istanza principale dell'unione come rappresentante
+    var istanzaId = getIstanzaRappresentante(tavoloSelezionato.istanza_id);
     var tavoloId = tavoloSelezionato.tavolo_id;
-    // Cerca se esiste gia' un record per questa prenotazione su questa istanza
+    if (istanzaId !== tavoloSelezionato.istanza_id) {
+      for (var li = 0; li < layoutAttivo.length; li++) {
+        if (layoutAttivo[li].istanza_id === istanzaId) { tavoloId = layoutAttivo[li].tavolo_id; break; }
+      }
+    }
     var esistente = null;
     for (var i = 0; i < tavoliPrenotazioni.length; i++) {
       if (tavoliPrenotazioni[i].prenotazione_id === assegnaPrenotazione && tavoliPrenotazioni[i].istanza_id === istanzaId) {
@@ -1066,10 +1097,11 @@ export default function SalePage() {
 
   function rimuoviAssegnazione(istanzaId, prenotazioneId) {
     if (!window.confirm('Rimuovere questa assegnazione dal tavolo?')) return;
+    var rappresentante = getIstanzaRappresentante(istanzaId);
     if (prenotazioneId) {
-      supabase.from('tavoli_prenotazioni').delete().eq('istanza_id', istanzaId).eq('prenotazione_id', prenotazioneId).then(function() { caricaTavoliPrenotazioni(); });
+      supabase.from('tavoli_prenotazioni').delete().eq('istanza_id', rappresentante).eq('prenotazione_id', prenotazioneId).then(function() { caricaTavoliPrenotazioni(); });
     } else {
-      supabase.from('tavoli_prenotazioni').delete().eq('istanza_id', istanzaId).then(function() { caricaTavoliPrenotazioni(); });
+      supabase.from('tavoli_prenotazioni').delete().eq('istanza_id', rappresentante).then(function() { caricaTavoliPrenotazioni(); });
     }
   }
 
@@ -1221,7 +1253,7 @@ export default function SalePage() {
     var stato = editorMode ? 'libero' : getStatoTavolo(layoutItem.istanza_id);
     var nomeCliente = editorMode ? null : getNomeClienteIstanza(layoutItem.istanza_id);
     var ospiti = editorMode ? 0 : getOspitiAssegnatiIstanza(layoutItem.istanza_id);
-    var unito = !editorMode && isIstanzaUnita(layoutItem.tavolo_id);
+    var unito = !editorMode && isIstanzaUnita(layoutItem.istanza_id);
     var isRound = t.forma === 'rotondo';
     var suOstacolo = editorMode && tavoloSuCellaBlocca(layoutItem);
     var pad = mostraSedie ? 14 : 0;
@@ -1667,7 +1699,8 @@ export default function SalePage() {
 
           {/* Assegnazioni esistenti su questo tavolo */}
           {(function() {
-            var assegnazioniTavolo = tavoliPrenotazioni.filter(function(tp) { return tp.istanza_id === ts.istanza_id; });
+            var rappIstanza = getIstanzaRappresentante(ts.istanza_id);
+            var assegnazioniTavolo = tavoliPrenotazioni.filter(function(tp) { return tp.istanza_id === rappIstanza; });
             if (assegnazioniTavolo.length === 0) return null;
             return (
               <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: '8px', padding: '10px 12px' }}>
@@ -1750,7 +1783,7 @@ export default function SalePage() {
               var tot = (pren.adults_count || 0) + (pren.children_count || 0);
               var assegnatiAltrove = getOspitiAssegnatiPrenotazione(assegnaPrenotazione) - getOspitiSuIstanza(assegnaPrenotazione, ts.istanza_id);
               var restanti = tot - assegnatiAltrove;
-              var capienza = ts.tavolo ? ts.tavolo.capacita : 0;
+              var capienza = ts.tavolo ? getCapienzaEffettiva(ts.istanza_id, ts.tavolo.capacita) : 0;
               return (
                 <div style={{ background: '#EFF6FF', border: '1px solid #BFDBFE', borderRadius: '8px', padding: '10px 12px', marginBottom: '10px', fontSize: '12px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
