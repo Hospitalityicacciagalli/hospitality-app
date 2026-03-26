@@ -712,26 +712,38 @@ export default function SalePage() {
     });
   }
 
-  // Salva layout — inserisce una riga per ogni istanza con il suo istanza_id
+  // Salva layout — cancella tutte le righe esistenti della sala, poi inserisce
   function salvaLayout() {
     var oggi = new Date().toISOString().split('T')[0];
-    Promise.all(layoutTemp.map(function(item) {
-      var rot = (item.rotazione === null || item.rotazione === undefined) ? 0 : Number(item.rotazione);
-      return supabase.from('layout_sala').insert({
-        sala_id: salaSelezionata,
-        tavolo_id: item.tavolo_id,
-        pos_x: item.pos_x,
-        pos_y: item.pos_y,
-        rotazione: rot,
-        etichetta: item.etichetta || null,
-        istanza_id: item.istanza_id,
-        data_validita_dal: oggi
+    supabase.from('layout_sala').delete().eq('sala_id', salaSelezionata).then(function(delResult) {
+      if (delResult.error) { alert('Errore nella pulizia del layout: ' + delResult.error.message); return; }
+      var righe = layoutTemp.map(function(item) {
+        var rot = (item.rotazione === null || item.rotazione === undefined) ? 0 : Number(item.rotazione);
+        return {
+          sala_id: salaSelezionata,
+          tavolo_id: item.tavolo_id,
+          pos_x: item.pos_x,
+          pos_y: item.pos_y,
+          rotazione: rot,
+          etichetta: item.etichetta || null,
+          istanza_id: item.istanza_id,
+          data_validita_dal: oggi
+        };
       });
-    })).then(function() {
-      setLayoutModificato(false);
-      caricaLayout(salaSelezionata);
-      caricaIstanzePerTipologia();
-      alert('Layout salvato correttamente!');
+      if (righe.length === 0) {
+        setLayoutModificato(false);
+        caricaLayout(salaSelezionata);
+        caricaIstanzePerTipologia();
+        alert('Layout salvato correttamente!');
+        return;
+      }
+      supabase.from('layout_sala').insert(righe).then(function(insResult) {
+        if (insResult.error) { alert('Errore nel salvataggio: ' + insResult.error.message); return; }
+        setLayoutModificato(false);
+        caricaLayout(salaSelezionata);
+        caricaIstanzePerTipologia();
+        alert('Layout salvato correttamente!');
+      });
     });
   }
 
@@ -2213,7 +2225,6 @@ export default function SalePage() {
             style={Object.assign({}, stileCanvas(), { cursor: 'crosshair' })}
           >
             {renderOverlayOstacoli(true)}
-            {layoutAttivo.map(function(item) { return renderTavoloGriglia(item, false); })}
             {previewCelle.map(function(c) {
               return (
                 <div key={c.x + '_' + c.y} style={{ position: 'absolute', left: (c.x * gridSize) + 'px', top: (c.y * gridSize) + 'px', width: gridSize + 'px', height: gridSize + 'px', background: previewColore, opacity: 0.5, zIndex: 20, pointerEvents: 'none' }}></div>
