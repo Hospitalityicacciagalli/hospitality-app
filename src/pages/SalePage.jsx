@@ -196,9 +196,13 @@ export default function SalePage() {
 
   var [showFormSala, setShowFormSala] = useState(false);
   var [salaInEditing, setSalaInEditing] = useState(null);
-  var [formSala, setFormSala] = useState({ nome: '', ordine: 1, grid_cols: 40, grid_rows: 30 });
+  var [formSala, setFormSala] = useState({ nome: '', ordine: 1, grid_cols: 40, grid_rows: 30, prefisso_tavolo: '', numero_iniziale: 1 });
 
   var [gruppiEspansi, setGruppiEspansi] = useState({});
+  var [editorModeAttivo, setEditorModeAttivo] = useState(false);
+  // Selezione multipla nell'editor
+  var [selezionatiEditor, setSelezionatiEditor] = useState([]);
+  var [modalitaSelezioneMult, setModalitaSelezioneMult] = useState(false);
 
   var [ostacoli, setOstacoli] = useState([]);
   var [tipoOstacoloAttivo, setTipoOstacoloAttivo] = useState('muro');
@@ -731,6 +735,29 @@ export default function SalePage() {
     });
   }
 
+  // Genera il prossimo suggerimento etichetta automatica basato su prefisso sala
+  function generaProssimaEtichetta() {
+    var salaDati = null;
+    for (var i = 0; i < sale.length; i++) {
+      if (sale[i].id === salaSelezionata) { salaDati = sale[i]; break; }
+    }
+    var prefisso = (salaDati && salaDati.prefisso_tavolo) ? salaDati.prefisso_tavolo.trim().toUpperCase() : '';
+    var numInizio = (salaDati && salaDati.numero_iniziale) ? parseInt(salaDati.numero_iniziale) : 1;
+    if (!prefisso) return '';
+    // Trova tutti i numeri già usati con questo prefisso nel layoutTemp
+    var usati = {};
+    for (var j = 0; j < layoutTemp.length; j++) {
+      var et = (layoutTemp[j].etichetta || '').trim().toUpperCase();
+      if (et.indexOf(prefisso) === 0) {
+        var numParte = parseInt(et.slice(prefisso.length));
+        if (!isNaN(numParte)) usati[numParte] = true;
+      }
+    }
+    var n = numInizio;
+    while (usati[n]) n++;
+    return prefisso + String(n).padStart(3, '0');
+  }
+
   // Aggiunge una nuova istanza al layoutTemp — genera un nuovo istanza_id univoco
   function richiediEtichettaEAggiungi(tavoloSnap) {
     var quantita = tavoloSnap.quantita || 1;
@@ -742,7 +769,7 @@ export default function SalePage() {
       return;
     }
     setTavoloInAttesaEtichetta(tavoloSnap);
-    setEtichettaInput('');
+    setEtichettaInput(generaProssimaEtichetta());
     setShowModaleEtichetta(true);
   }
 
@@ -888,14 +915,14 @@ export default function SalePage() {
   }
 
   function apriFormSala(sala) {
-    if (sala) { setSalaInEditing(sala); setFormSala({ nome: sala.nome, ordine: sala.ordine, grid_cols: sala.grid_cols || 40, grid_rows: sala.grid_rows || 30 }); }
-    else { setSalaInEditing(null); setFormSala({ nome: '', ordine: sale.length + 1, grid_cols: 40, grid_rows: 30 }); }
+    if (sala) { setSalaInEditing(sala); setFormSala({ nome: sala.nome, ordine: sala.ordine, grid_cols: sala.grid_cols || 40, grid_rows: sala.grid_rows || 30, prefisso_tavolo: sala.prefisso_tavolo || '', numero_iniziale: sala.numero_iniziale || 1 }); }
+    else { setSalaInEditing(null); setFormSala({ nome: '', ordine: sale.length + 1, grid_cols: 40, grid_rows: 30, prefisso_tavolo: '', numero_iniziale: 1 }); }
     setShowFormSala(true);
   }
 
   function salvaSala() {
     if (!formSala.nome.trim()) { alert('Inserisci il nome della sala'); return; }
-    var dati = { nome: formSala.nome.trim(), ordine: parseInt(formSala.ordine) || 1, attiva: true, grid_cols: parseInt(formSala.grid_cols) || 40, grid_rows: parseInt(formSala.grid_rows) || 30 };
+    var dati = { nome: formSala.nome.trim(), ordine: parseInt(formSala.ordine) || 1, attiva: true, grid_cols: parseInt(formSala.grid_cols) || 40, grid_rows: parseInt(formSala.grid_rows) || 30, prefisso_tavolo: formSala.prefisso_tavolo.trim() || null, numero_iniziale: parseInt(formSala.numero_iniziale) || 1 };
     if (salaInEditing) {
       supabase.from('sale').update(dati).eq('id', salaInEditing.id).then(function(result) {
         if (result.error) { alert('Errore: ' + result.error.message); return; }
@@ -1113,6 +1140,81 @@ export default function SalePage() {
     });
   }
 
+  function toggleSelezioneTavolo(istanzaId) {
+    setSelezionatiEditor(function(prev) {
+      if (prev.indexOf(istanzaId) >= 0) return prev.filter(function(id) { return id !== istanzaId; });
+      return prev.concat([istanzaId]);
+    });
+  }
+
+  function allineaSelezionati(tipo) {
+    if (selezionatiEditor.length < 2) return;
+    var items = layoutTemp.filter(function(it) { return selezionatiEditor.indexOf(it.istanza_id) >= 0; });
+    if (items.length === 0) return;
+    var val;
+    if (tipo === 'sinistra') val = items.reduce(function(m, it) { return Math.min(m, it.pos_x); }, Infinity);
+    else if (tipo === 'destra') val = items.reduce(function(m, it) { var d = getDimensioniEffettive(it); return Math.max(m, it.pos_x + d.w); }, -Infinity);
+    else if (tipo === 'alto') val = items.reduce(function(m, it) { return Math.min(m, it.pos_y); }, Infinity);
+    else if (tipo === 'basso') val = items.reduce(function(m, it) { var d = getDimensioniEffettive(it); return Math.max(m, it.pos_y + d.h); }, -Infinity);
+    else if (tipo === 'centro_h') val = items.reduce(function(acc, it) { return acc + it.pos_x + getDimensioniEffettive(it).w / 2; }, 0) / items.length;
+    else if (tipo === 'centro_v') val = items.reduce(function(acc, it) { return acc + it.pos_y + getDimensioniEffettive(it).h / 2; }, 0) / items.length;
+    else if (tipo === 'distrib_h') {
+      var sortH = items.slice().sort(function(a, b) { return a.pos_x - b.pos_x; });
+      var minX = sortH[0].pos_x;
+      var maxX = sortH[sortH.length - 1].pos_x + getDimensioniEffettive(sortH[sortH.length - 1]).w;
+      var totalW = sortH.reduce(function(s, it) { return s + getDimensioniEffettive(it).w; }, 0);
+      var gap = (maxX - minX - totalW) / (sortH.length - 1);
+      var curX = minX;
+      setLayoutTemp(function(prev) {
+        var mappa = {};
+        for (var i = 0; i < sortH.length; i++) {
+          mappa[sortH[i].istanza_id] = curX;
+          curX += getDimensioniEffettive(sortH[i]).w + gap;
+        }
+        return prev.map(function(it) {
+          if (mappa[it.istanza_id] !== undefined) return Object.assign({}, it, { pos_x: Math.round(mappa[it.istanza_id]) });
+          return it;
+        });
+      });
+      setLayoutModificato(true);
+      return;
+    } else if (tipo === 'distrib_v') {
+      var sortV = items.slice().sort(function(a, b) { return a.pos_y - b.pos_y; });
+      var minY = sortV[0].pos_y;
+      var maxY = sortV[sortV.length - 1].pos_y + getDimensioniEffettive(sortV[sortV.length - 1]).h;
+      var totalH = sortV.reduce(function(s, it) { return s + getDimensioniEffettive(it).h; }, 0);
+      var gapV = (maxY - minY - totalH) / (sortV.length - 1);
+      var curY = minY;
+      setLayoutTemp(function(prev) {
+        var mappaV = {};
+        for (var i = 0; i < sortV.length; i++) {
+          mappaV[sortV[i].istanza_id] = curY;
+          curY += getDimensioniEffettive(sortV[i]).h + gapV;
+        }
+        return prev.map(function(it) {
+          if (mappaV[it.istanza_id] !== undefined) return Object.assign({}, it, { pos_y: Math.round(mappaV[it.istanza_id]) });
+          return it;
+        });
+      });
+      setLayoutModificato(true);
+      return;
+    }
+    setLayoutTemp(function(prev) {
+      return prev.map(function(it) {
+        if (selezionatiEditor.indexOf(it.istanza_id) < 0) return it;
+        var dim = getDimensioniEffettive(it);
+        if (tipo === 'sinistra') return Object.assign({}, it, { pos_x: val });
+        if (tipo === 'destra') return Object.assign({}, it, { pos_x: Math.max(0, val - dim.w) });
+        if (tipo === 'alto') return Object.assign({}, it, { pos_y: val });
+        if (tipo === 'basso') return Object.assign({}, it, { pos_y: Math.max(0, val - dim.h) });
+        if (tipo === 'centro_h') return Object.assign({}, it, { pos_x: Math.round(val - dim.w / 2) });
+        if (tipo === 'centro_v') return Object.assign({}, it, { pos_y: Math.round(val - dim.h / 2) });
+        return it;
+      });
+    });
+    setLayoutModificato(true);
+  }
+
   // ── OSTACOLI ─────────────────────────────────────────────────
 
   function cellaFromEvent(e, ref) {
@@ -1280,6 +1382,9 @@ export default function SalePage() {
     var borderRadiusTavolo = isRound ? '50%' : ((t.border_radius || 0) + 'px');
     var rotAttuale = (layoutItem.rotazione === null || layoutItem.rotazione === undefined) ? 0 : Number(layoutItem.rotazione);
 
+    // Selezione multipla editor
+    var isSelezionatoMult = selezionatiEditor.indexOf(layoutItem.istanza_id) >= 0;
+
     // Evidenziazione in modalita unione
     var isPrimo = tavoloSelezionato && tavoloSelezionato.istanza_id === layoutItem.istanza_id;
     var isSecondo = secondoTavoloUnione && secondoTavoloUnione.istanza_id === layoutItem.istanza_id;
@@ -1304,7 +1409,10 @@ export default function SalePage() {
 
     return (
       <div key={layoutItem.istanza_id}
-        onMouseDown={editorMode ? function(e) { onMouseDownTavolo(e, layoutItem); } : (modalitaUnione === 'posiziona' && isSecondo ? onMouseDownSecondoTavolo : undefined)}
+        onMouseDown={editorMode ? function(e) {
+          if (modalitaSelezioneMult) { e.preventDefault(); toggleSelezioneTavolo(layoutItem.istanza_id); return; }
+          onMouseDownTavolo(e, layoutItem);
+        } : (modalitaUnione === 'posiziona' && isSecondo ? onMouseDownSecondoTavolo : undefined)}
         onClick={!editorMode ? function() {
           // In modalita scegli secondo tavolo
           if (modalitaUnione === 'scegli') {
@@ -1331,7 +1439,7 @@ export default function SalePage() {
             <SedieSVG w={w + pad * 2} h={h + pad * 2} capacita={t.capacita} forma={t.forma} colore={bgColor} />
           </div>
         )}
-        <div style={{ position: 'relative', width: w + 'px', height: h + 'px', backgroundColor: bgColor, borderRadius: borderRadiusTavolo, boxShadow: editorMode ? (suOstacolo ? '0 0 0 3px #EF4444' : '0 2px 6px rgba(0,0,0,0.25)') : boxShadowMappa, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white', overflow: 'hidden' }}>
+        <div style={{ position: 'relative', width: w + 'px', height: h + 'px', backgroundColor: bgColor, borderRadius: borderRadiusTavolo, boxShadow: editorMode ? (isSelezionatoMult ? '0 0 0 4px #6366F1, 0 0 0 7px rgba(99,102,241,0.25)' : suOstacolo ? '0 0 0 3px #EF4444' : '0 2px 6px rgba(0,0,0,0.25)') : boxShadowMappa, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white', overflow: 'hidden' }}>
           {/* Etichetta strutturale (T50) — sempre visibile in alto */}
           {labelVisibile !== '' && (
             <span style={{ fontSize: '13px', fontWeight: '900', textShadow: '0 1px 3px rgba(0,0,0,0.5)', textAlign: 'center', padding: '0 2px', letterSpacing: '0.02em', lineHeight: 1.1 }}>{labelVisibile}</span>
@@ -1552,11 +1660,13 @@ export default function SalePage() {
             var tavoliAssegnati = [];
             for (var a = 0; a < assegnazioni.length; a++) {
               assegnatiTot += (assegnazioni[a].n_ospiti_assegnati || 0);
-              // Trova etichetta strutturale dell'istanza
-              var labelT = assegnazioni[a].istanza_id;
+              // Trova etichetta strutturale dell'istanza (es. S050) — NON il nome tipologia
+              var labelT = '?';
               for (var la = 0; la < layoutAttivo.length; la++) {
                 if (layoutAttivo[la].istanza_id === assegnazioni[a].istanza_id) {
-                  labelT = (layoutAttivo[la].etichetta && layoutAttivo[la].etichetta.trim()) ? layoutAttivo[la].etichetta.trim() : (layoutAttivo[la].tavolo ? layoutAttivo[la].tavolo.nome : assegnazioni[a].istanza_id);
+                  labelT = (layoutAttivo[la].etichetta && layoutAttivo[la].etichetta.trim())
+                    ? layoutAttivo[la].etichetta.trim()
+                    : ('#' + assegnazioni[a].istanza_id.slice(0, 6));
                   break;
                 }
               }
@@ -1835,7 +1945,47 @@ export default function SalePage() {
             {renderSliderGriglia()}
             {layoutModificato && <button onClick={salvaLayout} style={{ background: '#10B981', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 18px', fontSize: '14px', cursor: 'pointer', fontWeight: '700' }}>Salva layout</button>}
             <button onClick={function() { setShowSalvaBase(true); setNomeLayoutBase(''); setDescLayoutBase(''); }} style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '7px 14px', fontSize: '13px', cursor: 'pointer', fontWeight: '600' }}>📐 Salva come layout base</button>
+            <button
+              onClick={function() { setModalitaSelezioneMult(function(prev) { if (prev) setSelezionatiEditor([]); return !prev; }); }}
+              style={{ padding: '7px 14px', borderRadius: '8px', border: '2px solid', fontSize: '13px', cursor: 'pointer', fontWeight: '700', background: modalitaSelezioneMult ? '#6366F1' : 'white', color: modalitaSelezioneMult ? 'white' : '#6366F1', borderColor: '#6366F1' }}
+            >
+              ☑ {modalitaSelezioneMult ? 'Sel. multipla ON' : 'Sel. multipla'}
+            </button>
           </div>
+
+          {/* Toolbar allineamento — visibile solo con ≥2 tavoli selezionati */}
+          {modalitaSelezioneMult && selezionatiEditor.length >= 2 && (
+            <div style={{ marginBottom: '10px', padding: '10px 14px', background: '#EEF2FF', border: '1px solid #C7D2FE', borderRadius: '10px', display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+              <span style={{ fontSize: '12px', fontWeight: '700', color: '#3730A3', marginRight: '4px' }}>
+                {selezionatiEditor.length} selezionati — Allinea:
+              </span>
+              {[
+                { tipo: 'sinistra',  label: '⬅ Sinistra' },
+                { tipo: 'centro_h', label: '↔ Centro H' },
+                { tipo: 'destra',   label: '➡ Destra'   },
+                { tipo: 'alto',     label: '⬆ Alto'      },
+                { tipo: 'centro_v', label: '↕ Centro V'  },
+                { tipo: 'basso',    label: '⬇ Basso'     },
+                { tipo: 'distrib_h',label: '⇔ Distrib H' },
+                { tipo: 'distrib_v',label: '⇕ Distrib V' }
+              ].map(function(a) {
+                return (
+                  <button key={a.tipo} onClick={function() { allineaSelezionati(a.tipo); }} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid #A5B4FC', background: 'white', color: '#3730A3', fontSize: '12px', cursor: 'pointer', fontWeight: '700' }}>
+                    {a.label}
+                  </button>
+                );
+              })}
+              <button onClick={function() { setSelezionatiEditor([]); }} style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid #C7D2FE', background: 'white', color: '#6B7280', fontSize: '12px', cursor: 'pointer', marginLeft: '4px' }}>
+                Deseleziona tutti
+              </button>
+            </div>
+          )}
+
+          {modalitaSelezioneMult && selezionatiEditor.length < 2 && (
+            <div style={{ marginBottom: '10px', padding: '8px 14px', background: '#EEF2FF', border: '1px dashed #A5B4FC', borderRadius: '8px', fontSize: '12px', color: '#4338CA' }}>
+              Clicca sui tavoli per selezionarli (selezionati: {selezionatiEditor.length}). Seleziona ≥2 per allineare.
+            </div>
+          )}
           {renderLegendaOstacoli()}
           <div style={stileViewport()}>
             <div ref={gridRef} onMouseMove={onMouseMoveGrid} onMouseUp={onMouseUpGrid} onMouseLeave={onMouseUpGrid} style={stileCanvas()}>
@@ -2268,6 +2418,25 @@ export default function SalePage() {
                     Area: {formSala.grid_cols / 10}m x {formSala.grid_rows / 10}m
                   </div>
                 </div>
+                <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: '10px', padding: '14px' }}>
+                  <div style={{ fontSize: '13px', fontWeight: '700', color: '#166534', marginBottom: '6px' }}>Numerazione automatica tavoli</div>
+                  <div style={{ fontSize: '12px', color: '#6B7280', marginBottom: '10px' }}>Quando aggiungi un tavolo, l'etichetta viene generata automaticamente come prefisso + numero (es. "S" + 50 → "S050").</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', color: '#374151', marginBottom: '4px', fontWeight: '700' }}>Prefisso <span style={{ color: '#9CA3AF', fontWeight: '400' }}>opzionale</span></label>
+                      <input type="text" maxLength="4" value={formSala.prefisso_tavolo} onChange={function(e) { setFormSala(Object.assign({}, formSala, { prefisso_tavolo: e.target.value })); }} style={{ width: '100%', padding: '9px', border: '1px solid #86EFAC', borderRadius: '7px', fontSize: '14px', boxSizing: 'border-box', fontWeight: '700', textTransform: 'uppercase' }} placeholder="es. S, T, V" />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '12px', color: '#374151', marginBottom: '4px', fontWeight: '700' }}>Numero iniziale</label>
+                      <input type="number" min="1" max="999" value={formSala.numero_iniziale} onChange={function(e) { setFormSala(Object.assign({}, formSala, { numero_iniziale: parseInt(e.target.value) || 1 })); }} style={{ width: '100%', padding: '9px', border: '1px solid #86EFAC', borderRadius: '7px', fontSize: '14px', boxSizing: 'border-box', fontWeight: '700' }} />
+                    </div>
+                  </div>
+                  {formSala.prefisso_tavolo.trim() && (
+                    <div style={{ fontSize: '11px', color: '#166534', marginTop: '8px', fontWeight: '700' }}>
+                      Anteprima: {formSala.prefisso_tavolo.toUpperCase()}{String(formSala.numero_iniziale || 1).padStart(3, '0')}, {formSala.prefisso_tavolo.toUpperCase()}{String((formSala.numero_iniziale || 1) + 1).padStart(3, '0')}, {formSala.prefisso_tavolo.toUpperCase()}{String((formSala.numero_iniziale || 1) + 2).padStart(3, '0')}...
+                    </div>
+                  )}
+                </div>
               </div>
               <div style={{ display: 'flex', gap: '10px', marginTop: '22px' }}>
                 <button onClick={salvaSala} style={{ flex: 1, background: '#10B981', color: 'white', border: 'none', borderRadius: '8px', padding: '12px', fontSize: '15px', cursor: 'pointer', fontWeight: '800' }}>Salva</button>
@@ -2291,8 +2460,7 @@ export default function SalePage() {
   }
 
   var TABS = [
-    { key: 'mappa',        label: 'Mappa servizio',     admin: false },
-    { key: 'editor',       label: 'Editor layout',      admin: true  },
+    { key: 'mappa',        label: 'Mappa sala',         admin: false },
     { key: 'ostacoli',     label: 'Editor ostacoli',    admin: true  },
     { key: 'gestione',     label: 'Gestione tipologie', admin: true  },
     { key: 'impostazioni', label: 'Impostazioni sala',  admin: true  }
@@ -2314,7 +2482,7 @@ export default function SalePage() {
         })}
       </div>
 
-      {(tab === 'mappa' || tab === 'editor' || tab === 'ostacoli') && (
+      {(tab === 'mappa' || tab === 'ostacoli') && (
         <div style={{ display: 'flex', gap: '10px', marginBottom: '20px', flexWrap: 'wrap', alignItems: 'center' }}>
           <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
             {sale.map(function(s) {
@@ -2323,7 +2491,7 @@ export default function SalePage() {
               );
             })}
           </div>
-          {(tab === 'mappa' || tab === 'editor') && (
+          {tab === 'mappa' && (
             <>
               <input type="date" value={dataSelezionata} onChange={function(e) { setDataSelezionata(e.target.value); setPannelloAperto(false); }} style={{ padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px' }} />
               <div style={{ display: 'flex', gap: '3px', background: '#f3f4f6', borderRadius: '8px', padding: '3px' }}>
@@ -2335,13 +2503,20 @@ export default function SalePage() {
                   );
                 })}
               </div>
+              {isAdmin && (
+                <button
+                  onClick={function() { setEditorModeAttivo(function(prev) { return !prev; }); setSelezionatiEditor([]); }}
+                  style={{ padding: '8px 16px', borderRadius: '8px', border: '2px solid', fontSize: '13px', cursor: 'pointer', fontWeight: '700', background: editorModeAttivo ? '#F59E0B' : 'white', color: editorModeAttivo ? 'white' : '#92400E', borderColor: editorModeAttivo ? '#F59E0B' : '#FDE68A' }}
+                >
+                  ✏️ {editorModeAttivo ? 'Esci da editor' : 'Modalità editor'}
+                </button>
+              )}
             </>
           )}
         </div>
       )}
 
-      {tab === 'mappa'        && renderTabMappa()}
-      {tab === 'editor'       && isAdmin && renderTabEditor()}
+      {tab === 'mappa'        && (editorModeAttivo && isAdmin ? renderTabEditor() : renderTabMappa())}
       {tab === 'ostacoli'     && isAdmin && renderTabOstacoli()}
       {tab === 'gestione'     && isAdmin && renderTabGestione()}
       {tab === 'impostazioni' && isAdmin && renderTabImpostazioni()}
