@@ -682,7 +682,11 @@ export default function SalePage() {
     setLayoutModificato(true);
   }
 
-  function onMouseUpGrid() { setDraggingIstanza(null); }
+  function onMouseUpGrid() {
+    setDraggingIstanza(null);
+    // Dopo ogni spostamento rinumera tutto il layout per posizione
+    setLayoutTemp(function(prev) { return rinumeraLayoutPerPosizione(prev); });
+  }
 
   function ruotaIstanzaInLayout(istanzaId) {
     setLayoutTemp(function(prev) {
@@ -701,13 +705,17 @@ export default function SalePage() {
     setLayoutModificato(true);
   }
 
-  // Rimozione immediata dal DB — usa istanza_id
+  // Rimozione immediata dal DB — usa istanza_id, poi rinumera
   function rimuoviIstanzaDB(layoutItem) {
     var label = (layoutItem.etichetta && layoutItem.etichetta.trim()) ? layoutItem.etichetta : (layoutItem.tavolo ? layoutItem.tavolo.nome : 'tavolo');
     if (!window.confirm('Rimuovere "' + label + '" dal layout?')) return;
     supabase.from('layout_sala').delete().eq('istanza_id', layoutItem.istanza_id).then(function(result) {
       if (result.error) { alert('Errore: ' + result.error.message); return; }
-      caricaLayout(salaSelezionata);
+      // Rimuovi dal layoutTemp e rinumera
+      setLayoutTemp(function(prev) {
+        var senzaRimosso = prev.filter(function(it) { return it.istanza_id !== layoutItem.istanza_id; });
+        return rinumeraLayoutPerPosizione(senzaRimosso);
+      });
       caricaIstanzePerTipologia();
     });
   }
@@ -747,27 +755,78 @@ export default function SalePage() {
     });
   }
 
-  // Genera il prossimo suggerimento etichetta automatica basato su prefisso sala
-  function generaProssimaEtichetta() {
+  // Recupera prefisso e numero_iniziale della sala corrente
+  function getDatiPrefissoSala() {
     var salaDati = null;
     for (var i = 0; i < sale.length; i++) {
       if (sale[i].id === salaSelezionata) { salaDati = sale[i]; break; }
     }
     var prefisso = (salaDati && salaDati.prefisso_tavolo) ? salaDati.prefisso_tavolo.trim().toUpperCase() : '';
     var numInizio = (salaDati && salaDati.numero_iniziale) ? parseInt(salaDati.numero_iniziale) : 1;
-    if (!prefisso) return '';
-    // Trova tutti i numeri già usati con questo prefisso nel layoutTemp
-    var usati = {};
-    for (var j = 0; j < layoutTemp.length; j++) {
-      var et = (layoutTemp[j].etichetta || '').trim().toUpperCase();
-      if (et.indexOf(prefisso) === 0) {
-        var numParte = parseInt(et.slice(prefisso.length));
-        if (!isNaN(numParte)) usati[numParte] = true;
+    return { prefisso: prefisso, numInizio: numInizio };
+  }
+
+  // Rinumerazione automatica per posizione: raggruppa in colonne per pos_x,
+  // ordina ogni colonna per pos_y, assegna numeri colonna*10+riga
+  function rinumeraLayoutPerPosizione(layout) {
+    var dati = getDatiPrefissoSala();
+    var prefisso = dati.prefisso;
+    var numInizio = dati.numInizio;
+    if (!prefisso || layout.length === 0) return layout;
+
+    // Calcola larghezza media per soglia colonna
+    var soglia = 4; // default celle
+    if (layout.length > 0) {
+      var largMax = 0;
+      for (var i = 0; i < layout.length; i++) {
+        var lw = (layout[i].tavolo && layout[i].tavolo.larghezza) ? layout[i].tavolo.larghezza : 2;
+        if (lw > largMax) largMax = lw;
+      }
+      soglia = Math.max(2, Math.floor(largMax / 2));
+    }
+
+    // Raggruppa per colonna: ordina per pos_x, poi aggrega tavoli con pos_x simile
+    var sorted = layout.slice().sort(function(a, b) { return a.pos_x - b.pos_x; });
+    var colonne = []; // array di array di layoutItem
+
+    for (var j = 0; j < sorted.length; j++) {
+      var item = sorted[j];
+      var trovato = false;
+      for (var c = 0; c < colonne.length; c++) {
+        var refX = colonne[c][0].pos_x;
+        if (Math.abs(item.pos_x - refX) <= soglia) {
+          colonne[c].push(item);
+          trovato = true;
+          break;
+        }
+      }
+      if (!trovato) colonne.push([item]);
+    }
+
+    // Ordina colonne per pos_x medio crescente (sinistra → destra)
+    colonne.sort(function(a, b) {
+      var avgA = a.reduce(function(s, it) { return s + it.pos_x; }, 0) / a.length;
+      var avgB = b.reduce(function(s, it) { return s + it.pos_x; }, 0) / b.length;
+      return avgA - avgB;
+    });
+
+    // Per ogni colonna ordina per pos_y (alto → basso) e assegna etichette
+    var nuoveEtichette = {};
+    for (var ci = 0; ci < colonne.length; ci++) {
+      var col = colonne[ci].slice().sort(function(a, b) { return a.pos_y - b.pos_y; });
+      var baseNum = numInizio + ci * 10;
+      for (var ri = 0; ri < col.length; ri++) {
+        nuoveEtichette[col[ri].istanza_id] = prefisso + String(baseNum + ri).padStart(3, '0');
       }
     }
-    var n = numInizio;
-    while (usati[n]) n++;
-    return prefisso + String(n).padStart(3, '0');
+
+    // Restituisce layout con etichette aggiornate
+    return layout.map(function(it) {
+      if (nuoveEtichette[it.istanza_id] !== undefined) {
+        return Object.assign({}, it, { etichetta: nuoveEtichette[it.istanza_id] });
+      }
+      return it;
+    });
   }
 
   // Aggiunge una nuova istanza al layoutTemp — genera un nuovo istanza_id univoco
@@ -781,7 +840,7 @@ export default function SalePage() {
       return;
     }
     setTavoloInAttesaEtichetta(tavoloSnap);
-    setEtichettaInput(generaProssimaEtichetta());
+    setEtichettaInput('');
     setShowModaleEtichetta(true);
   }
 
@@ -790,7 +849,7 @@ export default function SalePage() {
     if (!tavolo) return;
     var nuovoIstanzaId = generaUUID();
     setLayoutTemp(function(prev) {
-      return prev.concat([{
+      var nuovoLayout = prev.concat([{
         istanza_id: nuovoIstanzaId,
         id: null,
         sala_id: salaSelezionata,
@@ -798,10 +857,12 @@ export default function SalePage() {
         tavolo: tavolo,
         pos_x: 0, pos_y: 0,
         rotazione: 0,
-        etichetta: etichettaInput.trim(),
+        etichetta: '',
         data_validita_dal: new Date().toISOString().split('T')[0],
         nuovo: true
       }]);
+      // Rinumera tutto il layout per posizione (il nuovo tavolo è in pos 0,0, verrà spostato poi)
+      return rinumeraLayoutPerPosizione(nuovoLayout);
     });
     setLayoutModificato(true);
     setShowModaleEtichetta(false);
@@ -1957,6 +2018,9 @@ export default function SalePage() {
             {renderSliderGriglia()}
             {layoutModificato && <button onClick={salvaLayout} style={{ background: '#10B981', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 18px', fontSize: '14px', cursor: 'pointer', fontWeight: '700' }}>Salva layout</button>}
             <button onClick={function() { setShowSalvaBase(true); setNomeLayoutBase(''); setDescLayoutBase(''); }} style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '7px 14px', fontSize: '13px', cursor: 'pointer', fontWeight: '600' }}>📐 Salva come layout base</button>
+            {getDatiPrefissoSala().prefisso && (
+              <button onClick={function() { setLayoutTemp(function(prev) { return rinumeraLayoutPerPosizione(prev); }); setLayoutModificato(true); }} style={{ background: '#FEF3C7', color: '#92400E', border: '1px solid #FDE68A', borderRadius: '8px', padding: '7px 14px', fontSize: '13px', cursor: 'pointer', fontWeight: '600' }}>🔢 Rinumera tutto</button>
+            )}
             <button
               onClick={function() { setModalitaSelezioneMult(function(prev) { if (prev) setSelezionatiEditor([]); return !prev; }); }}
               style={{ padding: '7px 14px', borderRadius: '8px', border: '2px solid', fontSize: '13px', cursor: 'pointer', fontWeight: '700', background: modalitaSelezioneMult ? '#6366F1' : 'white', color: modalitaSelezioneMult ? 'white' : '#6366F1', borderColor: '#6366F1' }}
