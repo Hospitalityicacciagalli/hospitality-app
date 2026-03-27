@@ -262,6 +262,24 @@ export default function SalePage() {
     }
   }, [salaSelezionata, dataSelezionata, turnoSelezionato]);
 
+  // Quando le unioni cambiano, rinumera il layout visivo di conseguenza
+  useEffect(function() {
+    if (layoutAttivo.length > 0) {
+      var nuovoLayout = rinumeraConUnioni(layoutAttivo, tavoliUniti);
+      // Aggiorna solo se le etichette sono effettivamente cambiate
+      var cambiato = false;
+      for (var i = 0; i < nuovoLayout.length; i++) {
+        var vecchia = (layoutAttivo[i] && layoutAttivo[i].etichetta) || '';
+        var nuova = nuovoLayout[i].etichetta || '';
+        if (vecchia !== nuova) { cambiato = true; break; }
+      }
+      if (cambiato) {
+        setLayoutAttivo(nuovoLayout);
+        setLayoutTemp(nuovoLayout.map(function(r) { return Object.assign({}, r); }));
+      }
+    }
+  }, [tavoliUniti]);
+
   function aggiornaDimensioniGriglia(salaId) {
     var s = null;
     for (var i = 0; i < sale.length; i++) {
@@ -1145,12 +1163,114 @@ export default function SalePage() {
     setDraggingIstanza(null);
   }
 
+  // Calcola la rinumerazione del layoutAttivo tenendo conto delle unioni attive:
+  // i tavoli secondari perdono l'etichetta, gli altri vengono rinumerati per posizione
+  // saltando i buchi lasciati dai secondari nella loro colonna
+  function rinumeraConUnioni(layoutCorrente, unioniCorrente) {
+    var dati = getDatiPrefissoSala();
+    var prefisso = dati.prefisso;
+    var numInizio = dati.numInizio;
+    if (!prefisso || layoutCorrente.length === 0) return layoutCorrente;
+
+    // Identifica i secondari
+    var secondari = {};
+    for (var u = 0; u < unioniCorrente.length; u++) {
+      if (unioniCorrente[u].attivo !== false) {
+        secondari[unioniCorrente[u].istanza_secondaria_id] = true;
+      }
+    }
+
+    // Calcola soglia colonna
+    var soglia = 4;
+    var largMax = 0;
+    for (var i = 0; i < layoutCorrente.length; i++) {
+      var lw = (layoutCorrente[i].tavolo && layoutCorrente[i].tavolo.larghezza) ? layoutCorrente[i].tavolo.larghezza : 2;
+      if (lw > largMax) largMax = lw;
+    }
+    soglia = Math.max(2, Math.floor(largMax / 2));
+
+    // Raggruppa per colonna
+    var sorted = layoutCorrente.slice().sort(function(a, b) { return a.pos_x - b.pos_x; });
+    var colonne = [];
+    for (var j = 0; j < sorted.length; j++) {
+      var item = sorted[j];
+      var trovato = false;
+      for (var c = 0; c < colonne.length; c++) {
+        if (Math.abs(item.pos_x - colonne[c][0].pos_x) <= soglia) {
+          colonne[c].push(item); trovato = true; break;
+        }
+      }
+      if (!trovato) colonne.push([item]);
+    }
+
+    // Ordina colonne sinistra → destra
+    colonne.sort(function(a, b) {
+      var avgA = a.reduce(function(s, it) { return s + it.pos_x; }, 0) / a.length;
+      var avgB = b.reduce(function(s, it) { return s + it.pos_x; }, 0) / b.length;
+      return avgA - avgB;
+    });
+
+    // Assegna etichette: i secondari = null, i principali numerati in sequenza
+    var nuoveEtichette = {};
+    for (var ci = 0; ci < colonne.length; ci++) {
+      var col = colonne[ci].slice().sort(function(a, b) { return a.pos_y - b.pos_y; });
+      var baseNum = numInizio + ci * 10;
+      var contatore = 0;
+      for (var ri = 0; ri < col.length; ri++) {
+        var it = col[ri];
+        if (secondari[it.istanza_id]) {
+          nuoveEtichette[it.istanza_id] = null; // secondario: etichetta vuota
+        } else {
+          nuoveEtichette[it.istanza_id] = prefisso + String(baseNum + contatore).padStart(3, '0');
+          contatore++;
+        }
+      }
+    }
+
+    return layoutCorrente.map(function(it) {
+      if (nuoveEtichette[it.istanza_id] !== undefined) {
+        return Object.assign({}, it, { etichetta: nuoveEtichette[it.istanza_id] || '' });
+      }
+      return it;
+    });
+  }
+
+  // Salva le etichette aggiornate nel DB (layout_sala) per la sala corrente
+  function salvaEtichetteLayoutDB(nuovoLayout) {
+    var oggi = new Date().toISOString().split('T')[0];
+    // Cancella e reinserisce tutto il layout con le nuove etichette
+    supabase.from('layout_sala').delete().eq('sala_id', salaSelezionata).then(function(del) {
+      if (del.error) { console.error('Errore pulizia layout:', del.error.message); return; }
+      var righe = nuovoLayout.map(function(item) {
+        var rot = (item.rotazione === null || item.rotazione === undefined) ? 0 : Number(item.rotazione);
+        return {
+          sala_id: salaSelezionata,
+          tavolo_id: item.tavolo_id,
+          pos_x: item.pos_x,
+          pos_y: item.pos_y,
+          rotazione: rot,
+          etichetta: item.etichetta || null,
+          istanza_id: item.istanza_id,
+          data_validita_dal: oggi
+        };
+      });
+      if (righe.length === 0) return;
+      supabase.from('layout_sala').insert(righe).then(function(ins) {
+        if (ins.error) console.error('Errore salvataggio etichette:', ins.error.message);
+      });
+    });
+  }
+
   function confermaUnione() {
     if (!tavoloSelezionato || !secondoTavoloUnione) return;
+
+    var steps = [];
+
+    // Se il secondo tavolo è stato spostato, aggiorna posizione nel DB
     if (posizioneOriginaleUnione &&
         (secondoTavoloUnione.pos_x !== posizioneOriginaleUnione.x ||
          secondoTavoloUnione.pos_y !== posizioneOriginaleUnione.y)) {
-      supabase.from('layout_sala').insert({
+      steps.push(supabase.from('layout_sala').insert({
         sala_id: salaSelezionata,
         tavolo_id: secondoTavoloUnione.tavolo_id,
         pos_x: secondoTavoloUnione.pos_x,
@@ -1159,29 +1279,55 @@ export default function SalePage() {
         etichetta: secondoTavoloUnione.etichetta || null,
         istanza_id: secondoTavoloUnione.istanza_id,
         data_validita_dal: new Date().toISOString().split('T')[0]
-      }).then(function() {});
+      }));
     }
-    supabase.from('tavoli_uniti').insert({
-      tavolo_principale_id: tavoloSelezionato.tavolo_id,
-      tavolo_secondario_id: secondoTavoloUnione.tavolo_id,
-      istanza_principale_id: tavoloSelezionato.istanza_id,
-      istanza_secondaria_id: secondoTavoloUnione.istanza_id,
-      data: dataSelezionata,
-      turno: turnoSelezionato,
-      attivo: true,
-      capacita_unione: parseInt(unioneCapienza) || 0
-    }).then(function(result) {
-      if (result.error) { alert('Errore: ' + result.error.message); return; }
-      caricaTavoliUniti();
-      setModalitaUnione(false);
-      setSecondoTavoloUnione(null);
-      setPosizioneOriginaleUnione(null);
-      setPannelloAperto(false);
+
+    Promise.all(steps).then(function() {
+      supabase.from('tavoli_uniti').insert({
+        tavolo_principale_id: tavoloSelezionato.tavolo_id,
+        tavolo_secondario_id: secondoTavoloUnione.tavolo_id,
+        istanza_principale_id: tavoloSelezionato.istanza_id,
+        istanza_secondaria_id: secondoTavoloUnione.istanza_id,
+        data: dataSelezionata,
+        turno: turnoSelezionato,
+        attivo: true,
+        capacita_unione: parseInt(unioneCapienza) || 0
+      }).then(function(result) {
+        if (result.error) { alert('Errore: ' + result.error.message); return; }
+
+        // Rinumera il layout tenendo conto della nuova unione
+        var nuoveUnioni = tavoliUniti.concat([{
+          istanza_principale_id: tavoloSelezionato.istanza_id,
+          istanza_secondaria_id: secondoTavoloUnione.istanza_id,
+          attivo: true
+        }]);
+        var nuovoLayout = rinumeraConUnioni(layoutAttivo, nuoveUnioni);
+        setLayoutAttivo(nuovoLayout);
+        setLayoutTemp(nuovoLayout.map(function(r) { return Object.assign({}, r); }));
+        salvaEtichetteLayoutDB(nuovoLayout);
+
+        caricaTavoliUniti();
+        setModalitaUnione(false);
+        setSecondoTavoloUnione(null);
+        setPosizioneOriginaleUnione(null);
+        setPannelloAperto(false);
+      });
     });
   }
 
   function sciogliUnione(unioneId) {
-    supabase.from('tavoli_uniti').update({ attivo: false }).eq('id', unioneId).then(function() { caricaTavoliUniti(); });
+    supabase.from('tavoli_uniti').update({ attivo: false }).eq('id', unioneId).then(function(result) {
+      if (result.error) { alert('Errore: ' + result.error.message); return; }
+
+      // Rinumera il layout senza questa unione
+      var unioniRimanenti = tavoliUniti.filter(function(u) { return u.id !== unioneId; });
+      var nuovoLayout = rinumeraConUnioni(layoutAttivo, unioniRimanenti);
+      setLayoutAttivo(nuovoLayout);
+      setLayoutTemp(nuovoLayout.map(function(r) { return Object.assign({}, r); }));
+      salvaEtichetteLayoutDB(nuovoLayout);
+
+      caricaTavoliUniti();
+    });
   }
 
   function confermaAssegna() {
