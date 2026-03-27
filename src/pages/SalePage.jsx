@@ -325,42 +325,73 @@ export default function SalePage() {
 
   // Carica il numero totale di istanze per ogni tipologia in tutti i layout attivi
   function caricaIstanzePerTipologia() {
-    supabase.from('layout_sala').select('tavolo_id, sala_id, istanza_id, data_validita_dal').order('data_validita_dal', { ascending: false }).then(function(result) {
-      if (result.error) return;
-      var vistiIstanza = {};
-      var contatore = {};
-      var rows = result.data || [];
-      for (var i = 0; i < rows.length; i++) {
-        var r = rows[i];
-        var chiave = r.istanza_id || (r.tavolo_id + '_' + r.sala_id + '_' + i);
-        if (!vistiIstanza[chiave]) {
-          vistiIstanza[chiave] = true;
-          if (!contatore[r.tavolo_id]) contatore[r.tavolo_id] = 0;
-          contatore[r.tavolo_id]++;
+    // Conta le istanze per data+turno correnti (per alert disponibilità multi-sala)
+    var dataCorr = dataSelezionata;
+    var turnoCorr = turnoSelezionato;
+    supabase.from('layout_sala')
+      .select('tavolo_id, sala_id, istanza_id, data_validita_dal, turno')
+      .or('turno.eq.' + turnoCorr + ',turno.eq.tutti,turno.is.null')
+      .order('data_validita_dal', { ascending: false })
+      .then(function(result) {
+        if (result.error) return;
+        var vistiIstanza = {};
+        var contatore = {};
+        var rows = result.data || [];
+        for (var i = 0; i < rows.length; i++) {
+          var r = rows[i];
+          // Considera solo righe valide per la data corrente
+          if (r.data_validita_dal > dataCorr) continue;
+          var chiave = r.istanza_id || (r.tavolo_id + '_' + r.sala_id + '_' + i);
+          if (!vistiIstanza[chiave]) {
+            vistiIstanza[chiave] = true;
+            if (!contatore[r.tavolo_id]) contatore[r.tavolo_id] = 0;
+            contatore[r.tavolo_id]++;
+          }
         }
-      }
-      setIstanzePerTipologia(contatore);
-    });
+        setIstanzePerTipologia(contatore);
+      });
   }
 
-  // caricaLayout: ogni riga del DB diventa un layoutItem con istanza_id come chiave
+  // caricaLayout: carica il layout per sala+data+turno
+  // Priorità: 1) esatta corrispondenza data+turno, 2) data+turno='tutti', 3) data<=oggi+turno='tutti'
   function caricaLayout(salaId) {
-    supabase.from('layout_sala').select('*, tavolo:tavoli(*)').eq('sala_id', salaId).lte('data_validita_dal', dataSelezionata).order('data_validita_dal', { ascending: false }).then(function(result) {
-      if (result.error) { setErrore(result.error.message); return; }
-      var vistiIstanza = {};
-      var layout = [];
-      var rows = result.data || [];
-      for (var i = 0; i < rows.length; i++) {
-        var r = rows[i];
-        var iid = r.istanza_id || r.id;
-        if (!vistiIstanza[iid]) {
-          vistiIstanza[iid] = true;
-          layout.push(Object.assign({}, r, { istanza_id: iid }));
+    var turnoCorrente = turnoSelezionato;
+    var dataCorrente = dataSelezionata;
+    // Carica tutte le righe per questa sala (anche vecchie) per trovare il layout più adatto
+    supabase.from('layout_sala').select('*, tavolo:tavoli(*)')
+      .eq('sala_id', salaId)
+      .order('data_validita_dal', { ascending: false })
+      .then(function(result) {
+        if (result.error) { setErrore(result.error.message); return; }
+        var rows = result.data || [];
+        // Filtra: cerca prima layout per data+turno esatti
+        var righeEsatte = rows.filter(function(r) {
+          return r.data_validita_dal === dataCorrente && (r.turno === turnoCorrente);
+        });
+        // Fallback: layout per data esatta con turno='tutti'
+        var righeTutti = rows.filter(function(r) {
+          return r.data_validita_dal === dataCorrente && (r.turno === 'tutti' || !r.turno);
+        });
+        // Fallback finale: layout più recente con turno='tutti' prima di questa data
+        var righeStoriche = rows.filter(function(r) {
+          return r.data_validita_dal <= dataCorrente && (r.turno === 'tutti' || !r.turno);
+        });
+        // Scegli il gruppo con priorità
+        var righeDaUsare = righeEsatte.length > 0 ? righeEsatte : (righeTutti.length > 0 ? righeTutti : righeStoriche);
+        // Deduplica per istanza_id tenendo la riga più recente
+        var vistiIstanza = {};
+        var layout = [];
+        for (var i = 0; i < righeDaUsare.length; i++) {
+          var r = righeDaUsare[i];
+          var iid = r.istanza_id || r.id;
+          if (!vistiIstanza[iid]) {
+            vistiIstanza[iid] = true;
+            layout.push(Object.assign({}, r, { istanza_id: iid }));
+          }
         }
-      }
-      setLayoutAttivo(layout);
-      setLayoutTemp(layout.map(function(r) { return Object.assign({}, r); }));
-    });
+        setLayoutAttivo(layout);
+        setLayoutTemp(layout.map(function(r) { return Object.assign({}, r); }));
+      });
   }
 
   function caricaOstacoli(salaId) {
@@ -710,36 +741,44 @@ export default function SalePage() {
   // Salva layout — cancella tutte le righe esistenti della sala, poi inserisce
   function salvaLayout() {
     var oggi = new Date().toISOString().split('T')[0];
-    supabase.from('layout_sala').delete().eq('sala_id', salaSelezionata).then(function(delResult) {
-      if (delResult.error) { alert('Errore nella pulizia del layout: ' + delResult.error.message); return; }
-      var righe = layoutTemp.map(function(item) {
-        var rot = (item.rotazione === null || item.rotazione === undefined) ? 0 : Number(item.rotazione);
-        return {
-          sala_id: salaSelezionata,
-          tavolo_id: item.tavolo_id,
-          pos_x: item.pos_x,
-          pos_y: item.pos_y,
-          rotazione: rot,
-          etichetta: item.etichetta || null,
-          istanza_id: item.istanza_id,
-          data_validita_dal: oggi
-        };
+    var turnoCorrente = turnoSelezionato;
+    // Cancella solo le righe per questa sala+data+turno specifici
+    supabase.from('layout_sala')
+      .delete()
+      .eq('sala_id', salaSelezionata)
+      .eq('data_validita_dal', oggi)
+      .eq('turno', turnoCorrente)
+      .then(function(delResult) {
+        if (delResult.error) { alert('Errore nella pulizia del layout: ' + delResult.error.message); return; }
+        var righe = layoutTemp.map(function(item) {
+          var rot = (item.rotazione === null || item.rotazione === undefined) ? 0 : Number(item.rotazione);
+          return {
+            sala_id: salaSelezionata,
+            tavolo_id: item.tavolo_id,
+            pos_x: item.pos_x,
+            pos_y: item.pos_y,
+            rotazione: rot,
+            etichetta: item.etichetta || null,
+            istanza_id: item.istanza_id,
+            data_validita_dal: oggi,
+            turno: turnoCorrente
+          };
+        });
+        if (righe.length === 0) {
+          setLayoutModificato(false);
+          caricaLayout(salaSelezionata);
+          caricaIstanzePerTipologia();
+          alert('Layout salvato correttamente!');
+          return;
+        }
+        supabase.from('layout_sala').insert(righe).then(function(insResult) {
+          if (insResult.error) { alert('Errore nel salvataggio: ' + insResult.error.message); return; }
+          setLayoutModificato(false);
+          caricaLayout(salaSelezionata);
+          caricaIstanzePerTipologia();
+          alert('Layout salvato correttamente!');
+        });
       });
-      if (righe.length === 0) {
-        setLayoutModificato(false);
-        caricaLayout(salaSelezionata);
-        caricaIstanzePerTipologia();
-        alert('Layout salvato correttamente!');
-        return;
-      }
-      supabase.from('layout_sala').insert(righe).then(function(insResult) {
-        if (insResult.error) { alert('Errore nel salvataggio: ' + insResult.error.message); return; }
-        setLayoutModificato(false);
-        caricaLayout(salaSelezionata);
-        caricaIstanzePerTipologia();
-        alert('Layout salvato correttamente!');
-      });
-    });
   }
 
   // Recupera prefisso e numero_iniziale della sala corrente
@@ -973,7 +1012,38 @@ export default function SalePage() {
 
   function caricaLayoutBaseSuGriglia(lb) {
     if (!window.confirm('Caricare il layout "' + lb.nome + '"? Le modifiche non salvate andranno perse.')) return;
-    var nuovoLayout = (lb.layout_base_tavoli || []).map(function(item) {
+    var tavoli_base = lb.layout_base_tavoli || [];
+
+    // Alert disponibilità: controlla se ci sono tipologie in eccesso rispetto alle altre sale
+    var contatoreBase = {};
+    for (var i = 0; i < tavoli_base.length; i++) {
+      var tid = tavoli_base[i].tavolo_id;
+      contatoreBase[tid] = (contatoreBase[tid] || 0) + 1;
+    }
+    var avvisi = [];
+    for (var tid2 in contatoreBase) {
+      var quantitaTotale = 0;
+      for (var t = 0; t < tavoli.length; t++) { if (tavoli[t].id === tid2) { quantitaTotale = tavoli[t].quantita || 1; break; } }
+      var inAltreSale = contaIstanzeAlteSale(tid2);
+      var richieste = contatoreBase[tid2];
+      var disponibili = quantitaTotale - inAltreSale;
+      if (richieste > disponibili) {
+        var nomeTipo = '';
+        for (var t2 = 0; t2 < tavoli.length; t2++) { if (tavoli[t2].id === tid2) { nomeTipo = tavoli[t2].nome; break; } }
+        avvisi.push('"' + nomeTipo + '": richieste ' + richieste + ', disponibili solo ' + Math.max(0, disponibili) + ' (' + inAltreSale + ' già in altre sale)');
+      }
+    }
+    if (avvisi.length > 0) {
+      var msg = 'Attenzione — disponibilità insufficiente per questo turno:
+
+' + avvisi.join('
+') + '
+
+Modifica prima il layout delle altre sale, oppure carica comunque (alcuni tavoli potrebbero risultare in eccesso).';
+      if (!window.confirm(msg)) return;
+    }
+
+    var nuovoLayout = tavoli_base.map(function(item) {
       return {
         istanza_id: generaUUID(),
         id: null, sala_id: salaSelezionata,
@@ -985,7 +1055,8 @@ export default function SalePage() {
         nuovo: true
       };
     });
-    setLayoutTemp(nuovoLayout);
+    var nuovoLayoutRinumerato = rinumeraLayoutPerPosizione(nuovoLayout);
+    setLayoutTemp(nuovoLayoutRinumerato);
     setLayoutModificato(true);
   }
 
@@ -1245,30 +1316,36 @@ export default function SalePage() {
     });
   }
 
-  // Salva le etichette aggiornate nel DB (layout_sala) per la sala corrente
+  // Salva le etichette aggiornate nel DB (layout_sala) per la sala+data+turno correnti
   function salvaEtichetteLayoutDB(nuovoLayout) {
     var oggi = new Date().toISOString().split('T')[0];
-    // Cancella e reinserisce tutto il layout con le nuove etichette
-    supabase.from('layout_sala').delete().eq('sala_id', salaSelezionata).then(function(del) {
-      if (del.error) { console.error('Errore pulizia layout:', del.error.message); return; }
-      var righe = nuovoLayout.map(function(item) {
-        var rot = (item.rotazione === null || item.rotazione === undefined) ? 0 : Number(item.rotazione);
-        return {
-          sala_id: salaSelezionata,
-          tavolo_id: item.tavolo_id,
-          pos_x: item.pos_x,
-          pos_y: item.pos_y,
-          rotazione: rot,
-          etichetta: item.etichetta || null,
-          istanza_id: item.istanza_id,
-          data_validita_dal: oggi
-        };
+    var turnoCorrente = turnoSelezionato;
+    supabase.from('layout_sala')
+      .delete()
+      .eq('sala_id', salaSelezionata)
+      .eq('data_validita_dal', oggi)
+      .eq('turno', turnoCorrente)
+      .then(function(del) {
+        if (del.error) { console.error('Errore pulizia layout:', del.error.message); return; }
+        var righe = nuovoLayout.map(function(item) {
+          var rot = (item.rotazione === null || item.rotazione === undefined) ? 0 : Number(item.rotazione);
+          return {
+            sala_id: salaSelezionata,
+            tavolo_id: item.tavolo_id,
+            pos_x: item.pos_x,
+            pos_y: item.pos_y,
+            rotazione: rot,
+            etichetta: item.etichetta || null,
+            istanza_id: item.istanza_id,
+            data_validita_dal: oggi,
+            turno: turnoCorrente
+          };
+        });
+        if (righe.length === 0) return;
+        supabase.from('layout_sala').insert(righe).then(function(ins) {
+          if (ins.error) console.error('Errore salvataggio etichette:', ins.error.message);
+        });
       });
-      if (righe.length === 0) return;
-      supabase.from('layout_sala').insert(righe).then(function(ins) {
-        if (ins.error) console.error('Errore salvataggio etichette:', ins.error.message);
-      });
-    });
   }
 
   function confermaUnione() {
@@ -1859,9 +1936,15 @@ export default function SalePage() {
         for (var p = 0; p < prenotazioni.length; p++) { if (prenotazioni[p].id === tp.prenotazione_id) { pren = prenotazioni[p]; break; } }
         if (!pren) continue;
         var nc = pren.customer ? (pren.customer.first_name + ' ' + pren.customer.last_name) : 'Cliente';
-        var adulti = pren.adults_count || 0; var bambini = pren.children_count || 0;
+        var ospAssegnati = tp.n_ospiti_assegnati || 0;
+        var adultiTot = pren.adults_count || 0; var bambiniTot = pren.children_count || 0;
+        var totPren = adultiTot + bambiniTot;
+        // Stima bambini proporzionale agli ospiti assegnati al tavolo
+        var bambiniStimati = totPren > 0 ? Math.round(bambiniTot * ospAssegnati / totPren) : 0;
+        var adultiStimati = ospAssegnati - bambiniStimati;
         blocco += '<div class="pren-row"><span class="nome">' + nc + '</span>';
-        blocco += '<span class="ospiti">' + adulti + ' adulti' + (bambini > 0 ? ' + <strong>' + bambini + ' bambini 👶</strong>' : '') + '</span>';
+        blocco += '<span class="ospiti">' + ospAssegnati + ' ospiti al tavolo' + (bambiniStimati > 0 ? ' (di cui <strong>' + bambiniStimati + ' 👶</strong>)' : '') + '</span>';
+        if (ospAssegnati < totPren) blocco += '<span class="ospiti" style="color:#9CA3AF">Prenotazione totale: ' + totPren + '</span>';
         if (pren.notes) blocco += '<div class="note">📝 ' + pren.notes + '</div>';
         var allergie = tp.allergie_tavolo || [];
         if (allergie.length > 0) {
@@ -1907,7 +1990,13 @@ export default function SalePage() {
       var pren = prenotazioni[p];
       var nc = pren.customer ? (pren.customer.first_name + ' ' + pren.customer.last_name) : 'Cliente';
       var adulti = pren.adults_count || 0; var bambini = pren.children_count || 0;
-      var ospiti = adulti + ' adulti' + (bambini > 0 ? ' + ' + bambini + ' 👶' : '');
+      var totPren = adulti + bambini;
+      var ospAssegnatiTot = 0;
+      for (var ax = 0; ax < tavoliPrenotazioni.length; ax++) {
+        if (tavoliPrenotazioni[ax].prenotazione_id === pren.id) ospAssegnatiTot += (tavoliPrenotazioni[ax].n_ospiti_assegnati || 0);
+      }
+      var ospiti = adulti + ' adulti' + (bambini > 0 ? ' + ' + bambini + ' 👶' : '') + ' (tot. ' + totPren + ')';
+      if (ospAssegnatiTot > 0 && ospAssegnatiTot !== totPren) ospiti += ' — ' + ospAssegnatiTot + ' assegnati';
       var orario = pren.requested_time ? pren.requested_time.slice(0,5) : '-';
       var tavoliHtml = ''; var allergieHtml = '';
       for (var a = 0; a < tavoliPrenotazioni.length; a++) {
@@ -2349,17 +2438,7 @@ export default function SalePage() {
               {showAllergiePanel && (
                 <div style={{ marginTop: '10px', padding: '10px', background: 'white', borderRadius: '8px', border: '1px solid #FED7AA' }}>
                   {!haPrenotazione && <div style={{ fontSize: '11px', color: '#D97706', marginBottom: '8px', fontWeight: '700' }}>⚠ Assegna prima una prenotazione al tavolo</div>}
-                  <div style={{ fontSize: '11px', color: '#374151', marginBottom: '6px', fontWeight: '700' }}>Seleziona dalla lista:</div>
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '10px' }}>
-                    {ALLERGIE_PREDEFINITE.map(function(a) {
-                      return (
-                        <button key={a} onClick={function() { if (haPrenotazione) aggiungiAllergiaTavolo(ts.istanza_id, a, 1, ''); }} style={{ padding: '3px 8px', borderRadius: '12px', border: '1px solid #FED7AA', background: '#FFF7ED', color: '#C2410C', fontSize: '11px', cursor: haPrenotazione ? 'pointer' : 'not-allowed', fontWeight: '600', opacity: haPrenotazione ? 1 : 0.5 }}>
-                          {a}
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div style={{ fontSize: '11px', color: '#374151', marginBottom: '4px', fontWeight: '700' }}>Voce personalizzata:</div>
+                  <div style={{ fontSize: '11px', color: '#374151', marginBottom: '4px', fontWeight: '700' }}>Descrivi l'allergia / intolleranza:</div>
                   <input type="text" placeholder="es. Celiachia severa, No latticini..." value={allergieInput} onChange={function(e) { setAllergieInput(e.target.value); }} style={{ width: '100%', padding: '7px', border: '1px solid #FED7AA', borderRadius: '6px', fontSize: '12px', boxSizing: 'border-box', marginBottom: '6px' }} />
                   <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '8px' }}>
                     <label style={{ fontSize: '11px', color: '#374151', fontWeight: '700', whiteSpace: 'nowrap' }}>N. persone:</label>
