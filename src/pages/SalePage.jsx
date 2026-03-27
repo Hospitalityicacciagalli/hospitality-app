@@ -38,6 +38,12 @@ var TIPI_OSTACOLO = [
   { value: 'servizio', label: 'Tavolo di servizio', colore: '#9CA3AF', blocca: true  }
 ];
 
+var ALLERGIE_PREDEFINITE = [
+  'Glutine / Grano', 'Lattosio', 'Uova', 'Pesce', 'Crostacei', 'Molluschi',
+  'Arachidi', 'Frutta a guscio', 'Sesamo', 'Soia', 'Sedano', 'Senape',
+  'Lupini', 'Anidride solforosa / Solfiti', 'Vegetariano', 'Vegano', 'Senza glutine'
+];
+
 // Converte il turno interno ('pranzo'/'cena') nel valore usato nel DB reservations
 function turnoToMealType(turno) {
   if (turno === 'pranzo') return 'lunch';
@@ -191,6 +197,10 @@ export default function SalePage() {
   var [editEtichettaServizio, setEditEtichettaServizio] = useState('');
   var [editColoreServizio, setEditColoreServizio] = useState('#9CA3AF');
   var [salvandoEtichetta, setSalvandoEtichetta] = useState(false);
+  // Allergie tavolo
+  var [showAllergiePanel, setShowAllergiePanel] = useState(false);
+  var [allergieInput, setAllergieInput] = useState(''); // voce manuale
+  var [allergieQuantitaInput, setAllergieQuantitaInput] = useState(1);
 
   // ── UNIONE CON CLICK ─────────────────────────────────────────
   // modalitaUnione: false | 'scegli' | 'conferma'
@@ -1379,6 +1389,48 @@ export default function SalePage() {
     }
   }
 
+  // ── ALLERGIE TAVOLO ─────────────────────────────────────────
+  function getAllergieTavolo(istanzaId) {
+    var rappIstanza = getIstanzaRappresentante(istanzaId);
+    for (var i = 0; i < tavoliPrenotazioni.length; i++) {
+      if (tavoliPrenotazioni[i].istanza_id === rappIstanza) {
+        var raw = tavoliPrenotazioni[i].allergie_tavolo;
+        if (!raw) return [];
+        if (typeof raw === 'string') { try { return JSON.parse(raw); } catch(e) { return []; } }
+        return Array.isArray(raw) ? raw : [];
+      }
+    }
+    return [];
+  }
+
+  function salvaAllergieTabolo(istanzaId, nuovaLista) {
+    var rappIstanza = getIstanzaRappresentante(istanzaId);
+    var rigaEsistente = null;
+    for (var i = 0; i < tavoliPrenotazioni.length; i++) {
+      if (tavoliPrenotazioni[i].istanza_id === rappIstanza) { rigaEsistente = tavoliPrenotazioni[i]; break; }
+    }
+    if (!rigaEsistente) { alert('Assegna prima una prenotazione al tavolo prima di aggiungere allergie.'); return; }
+    supabase.from('tavoli_prenotazioni')
+      .update({ allergie_tavolo: nuovaLista })
+      .eq('id', rigaEsistente.id)
+      .then(function(result) {
+        if (result.error) { alert('Errore salvataggio allergie: ' + result.error.message); return; }
+        caricaTavoliPrenotazioni();
+      });
+  }
+
+  function aggiungiAllergiaTavolo(istanzaId, tipo, quantita, nota) {
+    var lista = getAllergieTavolo(istanzaId).slice();
+    lista.push({ tipo: tipo, quantita: parseInt(quantita) || 1, nota: nota || '' });
+    salvaAllergieTabolo(istanzaId, lista);
+  }
+
+  function rimuoviAllergiaTavolo(istanzaId, idx) {
+    var lista = getAllergieTavolo(istanzaId).slice();
+    lista.splice(idx, 1);
+    salvaAllergieTabolo(istanzaId, lista);
+  }
+
   function toggleGruppo(cat) {
     setGruppiEspansi(function(prev) {
       var nuovo = Object.assign({}, prev);
@@ -1751,6 +1803,212 @@ export default function SalePage() {
     return { position: 'relative', width: (gridCols * gridSize) + 'px', height: (gridRows * gridSize) + 'px', backgroundImage: 'linear-gradient(to right, #e5e7eb 1px, transparent 1px), linear-gradient(to bottom, #e5e7eb 1px, transparent 1px)', backgroundSize: gridSize + 'px ' + gridSize + 'px', backgroundColor: '#f9fafb', flexShrink: 0 };
   }
 
+  // ── STAMPE ───────────────────────────────────────────────────
+
+  function getInfoTurno() {
+    var totAdulti = 0; var totBambini = 0;
+    for (var i = 0; i < prenotazioni.length; i++) {
+      totAdulti += (prenotazioni[i].adults_count || 0);
+      totBambini += (prenotazioni[i].children_count || 0);
+    }
+    var salaNome = '';
+    for (var s = 0; s < sale.length; s++) { if (sale[s].id === salaSelezionata) { salaNome = sale[s].nome; break; } }
+    return { totAdulti: totAdulti, totBambini: totBambini, totOspiti: totAdulti + totBambini, salaNome: salaNome };
+  }
+
+  function apriStampa(html) {
+    var w = window.open('', '_blank');
+    w.document.write(html);
+    w.document.close();
+    setTimeout(function() { w.print(); }, 400);
+  }
+
+  function intestazioneHtml(titolo, info) {
+    var turnoLabel = turnoSelezionato === 'pranzo' ? '☀️ Pranzo' : '🌙 Cena';
+    return '<div class="intestazione"><h1>' + titolo + ' — ' + info.salaNome + ' — ' + turnoLabel + ' ' + dataSelezionata + '</h1>' +
+      '<div class="totali"><div class="tot-item">👥 ' + info.totOspiti + ' ospiti</div>' +
+      '<div class="tot-item">🧑 ' + info.totAdulti + ' adulti</div>' +
+      (info.totBambini > 0 ? '<div class="tot-item">👶 ' + info.totBambini + ' bambini</div>' : '') +
+      '</div></div>';
+  }
+
+  function cssBase() {
+    return 'body{font-family:Arial,sans-serif;font-size:12px;color:#111;margin:0;padding:16px;}' +
+      '.intestazione{background:#1e293b;color:white;padding:12px 16px;border-radius:6px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;}' +
+      '.intestazione h1{margin:0;font-size:15px;font-weight:700;}' +
+      '.totali{display:flex;gap:10px;font-size:12px;}' +
+      '.tot-item{background:rgba(255,255,255,0.15);padding:4px 10px;border-radius:4px;}' +
+      '.allergia-tag{display:inline-block;background:#DC2626;color:white;font-size:10px;font-weight:700;padding:2px 6px;border-radius:3px;margin:1px;}' +
+      '.tag-tavolo{display:inline-block;background:#1D4ED8;color:white;font-size:10px;font-weight:700;padding:2px 7px;border-radius:3px;margin:1px;}' +
+      '@media print{body{padding:8px;}@page{size:A4;margin:12mm;}}';
+  }
+
+  function stampaCucina() {
+    var info = getInfoTurno();
+    var righe = [];
+    for (var i = 0; i < layoutAttivo.length; i++) {
+      var item = layoutAttivo[i];
+      var rappIstanza = getIstanzaRappresentante(item.istanza_id);
+      var assegnazioni = tavoliPrenotazioni.filter(function(tp) { return tp.istanza_id === rappIstanza; });
+      if (assegnazioni.length === 0) continue;
+      var etichetta = (item.etichetta && item.etichetta.trim()) ? item.etichetta : (item.tavolo ? item.tavolo.nome : '?');
+      var blocco = '<div class="tavolo-block"><div class="tavolo-header">' + etichetta + '</div>';
+      for (var a = 0; a < assegnazioni.length; a++) {
+        var tp = assegnazioni[a];
+        var pren = null;
+        for (var p = 0; p < prenotazioni.length; p++) { if (prenotazioni[p].id === tp.prenotazione_id) { pren = prenotazioni[p]; break; } }
+        if (!pren) continue;
+        var nc = pren.customer ? (pren.customer.first_name + ' ' + pren.customer.last_name) : 'Cliente';
+        var adulti = pren.adults_count || 0; var bambini = pren.children_count || 0;
+        blocco += '<div class="pren-row"><span class="nome">' + nc + '</span>';
+        blocco += '<span class="ospiti">' + adulti + ' adulti' + (bambini > 0 ? ' + <strong>' + bambini + ' bambini 👶</strong>' : '') + '</span>';
+        if (pren.notes) blocco += '<div class="note">📝 ' + pren.notes + '</div>';
+        var allergie = tp.allergie_tavolo || [];
+        if (allergie.length > 0) {
+          blocco += '<div class="allergie-block"><span class="all-label">⚠️ ALLERGIE TAVOLO:</span>';
+          for (var al = 0; al < allergie.length; al++) {
+            var all = allergie[al];
+            blocco += '<span class="allergia-tag">' + (all.quantita > 1 ? all.quantita + 'x ' : '') + all.tipo + (all.nota ? ' (' + all.nota + ')' : '') + '</span>';
+          }
+          blocco += '</div>';
+        }
+        blocco += '</div>';
+      }
+      blocco += '</div>';
+      righe.push({ pos: item.pos_x * 1000 + item.pos_y, html: blocco });
+    }
+    righe.sort(function(a, b) { return a.pos - b.pos; });
+    var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Cucina</title><style>' + cssBase() +
+      '.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}' +
+      '.tavolo-block{border:2px solid #e5e7eb;border-radius:6px;padding:10px;break-inside:avoid;}' +
+      '.tavolo-header{font-size:15px;font-weight:800;color:#1e293b;margin-bottom:8px;padding-bottom:6px;border-bottom:2px solid #e5e7eb;}' +
+      '.pren-row{margin-bottom:6px;}.nome{font-weight:700;font-size:13px;display:block;}' +
+      '.ospiti{font-size:11px;color:#374151;display:block;margin:2px 0;}' +
+      '.note{font-size:11px;color:#6B7280;font-style:italic;margin-top:2px;}' +
+      '.allergie-block{background:#FEF2F2;border:1px solid #FECACA;border-radius:4px;padding:6px 8px;margin-top:6px;}' +
+      '.all-label{font-size:11px;font-weight:800;color:#DC2626;display:block;margin-bottom:4px;}' +
+      '</style></head><body>';
+    html += intestazioneHtml('🍳 Cucina', info);
+    html += '<div class="grid">';
+    for (var r = 0; r < righe.length; r++) html += righe[r].html;
+    html += '</div></body></html>';
+    apriStampa(html);
+  }
+
+  function stampaRiepilogo() {
+    var info = getInfoTurno();
+    var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Riepilogo</title><style>' + cssBase() +
+      'table{width:100%;border-collapse:collapse;}th{background:#f1f5f9;padding:8px 10px;text-align:left;border:1px solid #e5e7eb;font-weight:700;}' +
+      'td{padding:7px 10px;border:1px solid #e5e7eb;vertical-align:top;}tr:nth-child(even){background:#f9fafb;}' +
+      '</style></head><body>';
+    html += intestazioneHtml('📋 Riepilogo Prenotazioni', info);
+    html += '<table><thead><tr><th>Cliente</th><th>Ospiti</th><th>Orario</th><th>Tavoli</th><th>Allergie</th><th>Note</th></tr></thead><tbody>';
+    for (var p = 0; p < prenotazioni.length; p++) {
+      var pren = prenotazioni[p];
+      var nc = pren.customer ? (pren.customer.first_name + ' ' + pren.customer.last_name) : 'Cliente';
+      var adulti = pren.adults_count || 0; var bambini = pren.children_count || 0;
+      var ospiti = adulti + ' adulti' + (bambini > 0 ? ' + ' + bambini + ' 👶' : '');
+      var orario = pren.requested_time ? pren.requested_time.slice(0,5) : '-';
+      var tavoliHtml = ''; var allergieHtml = '';
+      for (var a = 0; a < tavoliPrenotazioni.length; a++) {
+        var tp = tavoliPrenotazioni[a];
+        if (tp.prenotazione_id !== pren.id) continue;
+        for (var l = 0; l < layoutAttivo.length; l++) {
+          if (layoutAttivo[l].istanza_id === tp.istanza_id) {
+            var et = (layoutAttivo[l].etichetta && layoutAttivo[l].etichetta.trim()) ? layoutAttivo[l].etichetta : '?';
+            tavoliHtml += '<span class="tag-tavolo">' + et + '</span>';
+            break;
+          }
+        }
+        var allergieTp = tp.allergie_tavolo || [];
+        for (var al = 0; al < allergieTp.length; al++) {
+          var all = allergieTp[al];
+          allergieHtml += '<span class="allergia-tag">' + (all.quantita > 1 ? all.quantita + 'x ' : '') + all.tipo + '</span>';
+        }
+      }
+      html += '<tr><td><strong>' + nc + '</strong></td><td>' + ospiti + '</td><td>' + orario + '</td>';
+      html += '<td>' + (tavoliHtml || '<span style="color:#9CA3AF">—</span>') + '</td>';
+      html += '<td>' + (allergieHtml || '—') + '</td>';
+      html += '<td style="color:#6B7280;font-style:italic">' + (pren.notes || '—') + '</td></tr>';
+    }
+    html += '</tbody></table></body></html>';
+    apriStampa(html);
+  }
+
+  function stampaSala() {
+    var info = getInfoTurno();
+    var maxX = 0; var maxY = 0;
+    for (var i = 0; i < layoutAttivo.length; i++) {
+      var it = layoutAttivo[i]; var dim = getDimensioniEffettive(it);
+      if (it.pos_x + dim.w > maxX) maxX = it.pos_x + dim.w;
+      if (it.pos_y + dim.h > maxY) maxY = it.pos_y + dim.h;
+    }
+    var scala = Math.min(760 / Math.max(maxX, 1), 460 / Math.max(maxY, 1));
+    scala = Math.max(3, Math.min(12, scala));
+    var tavoli_html = ''; var legenda_righe = [];
+    for (var j = 0; j < layoutAttivo.length; j++) {
+      var item = layoutAttivo[j]; var dim2 = getDimensioniEffettive(item);
+      var x = item.pos_x * scala + 4; var y = item.pos_y * scala + 4;
+      var w = Math.max(24, dim2.w * scala - 2); var h = Math.max(16, dim2.h * scala - 2);
+      var etichetta = (item.etichetta && item.etichetta.trim()) ? item.etichetta : (item.tavolo ? item.tavolo.nome : '?');
+      var rappIstanza = getIstanzaRappresentante(item.istanza_id);
+      var assegn = tavoliPrenotazioni.filter(function(tp) { return tp.istanza_id === rappIstanza; });
+      var haAllergie = assegn.some(function(tp) { return tp.allergie_tavolo && tp.allergie_tavolo.length > 0; });
+      var haBambini = assegn.some(function(tp) {
+        for (var pp = 0; pp < prenotazioni.length; pp++) { if (prenotazioni[pp].id === tp.prenotazione_id) return (prenotazioni[pp].children_count || 0) > 0; }
+        return false;
+      });
+      var bgCol = assegn.length > 0 ? '#3B82F6' : '#9CA3AF';
+      var borderStr = haAllergie ? '2px solid #DC2626' : (haBambini ? '2px solid #F59E0B' : '1px solid #6B7280');
+      var isRound = item.tavolo && item.tavolo.forma === 'rotondo';
+      var fSize = Math.max(6, Math.min(10, scala * 1.1));
+      tavoli_html += '<div style="position:absolute;left:' + x + 'px;top:' + y + 'px;width:' + w + 'px;height:' + h + 'px;' +
+        'background:' + bgCol + ';border-radius:' + (isRound ? '50%' : '3px') + ';border:' + borderStr + ';' +
+        'display:flex;flex-direction:column;align-items:center;justify-content:center;color:white;font-size:' + fSize + 'px;font-weight:700;overflow:hidden;">' +
+        '<span>' + etichetta + '</span>' +
+        (haAllergie ? '<span style="font-size:7px">⚠️</span>' : '') +
+        (haBambini ? '<span style="font-size:7px">👶</span>' : '') +
+        '</div>';
+      for (var a2 = 0; a2 < assegn.length; a2++) {
+        var tp2 = assegn[a2];
+        var pren2 = null;
+        for (var pp2 = 0; pp2 < prenotazioni.length; pp2++) { if (prenotazioni[pp2].id === tp2.prenotazione_id) { pren2 = prenotazioni[pp2]; break; } }
+        if (!pren2) continue;
+        var nc2 = pren2.customer ? (pren2.customer.first_name + ' ' + pren2.customer.last_name) : 'Cliente';
+        var allLeg = (tp2.allergie_tavolo || []).map(function(a) { return a.tipo; });
+        legenda_righe.push({ tavolo: etichetta, cliente: nc2, adulti: pren2.adults_count || 0, bambini: pren2.children_count || 0, allergie: allLeg });
+      }
+    }
+    var mappaW = maxX * scala + 8; var mappaH = maxY * scala + 8;
+    var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Mappa Sala</title><style>' + cssBase() +
+      '.mappa-wrap{position:relative;width:' + mappaW + 'px;height:' + mappaH + 'px;border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;margin-bottom:12px;}' +
+      'table{width:100%;border-collapse:collapse;font-size:11px;}th{background:#f1f5f9;padding:6px 8px;text-align:left;border:1px solid #e5e7eb;font-weight:700;}' +
+      'td{padding:5px 8px;border:1px solid #e5e7eb;vertical-align:top;}' +
+      '.leg-colori{display:flex;gap:12px;margin-bottom:8px;flex-wrap:wrap;}' +
+      '.leg-item{display:flex;align-items:center;gap:4px;font-size:10px;}' +
+      '.leg-dot{width:12px;height:12px;border-radius:2px;flex-shrink:0;}' +
+      '</style></head><body>';
+    html += intestazioneHtml('🗺️ Mappa Sala', info);
+    html += '<div class="leg-colori">' +
+      '<div class="leg-item"><div class="leg-dot" style="background:#3B82F6"></div>Con prenotazione</div>' +
+      '<div class="leg-item"><div class="leg-dot" style="background:#9CA3AF"></div>Libero</div>' +
+      '<div class="leg-item"><div class="leg-dot" style="background:#3B82F6;border:2px solid #DC2626"></div>⚠️ Allergie</div>' +
+      '<div class="leg-item"><div class="leg-dot" style="background:#3B82F6;border:2px solid #F59E0B"></div>👶 Bambini</div>' +
+      '</div>';
+    html += '<div class="mappa-wrap">' + tavoli_html + '</div>';
+    if (legenda_righe.length > 0) {
+      html += '<table><thead><tr><th>Tavolo</th><th>Cliente</th><th>Adulti</th><th>Bambini</th><th>Allergie</th></tr></thead><tbody>';
+      for (var lr = 0; lr < legenda_righe.length; lr++) {
+        var row = legenda_righe[lr];
+        var allHtml = row.allergie.length > 0 ? row.allergie.map(function(a) { return '<span class="allergia-tag">' + a + '</span>'; }).join('') : '—';
+        html += '<tr><td><strong>' + row.tavolo + '</strong></td><td>' + row.cliente + '</td><td>' + row.adulti + '</td><td>' + (row.bambini > 0 ? '<strong>' + row.bambini + '</strong> 👶' : '0') + '</td><td>' + allHtml + '</td></tr>';
+      }
+      html += '</tbody></table>';
+    }
+    html += '</body></html>';
+    apriStampa(html);
+  }
+
   // ── TAB MAPPA ─────────────────────────────────────────────────
 
   function renderTabMappa() {
@@ -1776,6 +2034,13 @@ export default function SalePage() {
           })}
 
           {renderSliderGriglia()}
+          {!editorModeAttivo && (
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              <button onClick={stampaCucina} style={{ background: '#EA580C', color: 'white', border: 'none', borderRadius: '7px', padding: '7px 12px', fontSize: '12px', cursor: 'pointer', fontWeight: '700' }}>🍳 Stampa cucina</button>
+              <button onClick={stampaSala} style={{ background: '#1D4ED8', color: 'white', border: 'none', borderRadius: '7px', padding: '7px 12px', fontSize: '12px', cursor: 'pointer', fontWeight: '700' }}>🗺️ Stampa sala</button>
+              <button onClick={stampaRiepilogo} style={{ background: '#374151', color: 'white', border: 'none', borderRadius: '7px', padding: '7px 12px', fontSize: '12px', cursor: 'pointer', fontWeight: '700' }}>📋 Riepilogo</button>
+            </div>
+          )}
         </div>
         {/* Legenda colori servizio */}
         <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
@@ -2055,6 +2320,65 @@ export default function SalePage() {
             {salvandoEtichetta ? 'Salvataggio...' : '✓ Salva etichetta'}
           </button>
         </div>
+
+        {/* ── SEZIONE ALLERGIE TAVOLO ── */}
+        {(function() {
+          var rappIstanza = getIstanzaRappresentante(ts.istanza_id);
+          var haPrenotazione = tavoliPrenotazioni.some(function(tp) { return tp.istanza_id === rappIstanza; });
+          var allergie = getAllergieTavolo(ts.istanza_id);
+          return (
+            <div style={{ marginBottom: '14px', padding: '12px', background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: '10px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <div style={{ fontSize: '12px', fontWeight: '700', color: '#C2410C' }}>⚠️ Allergie / Intolleranze tavolo</div>
+                <button onClick={function() { setShowAllergiePanel(function(p) { return !p; }); }} style={{ fontSize: '11px', background: 'none', border: '1px solid #FED7AA', borderRadius: '5px', padding: '2px 8px', cursor: 'pointer', color: '#C2410C', fontWeight: '700' }}>
+                  {showAllergiePanel ? 'Chiudi' : '+ Aggiungi'}
+                </button>
+              </div>
+              {allergie.length === 0 && <div style={{ fontSize: '12px', color: '#9CA3AF', fontStyle: 'italic' }}>Nessuna allergia registrata per questo tavolo</div>}
+              {allergie.map(function(a, idx) {
+                return (
+                  <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '4px', padding: '5px 8px', background: 'white', borderRadius: '6px', border: '1px solid #FED7AA' }}>
+                    <span style={{ fontSize: '13px', fontWeight: '700', color: '#DC2626', flex: 1 }}>
+                      {a.quantita > 1 ? a.quantita + 'x ' : ''}{a.tipo}
+                    </span>
+                    {a.nota && <span style={{ fontSize: '11px', color: '#6B7280', fontStyle: 'italic' }}>{a.nota}</span>}
+                    <button onClick={function() { rimuoviAllergiaTavolo(ts.istanza_id, idx); }} style={{ background: 'none', border: 'none', color: '#EF4444', cursor: 'pointer', fontSize: '14px', lineHeight: 1, flexShrink: 0 }}>✕</button>
+                  </div>
+                );
+              })}
+              {showAllergiePanel && (
+                <div style={{ marginTop: '10px', padding: '10px', background: 'white', borderRadius: '8px', border: '1px solid #FED7AA' }}>
+                  {!haPrenotazione && <div style={{ fontSize: '11px', color: '#D97706', marginBottom: '8px', fontWeight: '700' }}>⚠ Assegna prima una prenotazione al tavolo</div>}
+                  <div style={{ fontSize: '11px', color: '#374151', marginBottom: '6px', fontWeight: '700' }}>Seleziona dalla lista:</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginBottom: '10px' }}>
+                    {ALLERGIE_PREDEFINITE.map(function(a) {
+                      return (
+                        <button key={a} onClick={function() { if (haPrenotazione) aggiungiAllergiaTavolo(ts.istanza_id, a, 1, ''); }} style={{ padding: '3px 8px', borderRadius: '12px', border: '1px solid #FED7AA', background: '#FFF7ED', color: '#C2410C', fontSize: '11px', cursor: haPrenotazione ? 'pointer' : 'not-allowed', fontWeight: '600', opacity: haPrenotazione ? 1 : 0.5 }}>
+                          {a}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#374151', marginBottom: '4px', fontWeight: '700' }}>Voce personalizzata:</div>
+                  <input type="text" placeholder="es. Celiachia severa, No latticini..." value={allergieInput} onChange={function(e) { setAllergieInput(e.target.value); }} style={{ width: '100%', padding: '7px', border: '1px solid #FED7AA', borderRadius: '6px', fontSize: '12px', boxSizing: 'border-box', marginBottom: '6px' }} />
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center', marginBottom: '8px' }}>
+                    <label style={{ fontSize: '11px', color: '#374151', fontWeight: '700', whiteSpace: 'nowrap' }}>N. persone:</label>
+                    <input type="number" min="1" max="20" value={allergieQuantitaInput} onChange={function(e) { setAllergieQuantitaInput(e.target.value); }} style={{ width: '60px', padding: '5px', border: '1px solid #FED7AA', borderRadius: '6px', fontSize: '12px', textAlign: 'center' }} />
+                  </div>
+                  <button onClick={function() {
+                    if (!haPrenotazione) return;
+                    if (!allergieInput.trim()) return;
+                    aggiungiAllergiaTavolo(ts.istanza_id, allergieInput.trim(), allergieQuantitaInput, '');
+                    setAllergieInput('');
+                    setAllergieQuantitaInput(1);
+                  }} disabled={!haPrenotazione} style={{ width: '100%', background: haPrenotazione ? '#EA580C' : '#9CA3AF', color: 'white', border: 'none', borderRadius: '6px', padding: '8px', fontSize: '12px', cursor: haPrenotazione ? 'pointer' : 'not-allowed', fontWeight: '700' }}>
+                    + Aggiungi voce personalizzata
+                  </button>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* ── SEZIONE PRENOTAZIONE ── */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
@@ -2794,8 +3118,8 @@ export default function SalePage() {
               <div style={{ display: 'flex', gap: '3px', background: '#f3f4f6', borderRadius: '8px', padding: '3px' }}>
                 {['pranzo', 'cena'].map(function(turno) {
                   return (
-                    <button key={turno} onClick={function() { setTurnoSelezionato(turno); setPannelloAperto(false); }} style={{ padding: '6px 14px', borderRadius: '6px', border: 'none', fontSize: '13px', cursor: 'pointer', fontWeight: turnoSelezionato === turno ? '700' : '400', background: turnoSelezionato === turno ? 'white' : 'transparent', color: turnoSelezionato === turno ? '#111827' : '#6B7280', boxShadow: turnoSelezionato === turno ? '0 1px 3px rgba(0,0,0,0.1)' : 'none' }}>
-                      {turno === 'pranzo' ? 'Pranzo' : 'Cena'}
+                    <button key={turno} onClick={function() { setTurnoSelezionato(turno); setPannelloAperto(false); }} style={{ padding: '8px 20px', borderRadius: '6px', border: 'none', fontSize: '14px', cursor: 'pointer', fontWeight: turnoSelezionato === turno ? '800' : '500', background: turnoSelezionato === turno ? (turno === 'pranzo' ? '#F59E0B' : '#EA580C') : 'transparent', color: turnoSelezionato === turno ? 'white' : '#6B7280', boxShadow: turnoSelezionato === turno ? '0 2px 6px rgba(234,88,12,0.4)' : 'none', transition: 'all 0.15s' }}>
+                      {turno === 'pranzo' ? '☀️ Pranzo' : '🌙 Cena'}
                     </button>
                   );
                 })}
