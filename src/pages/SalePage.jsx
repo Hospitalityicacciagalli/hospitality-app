@@ -156,6 +156,12 @@ export default function SalePage() {
   // Selezione multipla nell'editor
   var [selezionatiEditor, setSelezionatiEditor] = useState([]);
   var [modalitaSelezioneMult, setModalitaSelezioneMult] = useState(false);
+  // Etichette manuali: Set di istanza_id che hanno numerazione manuale (solo in memoria)
+  var [etichetteManuali, setEtichetteManuali] = useState({});
+  // Modale per modifica etichetta manuale
+  var [showModaleEtichettaManuale, setShowModaleEtichettaManuale] = useState(false);
+  var [tavoloInEtichettaManuale, setTavoloInEtichettaManuale] = useState(null);
+  var [etichettaManualeInput, setEtichettaManualeInput] = useState('');
 
   var [ostacoli, setOstacoli] = useState([]);
   var [tipoOstacoloAttivo, setTipoOstacoloAttivo] = useState('muro');
@@ -721,27 +727,44 @@ export default function SalePage() {
 
   // Rinumerazione automatica per posizione: raggruppa in colonne per pos_x,
   // ordina ogni colonna per pos_y, assegna numeri colonna*10+riga
-  function rinumeraLayoutPerPosizione(layout) {
+  // Rinumerazione automatica per posizione — rispetta le etichette manuali come "ancore"
+  // Se forza=true ignora le manuali e rinumera tutto (usato da "Rinumera tutto" con conferma)
+  function rinumeraLayoutPerPosizione(layout, forza, manualiOverride) {
     var dati = getDatiPrefissoSala();
     var prefisso = dati.prefisso;
     var numInizio = dati.numInizio;
     if (!prefisso || layout.length === 0) return layout;
 
-    // Calcola larghezza media per soglia colonna
-    var soglia = 4; // default celle
-    if (layout.length > 0) {
-      var largMax = 0;
-      for (var i = 0; i < layout.length; i++) {
-        var lw = (layout[i].tavolo && layout[i].tavolo.larghezza) ? layout[i].tavolo.larghezza : 2;
-        if (lw > largMax) largMax = lw;
+    // Mappa corrente delle manuali (usa override se passato, altrimenti stato corrente)
+    var manuali = manualiOverride !== undefined ? manualiOverride : etichetteManuali;
+
+    // Raccogli numeri già usati dalle etichette manuali (per evitare collisioni)
+    var numeriUsatiManuali = {};
+    if (!forza) {
+      for (var m = 0; m < layout.length; m++) {
+        var iid = layout[m].istanza_id;
+        if (manuali[iid]) {
+          var etMan = (layout[m].etichetta || '').trim().toUpperCase();
+          if (etMan.indexOf(prefisso) === 0) {
+            var nMan = parseInt(etMan.slice(prefisso.length));
+            if (!isNaN(nMan)) numeriUsatiManuali[nMan] = true;
+          }
+        }
       }
-      soglia = Math.max(2, Math.floor(largMax / 2));
     }
 
-    // Raggruppa per colonna: ordina per pos_x, poi aggrega tavoli con pos_x simile
-    var sorted = layout.slice().sort(function(a, b) { return a.pos_x - b.pos_x; });
-    var colonne = []; // array di array di layoutItem
+    // Calcola soglia colonna dalla larghezza massima dei tavoli
+    var soglia = 4;
+    var largMax = 0;
+    for (var i = 0; i < layout.length; i++) {
+      var lw = (layout[i].tavolo && layout[i].tavolo.larghezza) ? layout[i].tavolo.larghezza : 2;
+      if (lw > largMax) largMax = lw;
+    }
+    soglia = Math.max(2, Math.floor(largMax / 2));
 
+    // Raggruppa per colonna per pos_x
+    var sorted = layout.slice().sort(function(a, b) { return a.pos_x - b.pos_x; });
+    var colonne = [];
     for (var j = 0; j < sorted.length; j++) {
       var item = sorted[j];
       var trovato = false;
@@ -756,30 +779,82 @@ export default function SalePage() {
       if (!trovato) colonne.push([item]);
     }
 
-    // Ordina colonne per pos_x medio crescente (sinistra → destra)
+    // Ordina colonne sinistra → destra
     colonne.sort(function(a, b) {
       var avgA = a.reduce(function(s, it) { return s + it.pos_x; }, 0) / a.length;
       var avgB = b.reduce(function(s, it) { return s + it.pos_x; }, 0) / b.length;
       return avgA - avgB;
     });
 
-    // Per ogni colonna ordina per pos_y (alto → basso) e assegna etichette
+    // Per ogni colonna ordina per pos_y e assegna etichette agli automatici
     var nuoveEtichette = {};
     for (var ci = 0; ci < colonne.length; ci++) {
       var col = colonne[ci].slice().sort(function(a, b) { return a.pos_y - b.pos_y; });
       var baseNum = numInizio + ci * 10;
+      var contatore = 0;
       for (var ri = 0; ri < col.length; ri++) {
-        nuoveEtichette[col[ri].istanza_id] = prefisso + String(baseNum + ri).padStart(3, '0');
+        var tavItem = col[ri];
+        // Se ha etichetta manuale e non stiamo forzando, la manteniamo
+        if (!forza && manuali[tavItem.istanza_id]) continue;
+        // Trova il prossimo numero libero nella colonna (salta numeri usati dalle manuali)
+        while (numeriUsatiManuali[baseNum + contatore]) contatore++;
+        nuoveEtichette[tavItem.istanza_id] = prefisso + String(baseNum + contatore).padStart(3, '0');
+        contatore++;
       }
     }
 
-    // Restituisce layout con etichette aggiornate
     return layout.map(function(it) {
       if (nuoveEtichette[it.istanza_id] !== undefined) {
         return Object.assign({}, it, { etichetta: nuoveEtichette[it.istanza_id] });
       }
       return it;
     });
+  }
+
+  // Apre il modale per modificare manualmente l'etichetta di un tavolo
+  function apriEtichettaManuale(layoutItem) {
+    setTavoloInEtichettaManuale(layoutItem);
+    setEtichettaManualeInput(layoutItem.etichetta || '');
+    setShowModaleEtichettaManuale(true);
+  }
+
+  function confermaEtichettaManuale() {
+    if (!tavoloInEtichettaManuale) return;
+    var iid = tavoloInEtichettaManuale.istanza_id;
+    var nuovaEt = etichettaManualeInput.trim();
+    // Segna come manuale e aggiorna etichetta
+    setEtichetteManuali(function(prev) {
+      var nuovo = Object.assign({}, prev);
+      nuovo[iid] = true;
+      return nuovo;
+    });
+    setLayoutTemp(function(prev) {
+      return prev.map(function(it) {
+        if (it.istanza_id === iid) return Object.assign({}, it, { etichetta: nuovaEt });
+        return it;
+      });
+    });
+    setLayoutModificato(true);
+    setShowModaleEtichettaManuale(false);
+    setTavoloInEtichettaManuale(null);
+    setEtichettaManualeInput('');
+  }
+
+  // Rinumera tutto: se ci sono manuali chiede conferma
+  function rinumeraTutto() {
+    var hasManuali = Object.keys(etichetteManuali).length > 0;
+    if (hasManuali) {
+      if (window.confirm('Hai modificato la numerazione assegnando valori manualmente. Vuoi annullare queste modifiche e rinumerare automaticamente?')) {
+        // Azzera le manuali e rinumera tutto forzato
+        setEtichetteManuali({});
+        setLayoutTemp(function(prev) { return rinumeraLayoutPerPosizione(prev, true, {}); });
+        setLayoutModificato(true);
+      }
+      // Se No non fa nulla
+    } else {
+      setLayoutTemp(function(prev) { return rinumeraLayoutPerPosizione(prev, false); });
+      setLayoutModificato(true);
+    }
   }
 
   // Aggiunge una nuova istanza al layoutTemp — genera un nuovo istanza_id univoco
@@ -1395,8 +1470,15 @@ export default function SalePage() {
       bgColor = esServizio.colore || '#9CA3AF';
     }
 
-    // Etichetta visibile sul tavolo nella mappa: prima l'etichetta di layout (es. T50), poi eventuale nome cliente
-    var labelVisibile = (layoutItem.etichetta && layoutItem.etichetta.trim()) ? layoutItem.etichetta.trim() : '';
+    // Etichetta visibile sul tavolo nella mappa
+    // Se il tavolo è secondario di un'unione, non mostra la propria etichetta
+    var isSecondarioUnione = !editorMode && (function() {
+      for (var ui = 0; ui < tavoliUniti.length; ui++) {
+        if (tavoliUniti[ui].istanza_secondaria_id === layoutItem.istanza_id) return true;
+      }
+      return false;
+    })();
+    var labelVisibile = isSecondarioUnione ? '' : ((layoutItem.etichetta && layoutItem.etichetta.trim()) ? layoutItem.etichetta.trim() : '');
 
     // In mappa, sotto l'etichetta mostriamo il testo di servizio se presente
     var testoServizio = '';
@@ -1484,10 +1566,12 @@ export default function SalePage() {
             <>
               <button onMouseDown={function(e) { e.stopPropagation(); }} onClick={function(e) { e.stopPropagation(); ruotaIstanzaInLayout(layoutItem.istanza_id); }} title={'Ruota (' + rotAttuale + 'deg)'} style={{ position: 'absolute', top: '2px', left: '3px', background: 'rgba(0,0,0,0.4)', border: 'none', color: 'white', borderRadius: '50%', width: '16px', height: '16px', fontSize: '8px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', lineHeight: 1 }}>R</button>
               <button onMouseDown={function(e) { e.stopPropagation(); }} onClick={function(e) { e.stopPropagation(); rimuoviIstanzaDB(layoutItem); }} style={{ position: 'absolute', top: '2px', right: '3px', background: 'rgba(0,0,0,0.35)', border: 'none', color: 'white', borderRadius: '50%', width: '16px', height: '16px', fontSize: '9px', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '900', lineHeight: 1 }}>x</button>
+              <button onMouseDown={function(e) { e.stopPropagation(); }} onClick={function(e) { e.stopPropagation(); apriEtichettaManuale(layoutItem); }} title="Modifica etichetta manualmente" style={{ position: 'absolute', bottom: '2px', left: '50%', transform: 'translateX(-50%)', background: etichetteManuali[layoutItem.istanza_id] ? 'rgba(99,102,241,0.85)' : 'rgba(0,0,0,0.3)', border: 'none', color: 'white', borderRadius: '3px', padding: '1px 5px', fontSize: '7px', cursor: 'pointer', fontWeight: '900', whiteSpace: 'nowrap' }}>✏️</button>
             </>
           )}
-          {suOstacolo && <div style={{ position: 'absolute', bottom: '2px', fontSize: '8px', color: '#FEF2F2', background: '#EF4444', borderRadius: '3px', padding: '1px 4px' }}>! ostacolo</div>}
-          {editorMode && rotAttuale !== 0 && <div style={{ position: 'absolute', bottom: '2px', fontSize: '7px', color: 'rgba(255,255,255,0.85)', background: 'rgba(0,0,0,0.3)', borderRadius: '3px', padding: '1px 3px' }}>{rotAttuale}deg</div>}
+          {suOstacolo && <div style={{ position: 'absolute', top: '20px', left: '3px', fontSize: '8px', color: '#FEF2F2', background: '#EF4444', borderRadius: '3px', padding: '1px 4px' }}>! ost.</div>}
+          {editorMode && rotAttuale !== 0 && !etichetteManuali[layoutItem.istanza_id] && <div style={{ position: 'absolute', top: '20px', right: '3px', fontSize: '7px', color: 'rgba(255,255,255,0.85)', background: 'rgba(0,0,0,0.3)', borderRadius: '3px', padding: '1px 3px' }}>{rotAttuale}°</div>}
+          {editorMode && etichetteManuali[layoutItem.istanza_id] && <div style={{ position: 'absolute', top: '20px', right: '3px', fontSize: '7px', color: 'white', background: 'rgba(99,102,241,0.8)', borderRadius: '3px', padding: '1px 3px' }}>M</div>}
         </div>
       </div>
     );
@@ -1968,7 +2052,9 @@ export default function SalePage() {
             {layoutModificato && <button onClick={salvaLayout} style={{ background: '#10B981', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 18px', fontSize: '14px', cursor: 'pointer', fontWeight: '700' }}>Salva layout</button>}
             <button onClick={function() { setShowSalvaBase(true); setNomeLayoutBase(''); setDescLayoutBase(''); }} style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '7px 14px', fontSize: '13px', cursor: 'pointer', fontWeight: '600' }}>📐 Salva come layout base</button>
             {getDatiPrefissoSala().prefisso && (
-              <button onClick={function() { setLayoutTemp(function(prev) { return rinumeraLayoutPerPosizione(prev); }); setLayoutModificato(true); }} style={{ background: '#FEF3C7', color: '#92400E', border: '1px solid #FDE68A', borderRadius: '8px', padding: '7px 14px', fontSize: '13px', cursor: 'pointer', fontWeight: '600' }}>🔢 Rinumera tutto</button>
+              <button onClick={rinumeraTutto} style={{ background: '#FEF3C7', color: '#92400E', border: '1px solid #FDE68A', borderRadius: '8px', padding: '7px 14px', fontSize: '13px', cursor: 'pointer', fontWeight: '600' }}>
+                🔢 Rinumera tutto{Object.keys(etichetteManuali).length > 0 ? ' (' + Object.keys(etichetteManuali).length + ' manuali)' : ''}
+              </button>
             )}
             <button
               onClick={function() { setModalitaSelezioneMult(function(prev) { if (prev) setSelezionatiEditor([]); return !prev; }); }}
@@ -2145,6 +2231,47 @@ export default function SalePage() {
                 <button onClick={confermAggiungiConEtichetta} style={{ flex: 1, background: '#3B82F6', color: 'white', border: 'none', borderRadius: '8px', padding: '12px', fontSize: '15px', cursor: 'pointer', fontWeight: '800' }}>Aggiungi</button>
                 <button onClick={function() { setShowModaleEtichetta(false); setTavoloInAttesaEtichetta(null); }} style={{ flex: 1, background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: '8px', padding: '12px', fontSize: '15px', cursor: 'pointer' }}>Annulla</button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modale modifica etichetta manuale */}
+        {showModaleEtichettaManuale && tavoloInEtichettaManuale && (
+          <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+            <div style={{ background: 'white', borderRadius: '16px', padding: '28px', width: '360px', maxWidth: '100%' }}>
+              <h3 style={{ margin: '0 0 6px 0', fontSize: '18px', fontWeight: '800', color: '#111827' }}>✏️ Etichetta manuale</h3>
+              <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#6B7280' }}>
+                Tavolo: <strong>{tavoloInEtichettaManuale.etichetta || '(nessuna)'}</strong>
+                {etichetteManuali[tavoloInEtichettaManuale.istanza_id] && <span style={{ marginLeft: '8px', fontSize: '11px', background: '#EEF2FF', color: '#4338CA', borderRadius: '4px', padding: '1px 6px', fontWeight: '700' }}>Manuale</span>}
+              </p>
+              <input
+                type="text"
+                value={etichettaManualeInput}
+                onChange={function(e) { setEtichettaManualeInput(e.target.value); }}
+                onKeyDown={function(e) { if (e.key === 'Enter') confermaEtichettaManuale(); if (e.key === 'Escape') { setShowModaleEtichettaManuale(false); } }}
+                autoFocus
+                placeholder="es. P30, VIP, 12..."
+                style={{ width: '100%', padding: '12px', border: '2px solid #6366F1', borderRadius: '8px', fontSize: '20px', fontWeight: '700', boxSizing: 'border-box', textAlign: 'center', marginBottom: '10px' }}
+              />
+              <p style={{ margin: '0 0 16px 0', fontSize: '12px', color: '#9CA3AF' }}>
+                Questa etichetta rimarrà fissa anche dopo "Rinumera tutto" (finché non confermi la rinumerazione automatica).
+              </p>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <button onClick={confermaEtichettaManuale} style={{ flex: 1, background: '#6366F1', color: 'white', border: 'none', borderRadius: '8px', padding: '12px', fontSize: '15px', cursor: 'pointer', fontWeight: '800' }}>✓ Conferma</button>
+                <button onClick={function() { setShowModaleEtichettaManuale(false); setTavoloInEtichettaManuale(null); }} style={{ flex: 1, background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: '8px', padding: '12px', fontSize: '15px', cursor: 'pointer' }}>Annulla</button>
+              </div>
+              {etichetteManuali[tavoloInEtichettaManuale.istanza_id] && (
+                <button onClick={function() {
+                  var iid = tavoloInEtichettaManuale.istanza_id;
+                  setEtichetteManuali(function(prev) { var n = Object.assign({}, prev); delete n[iid]; return n; });
+                  setLayoutTemp(function(prev) { return rinumeraLayoutPerPosizione(prev); });
+                  setLayoutModificato(true);
+                  setShowModaleEtichettaManuale(false);
+                  setTavoloInEtichettaManuale(null);
+                }} style={{ width: '100%', marginTop: '8px', background: 'white', color: '#6B7280', border: '1px solid #e5e7eb', borderRadius: '8px', padding: '8px', fontSize: '13px', cursor: 'pointer' }}>
+                  ↩ Torna ad automatica
+                </button>
+              )}
             </div>
           </div>
         )}
