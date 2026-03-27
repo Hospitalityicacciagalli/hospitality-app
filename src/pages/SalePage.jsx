@@ -95,53 +95,7 @@ function getDimensioniEffettive(layoutItem) {
   return { w: t.larghezza || 2, h: t.altezza || 1 };
 }
 
-function SedieSVG(props) {
-  var w = props.w;
-  var h = props.h;
-  var capacita = props.capacita;
-  var forma = props.forma;
-  var colore = props.colore || '#9CA3AF';
-  var sedieSize = 10;
-  var gap = 4;
-  var sedie = [];
 
-  if (forma === 'rotondo') {
-    var raggio = Math.min(w, h) / 2 + sedieSize + gap;
-    for (var i = 0; i < capacita; i++) {
-      var angolo = (2 * Math.PI * i) / capacita - Math.PI / 2;
-      var cx = w / 2 + raggio * Math.cos(angolo);
-      var cy = h / 2 + raggio * Math.sin(angolo);
-      sedie.push(<circle key={i} cx={cx} cy={cy} r={sedieSize / 2} fill={colore} opacity="0.7" />);
-    }
-  } else {
-    var top    = Math.ceil(capacita / 4);
-    var bottom = Math.ceil(capacita / 4);
-    var left   = Math.floor(capacita / 4);
-    var right  = capacita - top - bottom - left;
-    if (right < 0) right = 0;
-    var pad = sedieSize + gap;
-
-    function sedieLinea(n, x1, y1, x2, y2) {
-      for (var j = 0; j < n; j++) {
-        var tt = n > 1 ? j / (n - 1) : 0.5;
-        var sx = x1 + tt * (x2 - x1);
-        var sy = y1 + tt * (y2 - y1);
-        sedie.push(<rect key={'s' + x1 + y1 + j} x={sx - sedieSize / 2} y={sy - sedieSize / 2} width={sedieSize} height={sedieSize} rx="2" fill={colore} opacity="0.7" />);
-      }
-    }
-
-    if (top    > 0) sedieLinea(top,    pad,                   -sedieSize / 2 - gap,  w - pad,                 -sedieSize / 2 - gap);
-    if (bottom > 0) sedieLinea(bottom, pad,                    h + sedieSize / 2 + gap, w - pad,               h + sedieSize / 2 + gap);
-    if (left   > 0) sedieLinea(left,  -sedieSize / 2 - gap,   pad,                   -sedieSize / 2 - gap,     h - pad);
-    if (right  > 0) sedieLinea(right,  w + sedieSize / 2 + gap, pad,                  w + sedieSize / 2 + gap, h - pad);
-  }
-
-  return (
-    <svg style={{ position: 'absolute', top: 0, left: 0, overflow: 'visible', pointerEvents: 'none' }} width={w} height={h}>
-      {sedie}
-    </svg>
-  );
-}
 
 export default function SalePage() {
   var { profile } = useAuth();
@@ -166,7 +120,6 @@ export default function SalePage() {
   var [turnoSelezionato, setTurnoSelezionato] = useState('cena');
   var [loading, setLoading] = useState(true);
   var [errore, setErrore] = useState(null);
-  var [mostraSedie, setMostraSedie] = useState(true);
 
   var [gridSize, setGridSize] = useState(null);
   var [gridSizeInput, setGridSizeInput] = useState('');
@@ -1431,7 +1384,7 @@ export default function SalePage() {
     var unito = !editorMode && isIstanzaUnita(layoutItem.istanza_id);
     var isRound = t.forma === 'rotondo';
     var suOstacolo = editorMode && tavoloSuCellaBlocca(layoutItem);
-    var pad = mostraSedie ? 14 : 0;
+    var pad = 0;
 
     // In modalita mappa: colore dal servizio; in editor: colore tipologia
     var bgColor;
@@ -1507,11 +1460,7 @@ export default function SalePage() {
         } : undefined}
         style={{ position: 'absolute', left: (x - pad) + 'px', top: (y - pad) + 'px', width: (w + pad * 2) + 'px', height: (h + pad * 2) + 'px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: editorMode ? 'grab' : cursoreMappa, userSelect: 'none', zIndex: draggingIstanza === layoutItem.istanza_id ? 50 : 15 }}
       >
-        {mostraSedie && (
-          <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', pointerEvents: 'none' }}>
-            <SedieSVG w={w + pad * 2} h={h + pad * 2} capacita={t.capacita} forma={t.forma} colore={bgColor} />
-          </div>
-        )}
+
         <div style={{ position: 'relative', width: w + 'px', height: h + 'px', backgroundColor: bgColor, borderRadius: borderRadiusTavolo, boxShadow: editorMode ? (isSelezionatoMult ? '0 0 0 4px #6366F1, 0 0 0 7px rgba(99,102,241,0.25)' : suOstacolo ? '0 0 0 3px #EF4444' : '0 2px 6px rgba(0,0,0,0.25)') : boxShadowMappa, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'white', overflow: 'hidden' }}>
           {/* Etichetta strutturale (T50) — sempre visibile in alto */}
           {labelVisibile !== '' && (
@@ -1595,7 +1544,7 @@ export default function SalePage() {
               </div>
             );
           })}
-          <button onClick={function() { setMostraSedie(!mostraSedie); }} style={{ background: mostraSedie ? '#1D4ED8' : 'white', color: mostraSedie ? 'white' : '#374151', border: '1px solid ' + (mostraSedie ? '#1D4ED8' : '#d1d5db'), borderRadius: '8px', padding: '7px 12px', fontSize: '13px', cursor: 'pointer', fontWeight: '600' }}>🪑 Sedie {mostraSedie ? 'ON' : 'OFF'}</button>
+
           {renderSliderGriglia()}
         </div>
         {/* Legenda colori servizio */}
