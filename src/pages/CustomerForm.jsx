@@ -38,6 +38,20 @@ function CustomerForm() {
     marketing: false,
   })
 
+  // Canali marketing selezionati
+  const [canaliMarketing, setCanaliMarketing] = useState({
+    email: false,
+    sms: false,
+    telefono: false,
+    whatsapp: false,
+  })
+
+  // Allergie/intolleranze in testo libero (aggiuntive rispetto agli allergeni strutturati)
+  const [allergieLibere, setAllergieLibere] = useState('')
+
+  // Note interne (solo staff)
+  const [noteInterne, setNoteInterne] = useState('')
+
   // Carica la lista allergeni al mount
   useEffect(() => {
     loadAllergens()
@@ -85,6 +99,15 @@ function CustomerForm() {
         category: customer.category || 'standard',
         source: customer.source || 'manual',
       })
+
+      // Carica campi aggiuntivi
+      setAllergieLibere(customer.allergie_cliente || '')
+      setNoteInterne(customer.note_interne || '')
+      if (customer.canali_marketing && Array.isArray(customer.canali_marketing)) {
+        const canali = { email: false, sms: false, telefono: false, whatsapp: false }
+        customer.canali_marketing.forEach(c => { if (canali.hasOwnProperty(c)) canali[c] = true })
+        setCanaliMarketing(canali)
+      }
 
       // Carica allergeni del cliente
       const { data: customerAllergens, error: allergensError } = await supabase
@@ -186,10 +209,24 @@ function CustomerForm() {
     setSaving(true)
     try {
       // Prepara i dati (campi vuoti → null per evitare errori di unicità)
+      const canaliSelezionati = Object.entries(canaliMarketing)
+        .filter(([_, v]) => v)
+        .map(([k]) => k)
+
       const customerData = {
         ...formData,
         phone: formData.phone.trim() || null,
         email: formData.email.trim() || null,
+        allergie_cliente: allergieLibere.trim() || null,
+        note_interne: noteInterne.trim() || null,
+        canali_marketing: canaliSelezionati.length > 0 ? canaliSelezionati : null,
+        // Aggiorna i flag consenso nella tabella customers per accesso rapido
+        consenso_privacy: consents.data_processing,
+        consenso_privacy_data: consents.data_processing ? new Date().toISOString() : null,
+        consenso_allergie: consents.health_data,
+        consenso_allergie_data: consents.health_data ? new Date().toISOString() : null,
+        consenso_marketing: consents.marketing,
+        consenso_marketing_data: consents.marketing ? new Date().toISOString() : null,
       }
 
       let customerId = id
@@ -501,6 +538,25 @@ function CustomerForm() {
           </div>
         </div>
 
+        {/* Allergie / Note aggiuntive testo libero */}
+        <div className="bg-orange-50 rounded-xl shadow-sm border border-orange-200 p-6">
+          <div className="flex items-center gap-2 mb-2">
+            <AlertTriangle size={18} className="text-orange-500" />
+            <h2 className="text-lg font-semibold text-gray-900">Note allergie aggiuntive</h2>
+          </div>
+          <p className="text-sm text-gray-500 mb-3">
+            Descrizione libera di allergie, intolleranze o esigenze dietetiche particolari (es. "celiaco grave + intollerante lattosio, vegano").
+            Questa nota apparirà nelle stampe di cucina.
+          </p>
+          <textarea
+            value={allergieLibere}
+            onChange={(e) => setAllergieLibere(e.target.value)}
+            rows={3}
+            className="w-full px-4 py-3 border border-orange-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 text-base bg-white"
+            placeholder="es. 1 celiaco grave, 2 intolleranti al lattosio, 1 vegano..."
+          />
+        </div>
+
         {/* Consensi GDPR */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Consensi Privacy (GDPR)</h2>
@@ -554,7 +610,47 @@ function CustomerForm() {
                 </p>
               </div>
             </label>
+
+            {/* Canali marketing — visibili solo se marketing spuntato */}
+            {consents.marketing && (
+              <div className="ml-8 mt-2 p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <p className="text-sm font-medium text-blue-800 mb-3">Canali preferiti per le comunicazioni:</p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    { key: 'email', label: '✉️ Email' },
+                    { key: 'sms', label: '💬 SMS' },
+                    { key: 'telefono', label: '📞 Telefono' },
+                    { key: 'whatsapp', label: '📱 WhatsApp' },
+                  ].map(({ key, label }) => (
+                    <label key={key} className="flex items-center gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={canaliMarketing[key]}
+                        onChange={(e) => setCanaliMarketing(prev => ({ ...prev, [key]: e.target.checked }))}
+                        className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span className="text-sm text-gray-700">{label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
+        </div>
+
+        {/* Note interne staff */}
+        <div className="bg-gray-50 rounded-xl shadow-sm border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-2">Note interne</h2>
+          <p className="text-sm text-gray-500 mb-3">
+            Visibili solo al personale. Non condivise con il cliente.
+          </p>
+          <textarea
+            value={noteInterne}
+            onChange={(e) => setNoteInterne(e.target.value)}
+            rows={3}
+            className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base bg-white"
+            placeholder="es. cliente difficile, preferisce tavolo finestra, festeggia compleanno ogni anno..."
+          />
         </div>
 
         {/* Pulsanti azione */}
