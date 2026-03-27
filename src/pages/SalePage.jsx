@@ -1917,14 +1917,34 @@ export default function SalePage() {
 
   function stampaCucina() {
     var info = getInfoTurno();
+    // Costruisce set dei tavoli secondari di unioni attive — da escludere dalla stampa
+    var secondariUnione = {};
+    for (var ui = 0; ui < tavoliUniti.length; ui++) {
+      secondariUnione[tavoliUniti[ui].istanza_secondaria_id] = true;
+    }
     var righe = [];
     for (var i = 0; i < layoutAttivo.length; i++) {
       var item = layoutAttivo[i];
+      // Salta i tavoli secondari — il principale li rappresenta già
+      if (secondariUnione[item.istanza_id]) continue;
       var rappIstanza = getIstanzaRappresentante(item.istanza_id);
       var assegnazioni = tavoliPrenotazioni.filter(function(tp) { return tp.istanza_id === rappIstanza; });
       if (assegnazioni.length === 0) continue;
       var etichetta = (item.etichetta && item.etichetta.trim()) ? item.etichetta : (item.tavolo ? item.tavolo.nome : '?');
-      var blocco = '<div class="tavolo-block"><div class="tavolo-header">' + etichetta + '</div>';
+      // Se il tavolo è principale di un'unione, mostra anche il partner
+      var partnerEtichetta = '';
+      for (var ui2 = 0; ui2 < tavoliUniti.length; ui2++) {
+        if (tavoliUniti[ui2].istanza_principale_id === item.istanza_id) {
+          for (var li = 0; li < layoutAttivo.length; li++) {
+            if (layoutAttivo[li].istanza_id === tavoliUniti[ui2].istanza_secondaria_id) {
+              partnerEtichetta = (layoutAttivo[li].etichetta && layoutAttivo[li].etichetta.trim()) ? layoutAttivo[li].etichetta : (layoutAttivo[li].tavolo ? layoutAttivo[li].tavolo.nome : '');
+              break;
+            }
+          }
+        }
+      }
+      var headerLabel = etichetta + (partnerEtichetta ? ' <span style="font-size:11px;font-weight:400;color:#6B7280">+ ' + partnerEtichetta + ' (uniti)</span>' : '');
+      var blocco = '<div class="tavolo-block"><div class="tavolo-header">' + headerLabel + '</div>';
       for (var a = 0; a < assegnazioni.length; a++) {
         var tp = assegnazioni[a];
         var pren = null;
@@ -1932,14 +1952,13 @@ export default function SalePage() {
         if (!pren) continue;
         var nc = pren.customer ? (pren.customer.first_name + ' ' + pren.customer.last_name) : 'Cliente';
         var ospAssegnati = tp.n_ospiti_assegnati || 0;
-        var adultiTot = pren.adults_count || 0; var bambiniTot = pren.children_count || 0;
-        var totPren = adultiTot + bambiniTot;
-        // Stima bambini proporzionale agli ospiti assegnati al tavolo
-        var bambiniStimati = totPren > 0 ? Math.round(bambiniTot * ospAssegnati / totPren) : 0;
-        var adultiStimati = ospAssegnati - bambiniStimati;
+        var totPren = (pren.adults_count || 0) + (pren.children_count || 0);
+        var bambiniTot = pren.children_count || 0;
         blocco += '<div class="pren-row"><span class="nome">' + nc + '</span>';
-        blocco += '<span class="ospiti">' + ospAssegnati + ' ospiti al tavolo' + (bambiniStimati > 0 ? ' (di cui <strong>' + bambiniStimati + ' 👶</strong>)' : '') + '</span>';
-        if (ospAssegnati < totPren) blocco += '<span class="ospiti" style="color:#9CA3AF">Prenotazione totale: ' + totPren + '</span>';
+        blocco += '<span class="ospiti"><strong>' + ospAssegnati + ' ospiti al tavolo</strong>';
+        if (totPren !== ospAssegnati) blocco += ' <span style="color:#9CA3AF">(prenotazione totale: ' + totPren + ')</span>';
+        if (bambiniTot > 0) blocco += ' &mdash; prenotazione include <strong>' + bambiniTot + ' bambini 👶</strong>';
+        blocco += '</span>';
         if (pren.notes) blocco += '<div class="note">📝 ' + pren.notes + '</div>';
         var allergie = tp.allergie_tavolo || [];
         if (allergie.length > 0) {
@@ -2034,21 +2053,28 @@ export default function SalePage() {
     }
     var scala = Math.min(760 / Math.max(maxX, 1), 460 / Math.max(maxY, 1));
     scala = Math.max(3, Math.min(12, scala));
+    // Secondari da escludere dalla legenda (non dalla mappa grafica)
+    var secondariSala = {};
+    for (var uis = 0; uis < tavoliUniti.length; uis++) {
+      secondariSala[tavoliUniti[uis].istanza_secondaria_id] = true;
+    }
     var tavoli_html = ''; var legenda_righe = [];
     for (var j = 0; j < layoutAttivo.length; j++) {
       var item = layoutAttivo[j]; var dim2 = getDimensioniEffettive(item);
       var x = item.pos_x * scala + 4; var y = item.pos_y * scala + 4;
       var w = Math.max(24, dim2.w * scala - 2); var h = Math.max(16, dim2.h * scala - 2);
       var etichetta = (item.etichetta && item.etichetta.trim()) ? item.etichetta : (item.tavolo ? item.tavolo.nome : '?');
+      var isSecondarioSala = secondariSala[item.istanza_id];
       var rappIstanza = getIstanzaRappresentante(item.istanza_id);
       var assegn = tavoliPrenotazioni.filter(function(tp) { return tp.istanza_id === rappIstanza; });
-      var haAllergie = assegn.some(function(tp) { return tp.allergie_tavolo && tp.allergie_tavolo.length > 0; });
-      var haBambini = assegn.some(function(tp) {
+      var haAllergie = !isSecondarioSala && assegn.some(function(tp) { return tp.allergie_tavolo && tp.allergie_tavolo.length > 0; });
+      var haBambini = !isSecondarioSala && assegn.some(function(tp) {
         for (var pp = 0; pp < prenotazioni.length; pp++) { if (prenotazioni[pp].id === tp.prenotazione_id) return (prenotazioni[pp].children_count || 0) > 0; }
         return false;
       });
-      var bgCol = assegn.length > 0 ? '#3B82F6' : '#9CA3AF';
-      var borderStr = haAllergie ? '2px solid #DC2626' : (haBambini ? '2px solid #F59E0B' : '1px solid #6B7280');
+      // Colore: secondari più trasparenti
+      var bgCol = isSecondarioSala ? '#93C5FD' : (assegn.length > 0 ? '#3B82F6' : '#9CA3AF');
+      var borderStr = isSecondarioSala ? '2px dashed #3B82F6' : (haAllergie ? '2px solid #DC2626' : (haBambini ? '2px solid #F59E0B' : '1px solid #6B7280'));
       var isRound = item.tavolo && item.tavolo.forma === 'rotondo';
       var fSize = Math.max(6, Math.min(10, scala * 1.1));
       tavoli_html += '<div style="position:absolute;left:' + x + 'px;top:' + y + 'px;width:' + w + 'px;height:' + h + 'px;' +
@@ -2058,19 +2084,20 @@ export default function SalePage() {
         (haAllergie ? '<span style="font-size:7px">⚠️</span>' : '') +
         (haBambini ? '<span style="font-size:7px">👶</span>' : '') +
         '</div>';
-      for (var a2 = 0; a2 < assegn.length; a2++) {
-        var tp2 = assegn[a2];
-        var pren2 = null;
-        for (var pp2 = 0; pp2 < prenotazioni.length; pp2++) { if (prenotazioni[pp2].id === tp2.prenotazione_id) { pren2 = prenotazioni[pp2]; break; } }
-        if (!pren2) continue;
-        var nc2 = pren2.customer ? (pren2.customer.first_name + ' ' + pren2.customer.last_name) : 'Cliente';
-        var allLeg = (tp2.allergie_tavolo || []).map(function(a) { return a.tipo; });
-        var ospTavolo = tp2.n_ospiti_assegnati || 0;
-        var totPren2 = (pren2.adults_count || 0) + (pren2.children_count || 0);
-        // Stima bambini proporzionale agli ospiti al tavolo
-        var bambiniTavolo = totPren2 > 0 ? Math.round((pren2.children_count || 0) * ospTavolo / totPren2) : 0;
-        var adultiTavolo = ospTavolo - bambiniTavolo;
-        legenda_righe.push({ tavolo: etichetta, cliente: nc2, ospiti: ospTavolo, adulti: adultiTavolo, bambini: bambiniTavolo, totPren: totPren2, allergie: allLeg });
+      // Legenda: solo tavoli principali (non secondari)
+      if (!isSecondarioSala) {
+        for (var a2 = 0; a2 < assegn.length; a2++) {
+          var tp2 = assegn[a2];
+          var pren2 = null;
+          for (var pp2 = 0; pp2 < prenotazioni.length; pp2++) { if (prenotazioni[pp2].id === tp2.prenotazione_id) { pren2 = prenotazioni[pp2]; break; } }
+          if (!pren2) continue;
+          var nc2 = pren2.customer ? (pren2.customer.first_name + ' ' + pren2.customer.last_name) : 'Cliente';
+          var allLeg = (tp2.allergie_tavolo || []).map(function(a) { return a.tipo; });
+          var ospTavolo = tp2.n_ospiti_assegnati || 0;
+          var totPren2 = (pren2.adults_count || 0) + (pren2.children_count || 0);
+          var bambiniPren = pren2.children_count || 0;
+          legenda_righe.push({ tavolo: etichetta, cliente: nc2, ospiti: ospTavolo, bambiniPren: bambiniPren, totPren: totPren2, allergie: allLeg });
+        }
       }
     }
     var mappaW = maxX * scala + 8; var mappaH = maxY * scala + 8;
@@ -2091,15 +2118,14 @@ export default function SalePage() {
       '</div>';
     html += '<div class="mappa-wrap">' + tavoli_html + '</div>';
     if (legenda_righe.length > 0) {
-      html += '<table><thead><tr><th>Tavolo</th><th>Cliente</th><th>Al tavolo</th><th>di cui 👶</th><th>Tot. pren.</th><th>Allergie</th></tr></thead><tbody>';
+      html += '<table><thead><tr><th>Tavolo</th><th>Cliente</th><th>Ospiti al tavolo</th><th>Tot. pren.</th><th>👶 Bambini (pren.)</th><th>Allergie</th></tr></thead><tbody>';
       for (var lr = 0; lr < legenda_righe.length; lr++) {
         var row = legenda_righe[lr];
         var allHtml = row.allergie.length > 0 ? row.allergie.map(function(a) { return '<span class="allergia-tag">' + a + '</span>'; }).join('') : '—';
-        var totDiff = row.totPren !== row.ospiti ? '<span style="color:#9CA3AF;font-size:10px"> (' + row.totPren + ' tot.)</span>' : '';
         html += '<tr><td><strong>' + row.tavolo + '</strong></td><td>' + row.cliente + '</td>';
-        html += '<td><strong>' + row.ospiti + '</strong>' + totDiff + '</td>';
-        html += '<td>' + (row.bambini > 0 ? '<strong>' + row.bambini + '</strong>' : '—') + '</td>';
+        html += '<td><strong>' + row.ospiti + '</strong>' + (row.ospiti !== row.totPren ? ' <span style="color:#F59E0B;font-size:10px">/ ' + row.totPren + ' tot.</span>' : '') + '</td>';
         html += '<td style="color:#6B7280">' + row.totPren + '</td>';
+        html += '<td>' + (row.bambiniPren > 0 ? '<strong>' + row.bambiniPren + ' 👶</strong>' : '—') + '</td>';
         html += '<td>' + allHtml + '</td></tr>';
       }
       html += '</tbody></table>';
