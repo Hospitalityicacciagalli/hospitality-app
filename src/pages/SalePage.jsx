@@ -1034,12 +1034,7 @@ export default function SalePage() {
       }
     }
     if (avvisi.length > 0) {
-      var msg = 'Attenzione — disponibilità insufficiente per questo turno:
-
-' + avvisi.join('
-') + '
-
-Modifica prima il layout delle altre sale, oppure carica comunque (alcuni tavoli potrebbero risultare in eccesso).';
+      var msg = 'Attenzione - disponibilita insufficiente per questo turno:\n\n' + avvisi.join('\n') + '\n\nModifica prima il layout delle altre sale, oppure carica comunque (alcuni tavoli potrebbero risultare in eccesso).';
       if (!window.confirm(msg)) return;
     }
 
