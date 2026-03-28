@@ -186,6 +186,10 @@ export default function SalePage() {
   var [nomeLayoutBase, setNomeLayoutBase] = useState('');
   var [descLayoutBase, setDescLayoutBase] = useState('');
   var [salvaBaseLoading, setSalvaBaseLoading] = useState(false);
+  // Layout gerarchico: true = layout base, false = layout specifico salvato
+  var [layoutEBase, setLayoutEBase] = useState(true);
+  // Layout base in modifica (oggetto lb)
+  var [layoutBaseInModifica, setLayoutBaseInModifica] = useState(null);
 
   // contaIstanzePerTipologia: tavoloId -> numero di istanze in tutti i layout attivi
   var [istanzePerTipologia, setIstanzePerTipologia] = useState({});
@@ -260,6 +264,7 @@ export default function SalePage() {
       caricaOstacoli(salaSelezionata);
       caricaLayoutBase(salaSelezionata);
       caricaIstanzePerTipologia();
+      if (sale.length > 0) assicuraLayoutBaseDefault(salaSelezionata);
     }
   }, [salaSelezionata, dataSelezionata]);
 
@@ -354,43 +359,71 @@ export default function SalePage() {
 
   // caricaLayout: carica il layout per sala+data+turno
   // Priorità: 1) esatta corrispondenza data+turno, 2) data+turno='tutti', 3) data<=oggi+turno='tutti'
+  // caricaLayout: cerca layout specifico per data+turno, altrimenti carica il base di default
   function caricaLayout(salaId) {
     var turnoCorrente = turnoSelezionato;
     var dataCorrente = dataSelezionata;
-    // Carica tutte le righe per questa sala (anche vecchie) per trovare il layout più adatto
     supabase.from('layout_sala').select('*, tavolo:tavoli(*)')
       .eq('sala_id', salaId)
-      .order('data_validita_dal', { ascending: false })
+      .eq('data_validita_dal', dataCorrente)
+      .eq('turno', turnoCorrente)
       .then(function(result) {
         if (result.error) { setErrore(result.error.message); return; }
         var rows = result.data || [];
-        // Filtra: cerca prima layout per data+turno esatti
-        var righeEsatte = rows.filter(function(r) {
-          return r.data_validita_dal === dataCorrente && (r.turno === turnoCorrente);
-        });
-        // Fallback: layout per data esatta con turno='tutti'
-        var righeTutti = rows.filter(function(r) {
-          return r.data_validita_dal === dataCorrente && (r.turno === 'tutti' || !r.turno);
-        });
-        // Fallback finale: layout più recente con turno='tutti' prima di questa data
-        var righeStoriche = rows.filter(function(r) {
-          return r.data_validita_dal <= dataCorrente && (r.turno === 'tutti' || !r.turno);
-        });
-        // Scegli il gruppo con priorità
-        var righeDaUsare = righeEsatte.length > 0 ? righeEsatte : (righeTutti.length > 0 ? righeTutti : righeStoriche);
-        // Deduplica per istanza_id tenendo la riga più recente
-        var vistiIstanza = {};
-        var layout = [];
-        for (var i = 0; i < righeDaUsare.length; i++) {
-          var r = righeDaUsare[i];
-          var iid = r.istanza_id || r.id;
-          if (!vistiIstanza[iid]) {
-            vistiIstanza[iid] = true;
-            layout.push(Object.assign({}, r, { istanza_id: iid }));
+        if (rows.length > 0) {
+          // Layout specifico trovato
+          var vistiIstanza = {};
+          var layout = [];
+          for (var i = 0; i < rows.length; i++) {
+            var r = rows[i];
+            var iid = r.istanza_id || r.id;
+            if (!vistiIstanza[iid]) { vistiIstanza[iid] = true; layout.push(Object.assign({}, r, { istanza_id: iid })); }
           }
+          setLayoutAttivo(layout);
+          setLayoutTemp(layout.map(function(r) { return Object.assign({}, r); }));
+          setLayoutEBase(false);
+          setLayoutModificato(false);
+        } else {
+          // Nessun layout specifico — carica il base di default
+          caricaLayoutBaseComeDefault(salaId);
         }
-        setLayoutAttivo(layout);
-        setLayoutTemp(layout.map(function(r) { return Object.assign({}, r); }));
+      });
+  }
+
+  // Carica il layout base di default (is_default=true) come layout attivo, senza salvarlo
+  function caricaLayoutBaseComeDefault(salaId) {
+    supabase.from('layout_base')
+      .select('*, layout_base_tavoli(*, tavolo:tavoli(*))')
+      .eq('sala_id', salaId)
+      .eq('is_default', true)
+      .single()
+      .then(function(result) {
+        if (result.error || !result.data) {
+          // Nessun base di default — layout vuoto
+          setLayoutAttivo([]);
+          setLayoutTemp([]);
+          setLayoutEBase(true);
+          setLayoutModificato(false);
+          return;
+        }
+        var lb = result.data;
+        var layout = (lb.layout_base_tavoli || []).map(function(item) {
+          return {
+            istanza_id: generaUUID(),
+            id: null, sala_id: salaId,
+            tavolo_id: item.tavolo_id, tavolo: item.tavolo,
+            pos_x: item.pos_x, pos_y: item.pos_y,
+            rotazione: item.rotazione || 0,
+            etichetta: item.etichetta || '',
+            data_validita_dal: dataSelezionata,
+            nuovo: true
+          };
+        });
+        var layoutRinumerato = rinumeraLayoutPerPosizione(layout);
+        setLayoutAttivo(layoutRinumerato);
+        setLayoutTemp(layoutRinumerato.map(function(r) { return Object.assign({}, r); }));
+        setLayoutEBase(true);
+        setLayoutModificato(false);
       });
   }
 
@@ -402,7 +435,30 @@ export default function SalePage() {
 
   function caricaLayoutBase(salaId) {
     supabase.from('layout_base').select('*, layout_base_tavoli(*, tavolo:tavoli(*))').eq('sala_id', salaId).order('created_at', { ascending: false }).then(function(result) {
-      if (!result.error) setLayoutBase(result.data || []);
+      if (!result.error) {
+        var data = result.data || [];
+        // Ordina: default prima, poi per data creazione
+        data.sort(function(a, b) {
+          if (a.is_default && !b.is_default) return -1;
+          if (!a.is_default && b.is_default) return 1;
+          return 0;
+        });
+        setLayoutBase(data);
+      }
+    });
+  }
+
+  // Assicura che esista un layout base di default per la sala
+  function assicuraLayoutBaseDefault(salaId) {
+    var salaNome = '';
+    for (var i = 0; i < sale.length; i++) { if (sale[i].id === salaId) { salaNome = sale[i].nome; break; } }
+    supabase.from('layout_base').select('id').eq('sala_id', salaId).eq('is_default', true).single().then(function(result) {
+      if (result.error) {
+        // Non esiste — crealo vuoto
+        supabase.from('layout_base').insert({ sala_id: salaId, nome: salaNome + ' Base', is_default: true, descrizione: 'Layout base della sala' }).then(function() {
+          caricaLayoutBase(salaId);
+        });
+      }
     });
   }
 
@@ -740,9 +796,8 @@ export default function SalePage() {
 
   // Salva layout — cancella tutte le righe esistenti della sala, poi inserisce
   function salvaLayout() {
-    var oggi = new Date().toISOString().split('T')[0];
+    var oggi = dataSelezionata; // Salva per la data correntemente selezionata
     var turnoCorrente = turnoSelezionato;
-    // Cancella solo le righe per questa sala+data+turno specifici
     supabase.from('layout_sala')
       .delete()
       .eq('sala_id', salaSelezionata)
@@ -766,19 +821,42 @@ export default function SalePage() {
         });
         if (righe.length === 0) {
           setLayoutModificato(false);
-          caricaLayout(salaSelezionata);
+          setLayoutEBase(false);
           caricaIstanzePerTipologia();
-          alert('Layout salvato correttamente!');
+          alert('Layout salvato per ' + turnoCorrente + ' ' + oggi);
           return;
         }
         supabase.from('layout_sala').insert(righe).then(function(insResult) {
           if (insResult.error) { alert('Errore nel salvataggio: ' + insResult.error.message); return; }
           setLayoutModificato(false);
-          caricaLayout(salaSelezionata);
+          setLayoutEBase(false);
           caricaIstanzePerTipologia();
-          alert('Layout salvato correttamente!');
+          alert('Layout salvato per ' + turnoCorrente + ' ' + oggi);
         });
       });
+  }
+
+  // Aggiorna il layout base di default con il layout corrente
+  function aggiornaLayoutBaseDefault() {
+    if (!window.confirm('Aggiornare il layout base della sala con la configurazione attuale? Questo influenzera tutti i giorni che non hanno un layout specifico salvato.')) return;
+    var lb = null;
+    for (var i = 0; i < layoutBase.length; i++) {
+      if (layoutBase[i].is_default) { lb = layoutBase[i]; break; }
+    }
+    if (!lb) { alert('Nessun layout base trovato per questa sala.'); return; }
+    // Cancella i tavoli del base e reinserisce
+    supabase.from('layout_base_tavoli').delete().eq('layout_base_id', lb.id).then(function(del) {
+      if (del.error) { alert('Errore: ' + del.error.message); return; }
+      var righe = layoutTemp.map(function(item) {
+        return { layout_base_id: lb.id, tavolo_id: item.tavolo_id, pos_x: item.pos_x, pos_y: item.pos_y, rotazione: (item.rotazione === null || item.rotazione === undefined) ? 0 : Number(item.rotazione), etichetta: item.etichetta || null };
+      });
+      supabase.from('layout_base_tavoli').insert(righe).then(function(ins) {
+        if (ins.error) { alert('Errore: ' + ins.error.message); return; }
+        caricaLayoutBase(salaSelezionata);
+        setLayoutModificato(false);
+        alert('Layout base aggiornato correttamente!');
+      });
+    });
   }
 
   // Recupera prefisso e numero_iniziale della sala corrente
@@ -1056,10 +1134,52 @@ export default function SalePage() {
   }
 
   function eliminaLayoutBase(lb) {
+    if (lb.is_default) { alert('Il layout base di default non puo essere eliminato.'); return; }
     if (!window.confirm('Eliminare il layout base "' + lb.nome + '"?')) return;
     supabase.from('layout_base').delete().eq('id', lb.id).then(function(result) {
       if (result.error) { alert('Errore: ' + result.error.message); return; }
       caricaLayoutBase(salaSelezionata);
+    });
+  }
+
+  function modificaLayoutBase(lb) {
+    // Carica il layout base nell'editor per la modifica
+    var tavoli_base = lb.layout_base_tavoli || [];
+    var nuovoLayout = tavoli_base.map(function(item) {
+      return {
+        istanza_id: generaUUID(),
+        id: null, sala_id: salaSelezionata,
+        tavolo_id: item.tavolo_id, tavolo: item.tavolo,
+        pos_x: item.pos_x, pos_y: item.pos_y,
+        rotazione: item.rotazione || 0,
+        etichetta: item.etichetta || '',
+        data_validita_dal: dataSelezionata,
+        nuovo: true
+      };
+    });
+    var nuovoLayoutRinumerato = rinumeraLayoutPerPosizione(nuovoLayout);
+    setLayoutTemp(nuovoLayoutRinumerato);
+    setLayoutModificato(false);
+    setLayoutBaseInModifica(lb);
+    setEditorModeAttivo(true); // Attiva modalita editor
+    alert('Stai modificando il layout base "' + lb.nome + '". Usa il tasto "Salva come base" per aggiornarlo.');
+  }
+
+  function salvaModificheLayoutBase() {
+    if (!layoutBaseInModifica) return;
+    if (!window.confirm('Aggiornare il layout base "' + layoutBaseInModifica.nome + '"? Le modifiche si rifletteranno su tutti i giorni senza layout specifico.')) return;
+    supabase.from('layout_base_tavoli').delete().eq('layout_base_id', layoutBaseInModifica.id).then(function(del) {
+      if (del.error) { alert('Errore: ' + del.error.message); return; }
+      var righe = layoutTemp.map(function(item) {
+        return { layout_base_id: layoutBaseInModifica.id, tavolo_id: item.tavolo_id, pos_x: item.pos_x, pos_y: item.pos_y, rotazione: (item.rotazione === null || item.rotazione === undefined) ? 0 : Number(item.rotazione), etichetta: item.etichetta || null };
+      });
+      supabase.from('layout_base_tavoli').insert(righe).then(function(ins) {
+        if (ins.error) { alert('Errore: ' + ins.error.message); return; }
+        caricaLayoutBase(salaSelezionata);
+        setLayoutBaseInModifica(null);
+        setLayoutModificato(false);
+        alert('Layout base aggiornato!');
+      });
     });
   }
 
@@ -2713,11 +2833,30 @@ export default function SalePage() {
     return (
       <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
         <div>
+          {/* Banner stato layout */}
+          <div style={{ marginBottom: '10px', padding: '8px 14px', borderRadius: '8px', display: 'flex', alignItems: 'center', gap: '10px', background: layoutEBase ? '#FEF3C7' : '#F0FDF4', border: '1px solid ' + (layoutEBase ? '#FDE68A' : '#BBF7D0') }}>
+            <span style={{ fontSize: '14px' }}>{layoutEBase ? '📋' : '✏️'}</span>
+            <span style={{ fontSize: '13px', fontWeight: '700', color: layoutEBase ? '#92400E' : '#166534', flex: 1 }}>
+              {layoutBaseInModifica ? 'Modifica layout base: ' + layoutBaseInModifica.nome : (layoutEBase ? 'Layout base (nessun override per questo turno)' : 'Layout specifico — ' + turnoSelezionato + ' ' + dataSelezionata)}
+            </span>
+            {!layoutEBase && <span style={{ fontSize: '11px', color: '#166534', background: '#DCFCE7', borderRadius: '12px', padding: '2px 8px' }}>Salvato</span>}
+          </div>
+
           <div style={{ marginBottom: '10px', display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
             <span style={{ fontSize: '13px', color: '#6B7280' }}>Trascina i tavoli. [R] per ruotare.</span>
             {renderSliderGriglia()}
-            {layoutModificato && <button onClick={salvaLayout} style={{ background: '#10B981', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 18px', fontSize: '14px', cursor: 'pointer', fontWeight: '700' }}>Salva layout</button>}
-            <button onClick={function() { setShowSalvaBase(true); setNomeLayoutBase(''); setDescLayoutBase(''); }} style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '7px 14px', fontSize: '13px', cursor: 'pointer', fontWeight: '600' }}>📐 Salva come layout base</button>
+            {layoutModificato && !layoutBaseInModifica && (
+              <button onClick={salvaLayout} style={{ background: '#10B981', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 18px', fontSize: '14px', cursor: 'pointer', fontWeight: '700' }}>
+                💾 Salva per {turnoSelezionato} {dataSelezionata}
+              </button>
+            )}
+            {layoutModificato && layoutBaseInModifica && (
+              <button onClick={salvaModificheLayoutBase} style={{ background: '#F59E0B', color: 'white', border: 'none', borderRadius: '8px', padding: '8px 18px', fontSize: '14px', cursor: 'pointer', fontWeight: '700' }}>
+                💾 Salva modifiche al base
+              </button>
+            )}
+            {!layoutBaseInModifica && <button onClick={function() { setShowSalvaBase(true); setNomeLayoutBase(''); setDescLayoutBase(''); }} style={{ background: '#f0fdf4', color: '#166534', border: '1px solid #bbf7d0', borderRadius: '8px', padding: '7px 14px', fontSize: '13px', cursor: 'pointer', fontWeight: '600' }}>📐 Salva come nuovo base</button>}
+            {layoutBaseInModifica && <button onClick={function() { setLayoutBaseInModifica(null); caricaLayout(salaSelezionata); }} style={{ background: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA', borderRadius: '8px', padding: '7px 14px', fontSize: '13px', cursor: 'pointer', fontWeight: '600' }}>✕ Annulla modifica base</button>}
             {getDatiPrefissoSala().prefisso && (
               <button onClick={rinumeraTutto} style={{ background: '#FEF3C7', color: '#92400E', border: '1px solid #FDE68A', borderRadius: '8px', padding: '7px 14px', fontSize: '13px', cursor: 'pointer', fontWeight: '600' }}>
                 🔢 Rinumera tutto{Object.keys(etichetteManuali).length > 0 ? ' (' + Object.keys(etichetteManuali).length + ' manuali)' : ''}
@@ -2774,26 +2913,29 @@ export default function SalePage() {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', minWidth: '260px', maxWidth: '290px' }}>
-          {layoutBase.length > 0 && (
-            <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', padding: '14px' }}>
-              <h4 style={{ margin: '0 0 10px 0', fontSize: '13px', fontWeight: '700', color: '#166534' }}>📐 Layout base salvati</h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-                {layoutBase.map(function(lb) {
-                  var nTavoli = lb.layout_base_tavoli ? lb.layout_base_tavoli.length : 0;
-                  return (
-                    <div key={lb.id} style={{ background: 'white', border: '1px solid #d1fae5', borderRadius: '8px', padding: '8px 10px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: '12px', fontWeight: '700', color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{lb.nome}</div>
-                        <div style={{ fontSize: '11px', color: '#6B7280' }}>{nTavoli} tavol{nTavoli === 1 ? 'o' : 'i'}{lb.descrizione ? ' - ' + lb.descrizione : ''}</div>
-                      </div>
-                      <button onClick={function() { caricaLayoutBaseSuGriglia(lb); }} style={{ background: '#10B981', color: 'white', border: 'none', borderRadius: '5px', padding: '4px 8px', fontSize: '11px', cursor: 'pointer', fontWeight: '700', flexShrink: 0 }}>Carica</button>
-                      <button onClick={function() { eliminaLayoutBase(lb); }} style={{ background: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA', borderRadius: '5px', padding: '4px 7px', fontSize: '11px', cursor: 'pointer', flexShrink: 0 }}>x</button>
+          <div style={{ background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '12px', padding: '14px' }}>
+            <h4 style={{ margin: '0 0 10px 0', fontSize: '13px', fontWeight: '700', color: '#166534' }}>📐 Layout base</h4>
+            {layoutBase.length === 0 && <div style={{ fontSize: '12px', color: '#9CA3AF', fontStyle: 'italic' }}>Nessun layout base salvato</div>}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {layoutBase.map(function(lb) {
+                var nTavoli = lb.layout_base_tavoli ? lb.layout_base_tavoli.length : 0;
+                return (
+                  <div key={lb.id} style={{ background: 'white', border: '1px solid ' + (lb.is_default ? '#FDE68A' : '#d1fae5'), borderRadius: '8px', padding: '8px 10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                      {lb.is_default && <span style={{ fontSize: '9px', background: '#FEF3C7', color: '#92400E', borderRadius: '4px', padding: '1px 5px', fontWeight: '700', flexShrink: 0 }}>DEFAULT</span>}
+                      <div style={{ fontSize: '12px', fontWeight: '700', color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>{lb.nome}</div>
                     </div>
-                  );
-                })}
-              </div>
+                    <div style={{ fontSize: '11px', color: '#6B7280', marginBottom: '7px' }}>{nTavoli} tavol{nTavoli === 1 ? 'o' : 'i'}{lb.descrizione ? ' — ' + lb.descrizione : ''}</div>
+                    <div style={{ display: 'flex', gap: '4px' }}>
+                      <button onClick={function() { caricaLayoutBaseSuGriglia(lb); }} style={{ flex: 1, background: '#10B981', color: 'white', border: 'none', borderRadius: '5px', padding: '4px 6px', fontSize: '11px', cursor: 'pointer', fontWeight: '700' }}>Carica</button>
+                      <button onClick={function() { modificaLayoutBase(lb); }} style={{ flex: 1, background: '#EFF6FF', color: '#1D4ED8', border: '1px solid #BFDBFE', borderRadius: '5px', padding: '4px 6px', fontSize: '11px', cursor: 'pointer', fontWeight: '700' }}>Modifica</button>
+                      {!lb.is_default && <button onClick={function() { eliminaLayoutBase(lb); }} style={{ background: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA', borderRadius: '5px', padding: '4px 6px', fontSize: '11px', cursor: 'pointer', fontWeight: '700' }}>Elimina</button>}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          )}
+          </div>
 
           <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '16px' }}>
             <h4 style={{ margin: '0 0 4px 0', fontSize: '14px', fontWeight: '700', color: '#374151' }}>Tipologie</h4>
