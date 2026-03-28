@@ -259,14 +259,14 @@ export default function SalePage() {
   }, [sale, salaSelezionata]);
 
   useEffect(function() {
-    if (salaSelezionata) {
-      caricaLayout(salaSelezionata);
+    if (salaSelezionata && turnoSelezionato && dataSelezionata) {
+      caricaLayout(salaSelezionata, dataSelezionata, turnoSelezionato);
       caricaOstacoli(salaSelezionata);
       caricaLayoutBase(salaSelezionata);
       caricaIstanzePerTipologia();
       if (sale.length > 0) assicuraLayoutBaseDefault(salaSelezionata);
     }
-  }, [salaSelezionata, dataSelezionata]);
+  }, [salaSelezionata, dataSelezionata, turnoSelezionato]);
 
   useEffect(function() {
     if (salaSelezionata && dataSelezionata && turnoSelezionato) {
@@ -359,19 +359,18 @@ export default function SalePage() {
 
   // caricaLayout: carica il layout per sala+data+turno
   // Priorità: 1) esatta corrispondenza data+turno, 2) data+turno='tutti', 3) data<=oggi+turno='tutti'
-  // caricaLayout: cerca layout specifico per data+turno, altrimenti carica il base di default
-  function caricaLayout(salaId) {
-    var turnoCorrente = turnoSelezionato;
-    var dataCorrente = dataSelezionata;
+  // caricaLayout: cerca layout specifico per data+turno (parametri espliciti per evitare stale closure)
+  function caricaLayout(salaId, dataParam, turnoParam) {
+    var dataCorr = dataParam || dataSelezionata;
+    var turnoCorr = turnoParam || turnoSelezionato;
     supabase.from('layout_sala').select('*, tavolo:tavoli(*)')
       .eq('sala_id', salaId)
-      .eq('data_validita_dal', dataCorrente)
-      .eq('turno', turnoCorrente)
+      .eq('data_validita_dal', dataCorr)
+      .eq('turno', turnoCorr)
       .then(function(result) {
         if (result.error) { setErrore(result.error.message); return; }
         var rows = result.data || [];
         if (rows.length > 0) {
-          // Layout specifico trovato
           var vistiIstanza = {};
           var layout = [];
           for (var i = 0; i < rows.length; i++) {
@@ -384,14 +383,13 @@ export default function SalePage() {
           setLayoutEBase(false);
           setLayoutModificato(false);
         } else {
-          // Nessun layout specifico — carica il base di default
-          caricaLayoutBaseComeDefault(salaId);
+          caricaLayoutBaseComeDefault(salaId, dataCorr);
         }
       });
   }
 
-  // Carica il layout base di default (is_default=true) come layout attivo, senza salvarlo
-  function caricaLayoutBaseComeDefault(salaId) {
+  function caricaLayoutBaseComeDefault(salaId, dataParam) {
+    var dataCorr = dataParam || dataSelezionata;
     supabase.from('layout_base')
       .select('*, layout_base_tavoli(*, tavolo:tavoli(*))')
       .eq('sala_id', salaId)
@@ -399,7 +397,6 @@ export default function SalePage() {
       .single()
       .then(function(result) {
         if (result.error || !result.data) {
-          // Nessun base di default — layout vuoto
           setLayoutAttivo([]);
           setLayoutTemp([]);
           setLayoutEBase(true);
@@ -415,7 +412,7 @@ export default function SalePage() {
             pos_x: item.pos_x, pos_y: item.pos_y,
             rotazione: item.rotazione || 0,
             etichetta: item.etichetta || '',
-            data_validita_dal: dataSelezionata,
+            data_validita_dal: dataCorr,
             nuovo: true
           };
         });
@@ -3453,11 +3450,21 @@ export default function SalePage() {
           </div>
           {tab === 'mappa' && (
             <>
-              <input type="date" value={dataSelezionata} onChange={function(e) { setDataSelezionata(e.target.value); setPannelloAperto(false); }} style={{ padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px' }} />
+              <input type="date" value={dataSelezionata} onChange={function(e) {
+                var nuovaData = e.target.value;
+                setDataSelezionata(nuovaData);
+                setPannelloAperto(false);
+                if (salaSelezionata) caricaLayout(salaSelezionata, nuovaData, turnoSelezionato);
+              }} style={{ padding: '8px 12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '14px' }} />
               <div style={{ display: 'flex', gap: '3px', background: '#f3f4f6', borderRadius: '8px', padding: '3px' }}>
                 {['pranzo', 'cena'].map(function(turno) {
                   return (
-                    <button key={turno} onClick={function() { setTurnoSelezionato(turno); setPannelloAperto(false); }} style={{ padding: '8px 20px', borderRadius: '6px', border: 'none', fontSize: '14px', cursor: 'pointer', fontWeight: turnoSelezionato === turno ? '800' : '500', background: turnoSelezionato === turno ? (turno === 'pranzo' ? '#F59E0B' : '#EA580C') : 'transparent', color: turnoSelezionato === turno ? 'white' : '#6B7280', boxShadow: turnoSelezionato === turno ? '0 2px 6px rgba(234,88,12,0.4)' : 'none', transition: 'all 0.15s' }}>
+                    <button key={turno} onClick={function() {
+                      setTurnoSelezionato(turno);
+                      setPannelloAperto(false);
+                      // Carica il layout con il nuovo turno passato esplicitamente
+                      if (salaSelezionata) caricaLayout(salaSelezionata, dataSelezionata, turno);
+                    }} style={{ padding: '8px 20px', borderRadius: '6px', border: 'none', fontSize: '14px', cursor: 'pointer', fontWeight: turnoSelezionato === turno ? '800' : '500', background: turnoSelezionato === turno ? (turno === 'pranzo' ? '#F59E0B' : '#EA580C') : 'transparent', color: turnoSelezionato === turno ? 'white' : '#6B7280', boxShadow: turnoSelezionato === turno ? '0 2px 6px rgba(234,88,12,0.4)' : 'none', transition: 'all 0.15s' }}>
                       {turno === 'pranzo' ? '☀️ Pranzo' : '🌙 Cena'}
                     </button>
                   );
