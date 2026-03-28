@@ -1451,6 +1451,31 @@ export default function SalePage() {
     }
   }
 
+  function getBambiniTavolo(istanzaId, prenotazioneId) {
+    var rapp = getIstanzaRappresentante(istanzaId);
+    for (var i = 0; i < tavoliPrenotazioni.length; i++) {
+      if (tavoliPrenotazioni[i].istanza_id === rapp &&
+          (!prenotazioneId || tavoliPrenotazioni[i].prenotazione_id === prenotazioneId)) {
+        return tavoliPrenotazioni[i].n_bambini_tavolo || 0;
+      }
+    }
+    return 0;
+  }
+
+  function salvaBambiniTavolo(istanzaId, prenotazioneId, n) {
+    var rapp = getIstanzaRappresentante(istanzaId);
+    var riga = null;
+    for (var i = 0; i < tavoliPrenotazioni.length; i++) {
+      if (tavoliPrenotazioni[i].istanza_id === rapp && tavoliPrenotazioni[i].prenotazione_id === prenotazioneId) {
+        riga = tavoliPrenotazioni[i]; break;
+      }
+    }
+    if (!riga) return;
+    supabase.from('tavoli_prenotazioni').update({ n_bambini_tavolo: parseInt(n) || 0 }).eq('id', riga.id).then(function(result) {
+      if (!result.error) caricaTavoliPrenotazioni();
+    });
+  }
+
   function rimuoviAssegnazione(istanzaId, prenotazioneId) {
     if (!window.confirm('Rimuovere questa assegnazione dal tavolo?')) return;
     var rappresentante = getIstanzaRappresentante(istanzaId);
@@ -1975,19 +2000,16 @@ export default function SalePage() {
         var totPren = adultiTot + bambiniTot;
         blocco += '<div class="pren-row"><span class="nome">' + nc + '</span>';
         // Riga ospiti: N ospiti al tavolo, se ci sono bambini al tavolo mostrali
+        blocco += '<span class="ospiti"><strong>' + ospAssegnati + ' ospiti al tavolo</strong>';
         if (bambiniAlTavolo > 0) {
           var adultiAlTavolo = ospAssegnati - bambiniAlTavolo;
-          blocco += '<span class="ospiti"><strong>' + ospAssegnati + ' ospiti al tavolo</strong>';
-          blocco += ' <span style="color:#F59E0B;font-weight:700">(' + adultiAlTavolo + '+' + bambiniAlTavolo + ')</span></span>';
-        } else {
-          blocco += '<span class="ospiti"><strong>' + ospAssegnati + ' ospiti al tavolo</strong>';
-          // Avviso bambini non indicati: solo se prenotazione ha bambini E zero bambini su TUTTI i tavoli
-          if (bambiniTot > 0 && bambiniIndicatiPerPren[pren.id] === 0) {
-            blocco += ' <span style="color:#F59E0B;font-size:10px">⚠ bambini non indicati</span>';
-          }
-          blocco += '</span>';
+          blocco += ' <span style="color:#F59E0B;font-weight:700">(' + adultiAlTavolo + '+' + bambiniAlTavolo + ')</span>';
+        } else if (bambiniTot > 0 && bambiniIndicatiPerPren[pren.id] === 0) {
+          // Avviso solo se ZERO bambini indicati su tutti i tavoli di questa prenotazione
+          blocco += ' <span style="color:#F59E0B;font-size:10px">⚠ bambini non indicati</span>';
         }
-        // Totale prenotazione se diverso dal tavolo — formato adulti+bambini, NO icona bambini
+        blocco += '</span>';
+        // Totale prenotazione se diverso — solo numeri, niente emoji
         if (totPren !== ospAssegnati) {
           if (bambiniTot > 0) {
             blocco += '<span class="ospiti" style="color:#9CA3AF">(pren. totale: ' + adultiTot + '+' + bambiniTot + ')</span>';
@@ -2570,8 +2592,20 @@ export default function SalePage() {
                           <div style={{ fontSize: '13px', fontWeight: '800', color: '#111827' }}>{nomeCliente}</div>
                           <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '2px' }}>
                             {tp.n_ospiti_assegnati} ospiti su questo tavolo
+                            {(tp.n_bambini_tavolo > 0) && <span style={{ marginLeft: '6px', color: '#F59E0B', fontWeight: '700' }}>di cui {tp.n_bambini_tavolo} 👶</span>}
                           </div>
-                          <div style={{ fontSize: '11px', marginTop: '2px' }}>
+                          {/* Campo bambini al tavolo */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '5px', padding: '5px 8px', background: '#FFF7ED', borderRadius: '6px', border: '1px solid #FED7AA' }}>
+                            <span style={{ fontSize: '11px', color: '#92400E', fontWeight: '700' }}>👶 Bambini:</span>
+                            <input
+                              type="number" min="0" max={tp.n_ospiti_assegnati || 20}
+                              value={tp.n_bambini_tavolo || 0}
+                              onChange={function(e) { salvaBambiniTavolo(ts.istanza_id, tp.prenotazione_id, e.target.value); }}
+                              style={{ width: '52px', padding: '3px 6px', border: '1px solid #FED7AA', borderRadius: '5px', fontSize: '13px', fontWeight: '700', textAlign: 'center', background: 'white', boxSizing: 'border-box' }}
+                            />
+                            <span style={{ fontSize: '10px', color: '#9CA3AF' }}>su {tp.n_ospiti_assegnati || 0} ospiti</span>
+                          </div>
+                          <div style={{ fontSize: '11px', marginTop: '4px' }}>
                             <span style={{ color: '#374151' }}>Totale prenotazione: <strong>{totale}</strong></span>
                             {' · '}
                             <span style={{ color: assegnatiTotale >= totale ? '#059669' : '#D97706', fontWeight: '700' }}>
