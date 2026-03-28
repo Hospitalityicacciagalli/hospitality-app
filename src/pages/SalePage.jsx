@@ -201,12 +201,6 @@ export default function SalePage() {
   var [showAllergiePanel, setShowAllergiePanel] = useState(false);
   var [allergieInput, setAllergieInput] = useState(''); // voce manuale
   var [allergieQuantitaInput, setAllergieQuantitaInput] = useState(1);
-  // Bambini al tavolo
-  var [editBambiniTavolo, setEditBambiniTavolo] = useState(0);
-  // Reminder bambini
-  var [showReminderBambini, setShowReminderBambini] = useState(false);
-  var [reminderPrenotazioneId, setReminderPrenotazioneId] = useState(null);
-  var [reminderBambiniPerTavolo, setReminderBambiniPerTavolo] = useState({});
 
   // ── UNIONE CON CLICK ─────────────────────────────────────────
   // modalitaUnione: false | 'scegli' | 'conferma'
@@ -1418,36 +1412,11 @@ export default function SalePage() {
     });
   }
 
-  // Ritorna i bambini al tavolo per una specifica istanza+prenotazione
-  function getBambiniTavolo(istanzaId, prenotazioneId) {
-    var rapp = getIstanzaRappresentante(istanzaId);
-    for (var i = 0; i < tavoliPrenotazioni.length; i++) {
-      if (tavoliPrenotazioni[i].istanza_id === rapp &&
-          (!prenotazioneId || tavoliPrenotazioni[i].prenotazione_id === prenotazioneId)) {
-        return tavoliPrenotazioni[i].n_bambini_tavolo || 0;
-      }
-    }
-    return 0;
-  }
-
-  function salvaBambiniTavolo(istanzaId, prenotazioneId, n) {
-    var rapp = getIstanzaRappresentante(istanzaId);
-    var riga = null;
-    for (var i = 0; i < tavoliPrenotazioni.length; i++) {
-      if (tavoliPrenotazioni[i].istanza_id === rapp && tavoliPrenotazioni[i].prenotazione_id === prenotazioneId) {
-        riga = tavoliPrenotazioni[i]; break;
-      }
-    }
-    if (!riga) return;
-    supabase.from('tavoli_prenotazioni').update({ n_bambini_tavolo: parseInt(n) || 0 }).eq('id', riga.id).then(function(result) {
-      if (!result.error) caricaTavoliPrenotazioni();
-    });
-  }
-
   function confermaAssegna() {
     if (!assegnaPrenotazione) { alert('Seleziona una prenotazione'); return; }
     var n = parseInt(assegnaOspiti);
     if (!n || n <= 0) { alert('Inserisci il numero di ospiti'); return; }
+    // Usa sempre l'istanza principale dell'unione come rappresentante
     var istanzaId = getIstanzaRappresentante(tavoloSelezionato.istanza_id);
     var tavoloId = tavoloSelezionato.tavolo_id;
     if (istanzaId !== tavoloSelezionato.istanza_id) {
@@ -1458,7 +1427,8 @@ export default function SalePage() {
     var esistente = null;
     for (var i = 0; i < tavoliPrenotazioni.length; i++) {
       if (tavoliPrenotazioni[i].prenotazione_id === assegnaPrenotazione && tavoliPrenotazioni[i].istanza_id === istanzaId) {
-        esistente = tavoliPrenotazioni[i]; break;
+        esistente = tavoliPrenotazioni[i];
+        break;
       }
     }
     if (esistente) {
@@ -1472,29 +1442,11 @@ export default function SalePage() {
         tavolo_id: tavoloId,
         istanza_id: istanzaId,
         n_ospiti_assegnati: n,
-        n_bambini_tavolo: 0,
         data: dataSelezionata,
         turno: turnoSelezionato
       }).then(function(result) {
         if (result.error) { alert('Errore: ' + result.error.message); return; }
         caricaTavoliPrenotazioni(); setShowAssegna(false); setAssegnaPrenotazione(null); setAssegnaOspiti(0);
-        // Dopo assegnazione controlla se serve reminder bambini
-        var prenObj = null;
-        for (var pi = 0; pi < prenotazioni.length; pi++) {
-          if (prenotazioni[pi].id === assegnaPrenotazione) { prenObj = prenotazioni[pi]; break; }
-        }
-        if (prenObj && (prenObj.children_count || 0) > 0) {
-          var tavoliCoinvolti = {};
-          for (var tpi = 0; tpi < tavoliPrenotazioni.length; tpi++) {
-            if (tavoliPrenotazioni[tpi].prenotazione_id === assegnaPrenotazione) {
-              tavoliCoinvolti[tavoliPrenotazioni[tpi].istanza_id] = tavoliPrenotazioni[tpi].n_bambini_tavolo || 0;
-            }
-          }
-          tavoliCoinvolti[istanzaId] = 0;
-          setReminderPrenotazioneId(assegnaPrenotazione);
-          setReminderBambiniPerTavolo(tavoliCoinvolti);
-          setShowReminderBambini(true);
-        }
       });
     }
   }
@@ -1549,72 +1501,6 @@ export default function SalePage() {
     var lista = getAllergieTavolo(istanzaId).slice();
     lista.splice(idx, 1);
     salvaAllergieTabolo(istanzaId, lista);
-  }
-
-  // Salva i bambini dal reminder direttamente su n_bambini_tavolo
-  function salvaReminderBambini() {
-    var ids = Object.keys(reminderBambiniPerTavolo);
-    var promises = [];
-    for (var i = 0; i < ids.length; i++) {
-      var iid = ids[i];
-      var n = parseInt(reminderBambiniPerTavolo[iid]) || 0;
-      // Trova la riga tavoli_prenotazioni per questo istanza_id + prenotazione
-      for (var j = 0; j < tavoliPrenotazioni.length; j++) {
-        if (tavoliPrenotazioni[j].istanza_id === iid && tavoliPrenotazioni[j].prenotazione_id === reminderPrenotazioneId) {
-          promises.push(
-            supabase.from('tavoli_prenotazioni').update({ n_bambini_tavolo: n }).eq('id', tavoliPrenotazioni[j].id)
-          );
-          break;
-        }
-      }
-    }
-    Promise.all(promises).then(function() {
-      caricaTavoliPrenotazioni();
-      setShowReminderBambini(false);
-      setReminderPrenotazioneId(null);
-      setReminderBambiniPerTavolo({});
-    });
-  }
-
-  function chiudiPannelloConCheck() {
-    // Controlla se c'e' una prenotazione con bambini non ancora distribuiti
-    var reminderDaMostrare = null;
-    if (tavoloSelezionato) {
-      var rappIstanza = getIstanzaRappresentante(tavoloSelezionato.istanza_id);
-      var assegnazioni = tavoliPrenotazioni.filter(function(tp) { return tp.istanza_id === rappIstanza; });
-      for (var a = 0; a < assegnazioni.length; a++) {
-        var pren = null;
-        for (var p = 0; p < prenotazioni.length; p++) {
-          if (prenotazioni[p].id === assegnazioni[a].prenotazione_id) { pren = prenotazioni[p]; break; }
-        }
-        if (!pren || !(pren.children_count > 0)) continue;
-        // Controlla se i bambini sono gia' stati distribuiti su almeno un tavolo
-        var bambiniDistribuiti = 0;
-        for (var tp = 0; tp < tavoliPrenotazioni.length; tp++) {
-          if (tavoliPrenotazioni[tp].prenotazione_id === pren.id) {
-            bambiniDistribuiti += (tavoliPrenotazioni[tp].n_bambini_tavolo || 0);
-          }
-        }
-        if (bambiniDistribuiti === 0) {
-          reminderDaMostrare = pren.id;
-          break;
-        }
-      }
-    }
-    setPannelloAperto(false);
-    setShowAssegna(false);
-    setShowUnione(false);
-    if (reminderDaMostrare) {
-      var tavoliCoinvolti = {};
-      for (var tpi = 0; tpi < tavoliPrenotazioni.length; tpi++) {
-        if (tavoliPrenotazioni[tpi].prenotazione_id === reminderDaMostrare) {
-          tavoliCoinvolti[tavoliPrenotazioni[tpi].istanza_id] = tavoliPrenotazioni[tpi].n_bambini_tavolo || 0;
-        }
-      }
-      setReminderPrenotazioneId(reminderDaMostrare);
-      setReminderBambiniPerTavolo(tavoliCoinvolti);
-      setShowReminderBambini(true);
-    }
   }
 
   function toggleGruppo(cat) {
@@ -1851,7 +1737,17 @@ export default function SalePage() {
       bgColor = t.colore || '#6B7280';
     } else {
       var esServizio = getEtichettaServizio(layoutItem.istanza_id);
-      bgColor = esServizio.colore || '#9CA3AF';
+      var coloreServizioManuale = esServizio.colore && esServizio.colore !== '#9CA3AF';
+      if (coloreServizioManuale) {
+        // Colore impostato manualmente dall'utente — ha priorità
+        bgColor = esServizio.colore;
+      } else {
+        // Colore automatico basato sullo stato
+        var statoAuto = getStatoTavolo(layoutItem.istanza_id);
+        if (statoAuto === 'occupato') bgColor = '#EF4444';
+        else if (statoAuto === 'prenotato') bgColor = '#10B981';
+        else bgColor = '#9CA3AF';
+      }
     }
 
     // Etichetta visibile sul tavolo nella mappa
@@ -2031,14 +1927,42 @@ export default function SalePage() {
 
   function stampaCucina() {
     var info = getInfoTurno();
+    // Set dei secondari — da saltare completamente nella stampa
+    var secondariCucina = {};
+    for (var us = 0; us < tavoliUniti.length; us++) {
+      secondariCucina[tavoliUniti[us].istanza_secondaria_id] = true;
+    }
+    // Pre-calcola per ogni prenotazione se ha almeno un bambino indicato su qualche tavolo
+    var bambiniIndicatiPerPren = {};
+    for (var tpc = 0; tpc < tavoliPrenotazioni.length; tpc++) {
+      var pid = tavoliPrenotazioni[tpc].prenotazione_id;
+      if (!bambiniIndicatiPerPren[pid]) bambiniIndicatiPerPren[pid] = 0;
+      bambiniIndicatiPerPren[pid] += (tavoliPrenotazioni[tpc].n_bambini_tavolo || 0);
+    }
     var righe = [];
     for (var i = 0; i < layoutAttivo.length; i++) {
       var item = layoutAttivo[i];
+      // Salta i tavoli secondari
+      if (secondariCucina[item.istanza_id]) continue;
       var rappIstanza = getIstanzaRappresentante(item.istanza_id);
       var assegnazioni = tavoliPrenotazioni.filter(function(tp) { return tp.istanza_id === rappIstanza; });
       if (assegnazioni.length === 0) continue;
       var etichetta = (item.etichetta && item.etichetta.trim()) ? item.etichetta : (item.tavolo ? item.tavolo.nome : '?');
-      var blocco = '<div class="tavolo-block"><div class="tavolo-header">' + etichetta + '</div>';
+      // Se e' principale di un'unione, aggiungi il nome del partner nell'intestazione
+      var partnerLabel = '';
+      for (var up = 0; up < tavoliUniti.length; up++) {
+        if (tavoliUniti[up].istanza_principale_id === item.istanza_id) {
+          for (var lp = 0; lp < layoutAttivo.length; lp++) {
+            if (layoutAttivo[lp].istanza_id === tavoliUniti[up].istanza_secondaria_id) {
+              var pEt = (layoutAttivo[lp].etichetta && layoutAttivo[lp].etichetta.trim()) ? layoutAttivo[lp].etichetta : (layoutAttivo[lp].tavolo ? layoutAttivo[lp].tavolo.nome : '?');
+              partnerLabel += '+' + pEt;
+              break;
+            }
+          }
+        }
+      }
+      var headerLabel = etichetta + partnerLabel + (partnerLabel ? ' <span style="font-size:10px;font-weight:400">(uniti)</span>' : '');
+      var blocco = '<div class="tavolo-block"><div class="tavolo-header">' + headerLabel + '</div>';
       for (var a = 0; a < assegnazioni.length; a++) {
         var tp = assegnazioni[a];
         var pren = null;
@@ -2050,13 +1974,27 @@ export default function SalePage() {
         var adultiTot = pren.adults_count || 0; var bambiniTot = pren.children_count || 0;
         var totPren = adultiTot + bambiniTot;
         blocco += '<div class="pren-row"><span class="nome">' + nc + '</span>';
-        blocco += '<span class="ospiti"><strong>' + ospAssegnati + ' ospiti al tavolo</strong>';
-        if (bambiniAlTavolo > 0) blocco += ' &mdash; di cui <strong>' + bambiniAlTavolo + ' 👶</strong>';
-        if (totPren !== ospAssegnati) {
-          blocco += ' <span style="color:#9CA3AF">(pren. ' + adultiTot + (bambiniTot > 0 ? '+' + bambiniTot + ' 👶' : '') + ')</span>';
+        // Riga ospiti: N ospiti al tavolo, se ci sono bambini al tavolo mostrali
+        if (bambiniAlTavolo > 0) {
+          var adultiAlTavolo = ospAssegnati - bambiniAlTavolo;
+          blocco += '<span class="ospiti"><strong>' + ospAssegnati + ' ospiti al tavolo</strong>';
+          blocco += ' <span style="color:#F59E0B;font-weight:700">(' + adultiAlTavolo + '+' + bambiniAlTavolo + ')</span></span>';
+        } else {
+          blocco += '<span class="ospiti"><strong>' + ospAssegnati + ' ospiti al tavolo</strong>';
+          // Avviso bambini non indicati: solo se prenotazione ha bambini E zero bambini su TUTTI i tavoli
+          if (bambiniTot > 0 && bambiniIndicatiPerPren[pren.id] === 0) {
+            blocco += ' <span style="color:#F59E0B;font-size:10px">⚠ bambini non indicati</span>';
+          }
+          blocco += '</span>';
         }
-        blocco += '</span>';
-        if (ospAssegnati < totPren && bambiniTot > 0 && bambiniAlTavolo === 0) blocco += '<span class="ospiti" style="color:#F59E0B;font-size:10px">⚠ bambini non indicati</span>';
+        // Totale prenotazione se diverso dal tavolo — formato adulti+bambini, NO icona bambini
+        if (totPren !== ospAssegnati) {
+          if (bambiniTot > 0) {
+            blocco += '<span class="ospiti" style="color:#9CA3AF">(pren. totale: ' + adultiTot + '+' + bambiniTot + ')</span>';
+          } else {
+            blocco += '<span class="ospiti" style="color:#9CA3AF">(pren. totale: ' + totPren + ')</span>';
+          }
+        }
         if (pren.notes) blocco += '<div class="note">📝 ' + pren.notes + '</div>';
         var allergie = tp.allergie_tavolo || [];
         if (allergie.length > 0) {
@@ -2146,21 +2084,26 @@ export default function SalePage() {
     }
     var scala = Math.min(760 / Math.max(maxX, 1), 460 / Math.max(maxY, 1));
     scala = Math.max(3, Math.min(12, scala));
+    // Set secondari da escludere dalla legenda (rimangono visibili in mappa con stile diverso)
+    var secondariSala = {};
+    for (var uss = 0; uss < tavoliUniti.length; uss++) {
+      secondariSala[tavoliUniti[uss].istanza_secondaria_id] = true;
+    }
     var tavoli_html = ''; var legenda_righe = [];
     for (var j = 0; j < layoutAttivo.length; j++) {
       var item = layoutAttivo[j]; var dim2 = getDimensioniEffettive(item);
       var x = item.pos_x * scala + 4; var y = item.pos_y * scala + 4;
       var w = Math.max(24, dim2.w * scala - 2); var h = Math.max(16, dim2.h * scala - 2);
       var etichetta = (item.etichetta && item.etichetta.trim()) ? item.etichetta : (item.tavolo ? item.tavolo.nome : '?');
+      var isSecondarioSala = secondariSala[item.istanza_id];
       var rappIstanza = getIstanzaRappresentante(item.istanza_id);
       var assegn = tavoliPrenotazioni.filter(function(tp) { return tp.istanza_id === rappIstanza; });
-      var haAllergie = assegn.some(function(tp) { return tp.allergie_tavolo && tp.allergie_tavolo.length > 0; });
-      var haBambini = assegn.some(function(tp) {
-        for (var pp = 0; pp < prenotazioni.length; pp++) { if (prenotazioni[pp].id === tp.prenotazione_id) return (prenotazioni[pp].children_count || 0) > 0; }
-        return false;
-      });
-      var bgCol = assegn.length > 0 ? '#3B82F6' : '#9CA3AF';
-      var borderStr = haAllergie ? '2px solid #DC2626' : (haBambini ? '2px solid #F59E0B' : '1px solid #6B7280');
+      // haAllergie e haBambini solo per il tavolo principale (non propagati dal secondario)
+      var haAllergie = !isSecondarioSala && assegn.some(function(tp) { return tp.allergie_tavolo && tp.allergie_tavolo.length > 0; });
+      // haBambini: vero solo se n_bambini_tavolo > 0 su questo tavolo specifico
+      var haBambini = !isSecondarioSala && assegn.some(function(tp) { return (tp.n_bambini_tavolo || 0) > 0; });
+      var bgCol = isSecondarioSala ? '#93C5FD' : (assegn.length > 0 ? '#3B82F6' : '#9CA3AF');
+      var borderStr = isSecondarioSala ? '2px dashed #3B82F6' : (haAllergie ? '2px solid #DC2626' : (haBambini ? '2px solid #F59E0B' : '1px solid #6B7280'));
       var isRound = item.tavolo && item.tavolo.forma === 'rotondo';
       var fSize = Math.max(6, Math.min(10, scala * 1.1));
       tavoli_html += '<div style="position:absolute;left:' + x + 'px;top:' + y + 'px;width:' + w + 'px;height:' + h + 'px;' +
@@ -2170,15 +2113,33 @@ export default function SalePage() {
         (haAllergie ? '<span style="font-size:7px">⚠️</span>' : '') +
         (haBambini ? '<span style="font-size:7px">👶</span>' : '') +
         '</div>';
-      for (var a2 = 0; a2 < assegn.length; a2++) {
-        var tp2 = assegn[a2];
-        var pren2 = null;
-        for (var pp2 = 0; pp2 < prenotazioni.length; pp2++) { if (prenotazioni[pp2].id === tp2.prenotazione_id) { pren2 = prenotazioni[pp2]; break; } }
-        if (!pren2) continue;
-        var nc2 = pren2.customer ? (pren2.customer.first_name + ' ' + pren2.customer.last_name) : 'Cliente';
-        var allLeg = (tp2.allergie_tavolo || []).map(function(a) { return a.tipo; });
-        var bambiniAlTavolo3 = tp2.n_bambini_tavolo || 0;
-        legenda_righe.push({ tavolo: etichetta, cliente: nc2, ospiti: tp2.n_ospiti_assegnati || 0, bambiniTavolo: bambiniAlTavolo3, bambiniPren: pren2.children_count || 0, totPren: (pren2.adults_count || 0) + (pren2.children_count || 0), allergie: allLeg });
+      // Legenda: solo tavoli principali, con nome unione se applicabile
+      if (!isSecondarioSala && assegn.length > 0) {
+        var partnerLabelSala = '';
+        for (var ups = 0; ups < tavoliUniti.length; ups++) {
+          if (tavoliUniti[ups].istanza_principale_id === item.istanza_id) {
+            for (var lps = 0; lps < layoutAttivo.length; lps++) {
+              if (layoutAttivo[lps].istanza_id === tavoliUniti[ups].istanza_secondaria_id) {
+                var pEts = (layoutAttivo[lps].etichetta && layoutAttivo[lps].etichetta.trim()) ? layoutAttivo[lps].etichetta : (layoutAttivo[lps].tavolo ? layoutAttivo[lps].tavolo.nome : '?');
+                partnerLabelSala += '+' + pEts;
+                break;
+              }
+            }
+          }
+        }
+        var etichettaLegenda = etichetta + partnerLabelSala;
+        for (var a2 = 0; a2 < assegn.length; a2++) {
+          var tp2 = assegn[a2];
+          var pren2 = null;
+          for (var pp2 = 0; pp2 < prenotazioni.length; pp2++) { if (prenotazioni[pp2].id === tp2.prenotazione_id) { pren2 = prenotazioni[pp2]; break; } }
+          if (!pren2) continue;
+          var nc2 = pren2.customer ? (pren2.customer.first_name + ' ' + pren2.customer.last_name) : 'Cliente';
+          var allLeg = (tp2.allergie_tavolo || []).map(function(a) { return a.tipo; });
+          var ospTavolo2 = tp2.n_ospiti_assegnati || 0;
+          var bambiniTavolo2 = tp2.n_bambini_tavolo || 0;
+          var totPren2 = (pren2.adults_count || 0) + (pren2.children_count || 0);
+          legenda_righe.push({ tavolo: etichettaLegenda, cliente: nc2, ospiti: ospTavolo2, bambiniTavolo: bambiniTavolo2, bambiniPren: pren2.children_count || 0, totPren: totPren2, allergie: allLeg });
+        }
       }
     }
     var mappaW = maxX * scala + 8; var mappaH = maxY * scala + 8;
@@ -2199,18 +2160,18 @@ export default function SalePage() {
       '</div>';
     html += '<div class="mappa-wrap">' + tavoli_html + '</div>';
     if (legenda_righe.length > 0) {
-      html += '<table><thead><tr><th>Tavolo</th><th>Cliente</th><th>Al tavolo</th><th>👶 al tavolo</th><th>Tot. pren.</th><th>Allergie</th></tr></thead><tbody>';
+      html += '<table><thead><tr><th>Tavolo</th><th>Cliente</th><th>Ospiti al tavolo</th><th>Bambini al tavolo</th><th>Tot. pren.</th><th>Allergie</th></tr></thead><tbody>';
       for (var lr = 0; lr < legenda_righe.length; lr++) {
         var row = legenda_righe[lr];
         var allHtml = row.allergie.length > 0 ? row.allergie.map(function(a) { return '<span class="allergia-tag">' + a + '</span>'; }).join('') : '—';
-        var bambiniCell = row.bambiniTavolo > 0
-          ? '<strong style="color:#F59E0B">' + row.bambiniTavolo + ' 👶</strong>'
-          : (row.bambiniPren > 0 ? '<span style="color:#9CA3AF;font-size:10px">—  (' + row.bambiniPren + ' in pren.)</span>' : '—');
+        var bCell = row.bambiniTavolo > 0
+          ? '<strong style="color:#F59E0B">' + row.bambiniTavolo + '</strong>'
+          : (row.bambiniPren > 0 ? '<span style="color:#9CA3AF">— (' + row.bambiniPren + ' in pren.)</span>' : '—');
         html += '<tr>';
         html += '<td><strong>' + row.tavolo + '</strong></td>';
         html += '<td>' + row.cliente + '</td>';
-        html += '<td><strong>' + row.ospiti + '</strong>' + (row.ospiti !== row.totPren ? ' <span style="color:#9CA3AF;font-size:10px">/ ' + row.totPren + '</span>' : '') + '</td>';
-        html += '<td>' + bambiniCell + '</td>';
+        html += '<td><strong>' + row.ospiti + '</strong>' + (row.ospiti !== row.totPren ? ' <span style="color:#9CA3AF;font-size:10px">/' + row.totPren + '</span>' : '') + '</td>';
+        html += '<td>' + bCell + '</td>';
         html += '<td style="color:#6B7280">' + row.totPren + '</td>';
         html += '<td>' + allHtml + '</td>';
         html += '</tr>';
@@ -2437,80 +2398,6 @@ export default function SalePage() {
             </div>
           );
         })()}
-
-        {/* Modale reminder bambini */}
-        {showReminderBambini && reminderPrenotazioneId && (function() {
-          var pren = null;
-          for (var rp = 0; rp < prenotazioni.length; rp++) {
-            if (prenotazioni[rp].id === reminderPrenotazioneId) { pren = prenotazioni[rp]; break; }
-          }
-          if (!pren) return null;
-          var nc = pren.customer ? (pren.customer.first_name + ' ' + pren.customer.last_name) : 'Cliente';
-          var bambiniPren = pren.children_count || 0;
-          var ids = Object.keys(reminderBambiniPerTavolo);
-          return (
-            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
-              <div style={{ background: 'white', borderRadius: '16px', padding: '28px', width: '420px', maxWidth: '100%' }}>
-                <div style={{ fontSize: '28px', textAlign: 'center', marginBottom: '8px' }}>👶</div>
-                <h3 style={{ margin: '0 0 6px 0', fontSize: '17px', fontWeight: '800', color: '#111827', textAlign: 'center' }}>
-                  Bambini non ancora indicati
-                </h3>
-                <p style={{ margin: '0 0 16px 0', fontSize: '13px', color: '#6B7280', textAlign: 'center', lineHeight: '1.5' }}>
-                  La prenotazione di <strong>{nc}</strong> include <strong>{bambiniPren} bambini</strong>.<br/>
-                  Vuoi indicare quanti bambini siedono in ciascun tavolo?<br/>
-                  <span style={{ fontSize: '11px', color: '#9CA3AF' }}>Puoi anche farlo dopo dal pannello del tavolo.</span>
-                </p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '20px' }}>
-                  {ids.map(function(iid) {
-                    var etLabel = iid;
-                    var ospTavolo = 0;
-                    for (var li = 0; li < layoutAttivo.length; li++) {
-                      if (layoutAttivo[li].istanza_id === iid) {
-                        etLabel = (layoutAttivo[li].etichetta && layoutAttivo[li].etichetta.trim()) ? layoutAttivo[li].etichetta : (layoutAttivo[li].tavolo ? layoutAttivo[li].tavolo.nome : iid);
-                        break;
-                      }
-                    }
-                    for (var tpi2 = 0; tpi2 < tavoliPrenotazioni.length; tpi2++) {
-                      if (tavoliPrenotazioni[tpi2].istanza_id === iid && tavoliPrenotazioni[tpi2].prenotazione_id === reminderPrenotazioneId) {
-                        ospTavolo = tavoliPrenotazioni[tpi2].n_ospiti_assegnati || 0; break;
-                      }
-                    }
-                    return (
-                      <div key={iid} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: '10px' }}>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontSize: '14px', fontWeight: '800', color: '#92400E' }}>Tavolo {etLabel}</div>
-                          <div style={{ fontSize: '11px', color: '#9CA3AF' }}>{ospTavolo} ospiti assegnati</div>
-                        </div>
-                        <label style={{ fontSize: '12px', color: '#374151', whiteSpace: 'nowrap' }}>👶</label>
-                        <input
-                          type="number" min="0" max={Math.max(ospTavolo, bambiniPren)}
-                          value={reminderBambiniPerTavolo[iid] || ''}
-                          onChange={function(e) {
-                            var val = e.target.value;
-                            var iidCopy = iid;
-                            setReminderBambiniPerTavolo(function(prev) {
-                              return Object.assign({}, prev, { [iidCopy]: val });
-                            });
-                          }}
-                          style={{ width: '64px', padding: '8px', border: '2px solid #FED7AA', borderRadius: '8px', fontSize: '18px', fontWeight: '700', textAlign: 'center', boxSizing: 'border-box' }}
-                          placeholder="0"
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-                <div style={{ display: 'flex', gap: '10px' }}>
-                  <button onClick={salvaReminderBambini} style={{ flex: 1, background: '#F59E0B', color: 'white', border: 'none', borderRadius: '8px', padding: '12px', fontSize: '15px', cursor: 'pointer', fontWeight: '800' }}>
-                    ✓ Salva
-                  </button>
-                  <button onClick={function() { setShowReminderBambini(false); setReminderPrenotazioneId(null); setReminderBambiniPerTavolo({}); }} style={{ flex: 1, background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: '8px', padding: '12px', fontSize: '15px', cursor: 'pointer', fontWeight: '600' }}>
-                    Salta
-                  </button>
-                </div>
-              </div>
-            </div>
-          );
-        })()}
       </div>
     );
   }
@@ -2540,7 +2427,7 @@ export default function SalePage() {
       <div style={{ background: 'white', border: '1px solid #e5e7eb', borderRadius: '12px', padding: '20px', minWidth: '290px', maxWidth: '330px', flexShrink: 0, maxHeight: '85vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
           <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '800', color: '#111827' }}>{labelTavolo}</h3>
-          <button onClick={chiudiPannelloConCheck} style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', color: '#9CA3AF', lineHeight: 1 }}>x</button>
+          <button onClick={function() { setPannelloAperto(false); setShowAssegna(false); setShowUnione(false); }} style={{ background: 'none', border: 'none', fontSize: '22px', cursor: 'pointer', color: '#9CA3AF', lineHeight: 1 }}>x</button>
         </div>
 
         {/* Banner unione attiva */}
@@ -2683,16 +2570,6 @@ export default function SalePage() {
                           <div style={{ fontSize: '13px', fontWeight: '800', color: '#111827' }}>{nomeCliente}</div>
                           <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '2px' }}>
                             {tp.n_ospiti_assegnati} ospiti su questo tavolo
-                            {(tp.n_bambini_tavolo > 0) && <span style={{ marginLeft: '6px', color: '#F59E0B', fontWeight: '700' }}>({tp.n_bambini_tavolo} 👶)</span>}
-                          </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '4px' }}>
-                            <span style={{ fontSize: '11px', color: '#374151' }}>👶 Bambini al tavolo:</span>
-                            <input
-                              type="number" min="0" max={tp.n_ospiti_assegnati || 10}
-                              value={tp.n_bambini_tavolo || 0}
-                              onChange={function(e) { salvaBambiniTavolo(ts.istanza_id, tp.prenotazione_id, e.target.value); }}
-                              style={{ width: '52px', padding: '3px 6px', border: '1px solid #FED7AA', borderRadius: '5px', fontSize: '13px', fontWeight: '700', textAlign: 'center', background: '#FFF7ED' }}
-                            />
                           </div>
                           <div style={{ fontSize: '11px', marginTop: '2px' }}>
                             <span style={{ color: '#374151' }}>Totale prenotazione: <strong>{totale}</strong></span>
