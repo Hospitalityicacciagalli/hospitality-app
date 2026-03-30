@@ -144,6 +144,11 @@ export default function SalePage() {
   var [assegnaOspiti, setAssegnaOspiti] = useState(0);
   var [showUnione, setShowUnione] = useState(false);
   var [unioneCapienza, setUnioneCapienza] = useState(0);
+  // Sposta prenotazione
+  var [showSposta, setShowSposta] = useState(false);
+  var [spostaPrenotazioneId, setSpostaPrenotazioneId] = useState(null);
+  var [spostaOspiti, setSpostaOspiti] = useState(0);
+  var [spostaDestinazioneId, setSpostaDestinazioneId] = useState('');
 
   var [showFormTavolo, setShowFormTavolo] = useState(false);
   var [tavoloInEditing, setTavoloInEditing] = useState(null);
@@ -1541,6 +1546,10 @@ export default function SalePage() {
         if (layoutAttivo[li].istanza_id === istanzaId) { tavoloId = layoutAttivo[li].tavolo_id; break; }
       }
     }
+    // Avviso capienza morbida: conta tutti gli ospiti gia sul tavolo ESCLUSI quelli di questa prenotazione
+    var avvisoCap = verificaCapienzaMorbida(istanzaId, n, assegnaPrenotazione);
+    if (avvisoCap && !window.confirm(avvisoCap)) return;
+
     var esistente = null;
     for (var i = 0; i < tavoliPrenotazioni.length; i++) {
       if (tavoliPrenotazioni[i].prenotazione_id === assegnaPrenotazione && tavoliPrenotazioni[i].istanza_id === istanzaId) {
@@ -1559,6 +1568,7 @@ export default function SalePage() {
         tavolo_id: tavoloId,
         istanza_id: istanzaId,
         n_ospiti_assegnati: n,
+        n_bambini_tavolo: 0,
         data: dataSelezionata,
         turno: turnoSelezionato
       }).then(function(result) {
@@ -1566,6 +1576,83 @@ export default function SalePage() {
         caricaTavoliPrenotazioni(); setShowAssegna(false); setAssegnaPrenotazione(null); setAssegnaOspiti(0);
       });
     }
+  }
+
+  // Verifica capienza morbida — restituisce messaggio di avviso o null
+  function verificaCapienzaMorbida(istanzaId, nOspitiDaAggiungere, escludiPrenotazioneId) {
+    var capienza = 0;
+    for (var li = 0; li < layoutAttivo.length; li++) {
+      if (layoutAttivo[li].istanza_id === istanzaId && layoutAttivo[li].tavolo) {
+        capienza = getCapienzaEffettiva(istanzaId, layoutAttivo[li].tavolo.capacita);
+        break;
+      }
+    }
+    if (capienza === 0) return null;
+    var rappIstanza = getIstanzaRappresentante(istanzaId);
+    var giaSuTavolo = 0;
+    for (var i = 0; i < tavoliPrenotazioni.length; i++) {
+      if (tavoliPrenotazioni[i].istanza_id === rappIstanza) {
+        if (escludiPrenotazioneId && tavoliPrenotazioni[i].prenotazione_id === escludiPrenotazioneId) continue;
+        giaSuTavolo += (tavoliPrenotazioni[i].n_ospiti_assegnati || 0);
+      }
+    }
+    var totaleDopoAggiunta = giaSuTavolo + nOspitiDaAggiungere;
+    if (totaleDopoAggiunta > capienza) {
+      return 'Attenzione: il tavolo ha capienza ' + capienza + ' ma avrai ' + totaleDopoAggiunta + ' ospiti (' + (totaleDopoAggiunta - capienza) + ' in piu). Vuoi procedere comunque?';
+    }
+    return null;
+  }
+
+  // Sposta una prenotazione (o parte di essa) da questo tavolo a un altro
+  function confermaSposta() {
+    if (!spostaPrenotazioneId || !spostaDestinazioneId) { alert('Seleziona la prenotazione e il tavolo destinazione'); return; }
+    var n = parseInt(spostaOspiti);
+    if (!n || n <= 0) { alert('Inserisci il numero di ospiti da spostare'); return; }
+    var sorgIstanza = getIstanzaRappresentante(tavoloSelezionato.istanza_id);
+    var destIstanza = getIstanzaRappresentante(spostaDestinazioneId);
+    // Trova riga sorgente
+    var rigaSorg = null;
+    for (var i = 0; i < tavoliPrenotazioni.length; i++) {
+      if (tavoliPrenotazioni[i].istanza_id === sorgIstanza && tavoliPrenotazioni[i].prenotazione_id === spostaPrenotazioneId) {
+        rigaSorg = tavoliPrenotazioni[i]; break;
+      }
+    }
+    if (!rigaSorg) return;
+    var nRimanenti = (rigaSorg.n_ospiti_assegnati || 0) - n;
+    if (nRimanenti < 0) { alert('Non puoi spostare piu ospiti di quanti ne hai assegnati'); return; }
+    // Avviso capienza morbida sulla destinazione
+    var avviso = verificaCapienzaMorbida(destIstanza, n, spostaPrenotazioneId);
+    if (avviso && !window.confirm(avviso)) return;
+    // Trova tavolo_id destinazione
+    var destTavoloId = null;
+    for (var li = 0; li < layoutAttivo.length; li++) {
+      if (layoutAttivo[li].istanza_id === destIstanza) { destTavoloId = layoutAttivo[li].tavolo_id; break; }
+    }
+    // Aggiorna sorgente
+    var p1 = nRimanenti > 0
+      ? supabase.from('tavoli_prenotazioni').update({ n_ospiti_assegnati: nRimanenti }).eq('id', rigaSorg.id)
+      : supabase.from('tavoli_prenotazioni').delete().eq('id', rigaSorg.id);
+    p1.then(function(r1) {
+      if (r1.error) { alert('Errore: ' + r1.error.message); return; }
+      // Trova riga destinazione (potrebbe già esistere)
+      var rigaDest = null;
+      for (var j = 0; j < tavoliPrenotazioni.length; j++) {
+        if (tavoliPrenotazioni[j].istanza_id === destIstanza && tavoliPrenotazioni[j].prenotazione_id === spostaPrenotazioneId) {
+          rigaDest = tavoliPrenotazioni[j]; break;
+        }
+      }
+      var p2 = rigaDest
+        ? supabase.from('tavoli_prenotazioni').update({ n_ospiti_assegnati: (rigaDest.n_ospiti_assegnati || 0) + n }).eq('id', rigaDest.id)
+        : supabase.from('tavoli_prenotazioni').insert({ prenotazione_id: spostaPrenotazioneId, tavolo_id: destTavoloId, istanza_id: destIstanza, n_ospiti_assegnati: n, n_bambini_tavolo: 0, data: dataSelezionata, turno: turnoSelezionato });
+      p2.then(function(r2) {
+        if (r2.error) { alert('Errore: ' + r2.error.message); return; }
+        caricaTavoliPrenotazioni();
+        setShowSposta(false);
+        setSpostaPrenotazioneId(null);
+        setSpostaOspiti(0);
+        setSpostaDestinazioneId('');
+      });
+    });
   }
 
   function getBambiniTavolo(istanzaId, prenotazioneId) {
@@ -2104,8 +2191,12 @@ export default function SalePage() {
         }
       }
       var headerLabel = etichetta + partnerLabel + (partnerLabel ? ' <span style="font-size:10px;font-weight:400">(uniti)</span>' : '');
-      var blocco = '<div class="tavolo-block"><div class="tavolo-header">' + headerLabel + '</div>';
+      var nAssegn = assegnazioni.length;
+      var blocco = '<div class="tavolo-block"><div class="tavolo-header">' + headerLabel;
+      if (nAssegn > 1) blocco += ' <span style="font-size:10px;font-weight:400;background:#FEF3C7;color:#92400E;padding:1px 5px;border-radius:3px">' + nAssegn + ' prenotazioni</span>';
+      blocco += '</div>';
       for (var a = 0; a < assegnazioni.length; a++) {
+        if (a > 0) blocco += '<div style="border-top:1px dashed #e5e7eb;margin:4px 0"></div>';
         var tp = assegnazioni[a];
         var pren = null;
         for (var p = 0; p < prenotazioni.length; p++) { if (prenotazioni[p].id === tp.prenotazione_id) { pren = prenotazioni[p]; break; } }
@@ -2689,10 +2780,21 @@ export default function SalePage() {
           {(function() {
             var rappIstanza = getIstanzaRappresentante(ts.istanza_id);
             var assegnazioniTavolo = tavoliPrenotazioni.filter(function(tp) { return tp.istanza_id === rappIstanza; });
+            var totOspitiSuTavolo = assegnazioniTavolo.reduce(function(s, tp) { return s + (tp.n_ospiti_assegnati || 0); }, 0);
+            var capienza = ts.tavolo ? getCapienzaEffettiva(ts.istanza_id, ts.tavolo.capacita) : 0;
+            var sovraffollato = capienza > 0 && totOspitiSuTavolo > capienza;
             if (assegnazioniTavolo.length === 0) return null;
             return (
               <div style={{ background: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: '8px', padding: '10px 12px' }}>
-                <div style={{ fontSize: '12px', fontWeight: '700', color: '#166534', marginBottom: '6px' }}>Prenotazioni assegnate a questo tavolo:</div>
+                {/* Barra occupazione */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <div style={{ fontSize: '12px', fontWeight: '700', color: '#166534' }}>
+                    Prenotazioni ({assegnazioniTavolo.length}):
+                  </div>
+                  <div style={{ fontSize: '12px', fontWeight: '700', color: sovraffollato ? '#DC2626' : '#166534', background: sovraffollato ? '#FEE2E2' : '#DCFCE7', borderRadius: '12px', padding: '2px 8px' }}>
+                    {totOspitiSuTavolo}/{capienza} posti {sovraffollato ? '⚠' : ''}
+                  </div>
+                </div>
                 {assegnazioniTavolo.map(function(tp) {
                   var pren = null;
                   for (var i = 0; i < prenotazioni.length; i++) {
@@ -2705,32 +2807,36 @@ export default function SalePage() {
                   return (
                     <div key={tp.id} style={{ background: 'white', border: '1px solid #D1FAE5', borderRadius: '6px', padding: '8px 10px', marginBottom: '4px' }}>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                        <div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ fontSize: '13px', fontWeight: '800', color: '#111827' }}>{nomeCliente}</div>
                           <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '2px' }}>
-                            {tp.n_ospiti_assegnati} ospiti su questo tavolo
+                            <strong>{tp.n_ospiti_assegnati}</strong> ospiti su questo tavolo
                             {(tp.n_bambini_tavolo > 0) && <span style={{ marginLeft: '6px', color: '#F59E0B', fontWeight: '700' }}>di cui {tp.n_bambini_tavolo} 👶</span>}
                           </div>
                           {/* Campo bambini al tavolo */}
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '5px', padding: '5px 8px', background: '#FFF7ED', borderRadius: '6px', border: '1px solid #FED7AA' }}>
-                            <span style={{ fontSize: '11px', color: '#92400E', fontWeight: '700' }}>👶 Bambini:</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '5px', padding: '4px 8px', background: '#FFF7ED', borderRadius: '6px', border: '1px solid #FED7AA' }}>
+                            <span style={{ fontSize: '11px', color: '#92400E', fontWeight: '700' }}>👶</span>
                             <input
                               type="number" min="0" max={tp.n_ospiti_assegnati || 20}
                               value={tp.n_bambini_tavolo || 0}
                               onChange={function(e) { salvaBambiniTavolo(ts.istanza_id, tp.prenotazione_id, e.target.value); }}
-                              style={{ width: '52px', padding: '3px 6px', border: '1px solid #FED7AA', borderRadius: '5px', fontSize: '13px', fontWeight: '700', textAlign: 'center', background: 'white', boxSizing: 'border-box' }}
+                              style={{ width: '48px', padding: '2px 5px', border: '1px solid #FED7AA', borderRadius: '5px', fontSize: '12px', fontWeight: '700', textAlign: 'center', background: 'white', boxSizing: 'border-box' }}
                             />
-                            <span style={{ fontSize: '10px', color: '#9CA3AF' }}>su {tp.n_ospiti_assegnati || 0} ospiti</span>
+                            <span style={{ fontSize: '10px', color: '#9CA3AF' }}>bambini</span>
                           </div>
-                          <div style={{ fontSize: '11px', marginTop: '4px' }}>
-                            <span style={{ color: '#374151' }}>Totale prenotazione: <strong>{totale}</strong></span>
-                            {' · '}
-                            <span style={{ color: assegnatiTotale >= totale ? '#059669' : '#D97706', fontWeight: '700' }}>
-                              {assegnatiTotale >= totale ? '✓ Completa' : restanti + ' ancora da sistemare'}
-                            </span>
+                          <div style={{ fontSize: '11px', marginTop: '4px', color: assegnatiTotale >= totale ? '#059669' : '#D97706', fontWeight: '600' }}>
+                            {assegnatiTotale >= totale ? '✓ Prenotazione completa' : 'Pren. ' + assegnatiTotale + '/' + totale + ' — ' + restanti + ' da sistemare'}
                           </div>
                         </div>
-                        <button onClick={function() { rimuoviAssegnazione(ts.istanza_id, tp.prenotazione_id); }} style={{ background: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA', borderRadius: '5px', padding: '3px 8px', fontSize: '11px', cursor: 'pointer', flexShrink: 0, marginLeft: '8px' }}>✕</button>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px', marginLeft: '8px', flexShrink: 0 }}>
+                          <button onClick={function() {
+                            setSpostaPrenotazioneId(tp.prenotazione_id);
+                            setSpostaOspiti(tp.n_ospiti_assegnati || 0);
+                            setSpostaDestinazioneId('');
+                            setShowSposta(true);
+                          }} style={{ background: '#EFF6FF', color: '#1D4ED8', border: '1px solid #BFDBFE', borderRadius: '5px', padding: '3px 7px', fontSize: '10px', cursor: 'pointer', fontWeight: '700' }}>↗ Sposta</button>
+                          <button onClick={function() { rimuoviAssegnazione(ts.istanza_id, tp.prenotazione_id); }} style={{ background: '#FEF2F2', color: '#DC2626', border: '1px solid #FECACA', borderRadius: '5px', padding: '3px 7px', fontSize: '10px', cursor: 'pointer', fontWeight: '700' }}>✕</button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -2816,6 +2922,59 @@ export default function SalePage() {
             </div>
           </div>
         )}
+
+        {/* Form sposta prenotazione */}
+        {showSposta && spostaPrenotazioneId && (function() {
+          var prenSposta = null;
+          for (var i = 0; i < prenotazioni.length; i++) {
+            if (prenotazioni[i].id === spostaPrenotazioneId) { prenSposta = prenotazioni[i]; break; }
+          }
+          var nomeSposta = prenSposta && prenSposta.customer ? (prenSposta.customer.first_name + ' ' + prenSposta.customer.last_name) : 'Cliente';
+          var rappAttuale = getIstanzaRappresentante(ts.istanza_id);
+          // Ospiti di questa prenotazione su questo tavolo
+          var ospitiAttuali = 0;
+          for (var j = 0; j < tavoliPrenotazioni.length; j++) {
+            if (tavoliPrenotazioni[j].istanza_id === rappAttuale && tavoliPrenotazioni[j].prenotazione_id === spostaPrenotazioneId) {
+              ospitiAttuali = tavoliPrenotazioni[j].n_ospiti_assegnati || 0; break;
+            }
+          }
+          // Lista tavoli disponibili (tutti tranne questo)
+          var altriTavoli = layoutAttivo.filter(function(it) {
+            return it.istanza_id !== ts.istanza_id && it.istanza_id !== rappAttuale;
+          });
+          return (
+            <div style={{ marginTop: '12px', borderTop: '1px solid #f3f4f6', paddingTop: '14px', background: '#EFF6FF', borderRadius: '10px', padding: '14px', border: '1px solid #BFDBFE' }}>
+              <h4 style={{ margin: '0 0 10px 0', fontSize: '14px', fontWeight: '700', color: '#1D4ED8' }}>↗ Sposta — {nomeSposta}</h4>
+              <div style={{ fontSize: '12px', color: '#374151', marginBottom: '8px' }}>
+                Ospiti attualmente su questo tavolo: <strong>{ospitiAttuali}</strong>
+              </div>
+              <div style={{ marginBottom: '8px' }}>
+                <label style={{ fontSize: '12px', color: '#374151', fontWeight: '700', display: 'block', marginBottom: '4px' }}>Quanti ospiti spostare:</label>
+                <input type="number" min="1" max={ospitiAttuali} value={spostaOspiti}
+                  onChange={function(e) { setSpostaOspiti(e.target.value); }}
+                  style={{ width: '100%', padding: '8px', border: '2px solid #3B82F6', borderRadius: '6px', fontSize: '16px', fontWeight: '800', textAlign: 'center', boxSizing: 'border-box', color: '#1D4ED8' }} />
+              </div>
+              <div style={{ marginBottom: '10px' }}>
+                <label style={{ fontSize: '12px', color: '#374151', fontWeight: '700', display: 'block', marginBottom: '4px' }}>Tavolo destinazione:</label>
+                <select value={spostaDestinazioneId} onChange={function(e) { setSpostaDestinazioneId(e.target.value); }}
+                  style={{ width: '100%', padding: '8px', border: '1px solid #BFDBFE', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }}>
+                  <option value="">-- Seleziona tavolo --</option>
+                  {altriTavoli.map(function(it) {
+                    var et = (it.etichetta && it.etichetta.trim()) ? it.etichetta : (it.tavolo ? it.tavolo.nome : '?');
+                    var rappDest = getIstanzaRappresentante(it.istanza_id);
+                    var ospitiDest = tavoliPrenotazioni.filter(function(tp) { return tp.istanza_id === rappDest; }).reduce(function(s, tp) { return s + (tp.n_ospiti_assegnati || 0); }, 0);
+                    var capDest = it.tavolo ? getCapienzaEffettiva(it.istanza_id, it.tavolo.capacita) : 0;
+                    return <option key={it.istanza_id} value={it.istanza_id}>{et} ({ospitiDest}/{capDest} posti)</option>;
+                  })}
+                </select>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button onClick={confermaSposta} style={{ flex: 1, background: '#3B82F6', color: 'white', border: 'none', borderRadius: '8px', padding: '9px', fontSize: '13px', cursor: 'pointer', fontWeight: '700' }}>✓ Sposta</button>
+                <button onClick={function() { setShowSposta(false); setSpostaPrenotazioneId(null); setSpostaOspiti(0); setSpostaDestinazioneId(''); }} style={{ flex: 1, background: '#f3f4f6', color: '#374151', border: '1px solid #d1d5db', borderRadius: '8px', padding: '9px', fontSize: '13px', cursor: 'pointer' }}>Annulla</button>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     );
   }
