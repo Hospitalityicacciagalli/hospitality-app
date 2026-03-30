@@ -90,6 +90,12 @@ function nuovoPagamento() {
   };
 }
 
+function formatEventLabel(ev) {
+  var tipoLabel = ev.event_type === 'confirmed' ? 'CONFERMATO' : 'OPZIONE';
+  var pastoLabel = ev.meal_type === 'lunch' ? 'Pranzo' : (ev.meal_type === 'dinner' ? 'Cena' : 'Giornata');
+  return ev.event_date + ' - ' + ev.title + ' (' + pastoLabel + ', ' + tipoLabel + ')';
+}
+
 // ── FORM TAGLI DOPPIO (Ricevuto / Resto) ────────────────────
 function FormTagliDoppio(props) {
   var ricevuto = props.ricevuto;
@@ -247,6 +253,7 @@ function FormMovimento(props) {
   var centri = props.centri;
   var userId = props.userId;
   var tavoli = props.tavoli || [];
+  var eventi = props.eventi || [];
   var movimentoEsistente = props.movimento || null;
   var altreCase = CASSE.filter(function(c) { return c.id !== cassaId; });
   var isModifica = movimentoEsistente !== null;
@@ -261,6 +268,7 @@ function FormMovimento(props) {
   var [cassaCollegataId, setCassaCollegataId] = useState(isModifica ? (movimentoEsistente.cassa_collegata_id || '') : '');
   var [nota, setNota] = useState(isModifica ? (movimentoEsistente.nota || '') : '');
   var [tavoloId, setTavoloId] = useState(isModifica ? (movimentoEsistente.tavolo_id || '') : '');
+  var [eventoId, setEventoId] = useState(isModifica ? (movimentoEsistente.event_id || '') : '');
   var [saving, setSaving] = useState(false);
   var [errore, setErrore] = useState('');
 
@@ -268,6 +276,7 @@ function FormMovimento(props) {
   var isEntrata = tipoInfo.segno === '+';
   var richiedeCentro = TIPI_CHE_RICHIEDONO_CENTRO.indexOf(tipo) !== -1;
   var richiedeCassa = tipo === 'trasferimento_uscita' || tipo === 'trasferimento_entrata';
+  var isCaparra = tipo === 'caparra';
   var totale = parseFloat(totaleStr) || 0;
   var sommaPagamenti = arrotonda(pagamenti.reduce(function(acc, p) { return acc + (parseFloat(p.importo) || 0); }, 0));
   var residuo = arrotonda(totale - sommaPagamenti);
@@ -289,6 +298,7 @@ function FormMovimento(props) {
   if (richiedeCentro && !centroCostoId) alertsVivi.push('Nessun centro di costo selezionato.');
   if (isfattoria && !nota) alertsVivi.push('Movimento Fattoria senza nota esplicativa.');
   if (richiedeCassa && !cassaCollegataId) alertsVivi.push('Trasferimento senza cassa collegata.');
+  if (isCaparra && !eventoId) alertsVivi.push('Caparra senza evento collegato - registra comunque se l\'evento non e\' ancora in agenda.');
 
   function handleSave() {
     if (totale <= 0) { setErrore('Inserisci il totale del movimento.'); return; }
@@ -313,6 +323,7 @@ function FormMovimento(props) {
         provenienza: provenienza || null,
         cassa_collegata_id: cassaCollegataId || null,
         tavolo_id: tavoloId || null,
+        event_id: eventoId || null,
         nota: gruppoId ? ((nota ? nota + ' ' : '') + '(totale ' + formatEuro(totale) + ')') : (nota || null),
         alert_centro_costo: richiedeCentro && !centroCostoId,
         annullato: false,
@@ -329,6 +340,7 @@ function FormMovimento(props) {
         is_fattoria: r.is_fattoria, centro_di_costo_id: r.centro_di_costo_id,
         provenienza: r.provenienza, cassa_collegata_id: r.cassa_collegata_id,
         tavolo_id: r.tavolo_id,
+        event_id: r.event_id,
         nota: r.nota, alert_centro_costo: r.alert_centro_costo,
         annullato: r.annullato, inserito_da: r.inserito_da
       };
@@ -347,6 +359,11 @@ function FormMovimento(props) {
         if (tavoloId) {
           for (var j = 0; j < tavoli.length; j++) {
             if (tavoli[j].id === tavoloId) { salvato._tavolo_nome = tavoli[j].nome; break; }
+          }
+        }
+        if (eventoId) {
+          for (var k = 0; k < eventi.length; k++) {
+            if (eventi[k].id === eventoId) { salvato._evento_titolo = eventi[k].title; break; }
           }
         }
         if (riga._tagli) salvato._tagli = riga._tagli;
@@ -465,6 +482,26 @@ function FormMovimento(props) {
           </div>
         )}
 
+        {isCaparra && (
+          <div>
+            <label style={S.label}>
+              Evento collegato
+              <span style={{ color: '#64748b', marginLeft: '6px', fontSize: '11px', textTransform: 'none', letterSpacing: 0 }}>opzionale - collega la caparra all'evento in agenda</span>
+            </label>
+            <select value={eventoId} onChange={function(e) { setEventoId(e.target.value); }} style={S.select}>
+              <option value="">nessun evento collegato</option>
+              {eventi.map(function(ev) {
+                return <option key={ev.id} value={ev.id}>{formatEventLabel(ev)}</option>;
+              })}
+            </select>
+            {eventi.length === 0 && (
+              <div style={{ color: '#475569', fontSize: '12px', marginTop: '-12px', marginBottom: '16px' }}>
+                Nessun evento in agenda. Registra prima l'evento dalla vista giornaliera, oppure salva la caparra senza collegamento.
+              </div>
+            )}
+          </div>
+        )}
+
         <label style={S.label}>{tipoInfo.segno === '-' ? 'Destinatario / Causale' : 'Provenienza / Da chi'}</label>
         <input type="text" placeholder="es. Tavolo 5, Cliente Rossi, Direttore..." value={provenienza} onChange={function(e) { setProvenienza(e.target.value); }} style={S.input} />
 
@@ -562,6 +599,7 @@ function RigaMovimento(props) {
           {m.alert_centro_costo && !m.annullato && <span style={{ background: '#f59e0b18', color: '#f59e0b', fontSize: '11px', padding: '2px 8px', borderRadius: '10px', border: '1px solid #f59e0b55' }}>no centro costo</span>}
           {m.annullato && <span style={{ background: '#37415122', color: '#6b7280', fontSize: '11px', padding: '2px 8px', borderRadius: '10px' }}>Annullato</span>}
           {m._tavolo_nome && <span style={{ background: '#0369a122', color: '#38bdf8', fontSize: '11px', padding: '2px 8px', borderRadius: '10px', border: '1px solid #0369a144' }}>{m._tavolo_nome}</span>}
+          {m._evento_titolo && <span style={{ background: '#d9770622', color: '#fb923c', fontSize: '11px', padding: '2px 8px', borderRadius: '10px', border: '1px solid #d9770644' }}>Evento: {m._evento_titolo}</span>}
         </div>
         <div style={{ color: '#475569', fontSize: '12px', marginTop: '3px' }}>
           {getMetodoNome(m.metodo_pagamento_id)}
@@ -618,7 +656,6 @@ function VistaTavoli(props) {
   var onFiltra = props.onFiltra;
   var filtroTavoloId = props.filtroTavoloId;
 
-  // Calcola per ogni tavolo se ha movimenti attivi oggi
   function getStatoTavolo(tavoloId) {
     var movTavolo = movimenti.filter(function(m) {
       return !m.annullato && m.tavolo_id === tavoloId;
@@ -640,7 +677,7 @@ function VistaTavoli(props) {
     return (
       <div style={{ background: '#1a1f2e', borderRadius: '12px', padding: '48px', textAlign: 'center', border: '1px dashed #2d3448' }}>
         <div style={{ fontSize: '36px', marginBottom: '12px' }}>🪑</div>
-        <div style={{ color: '#475569', fontSize: '15px' }}>Nessun tavolo attivo. Aggiungili dal Modulo Tavoli.</div>
+        <div style={{ color: '#475569', fontSize: '15px' }}>Nessun tavolo attivo. Aggiungili dalla Mappa Sala.</div>
       </div>
     );
   }
@@ -724,6 +761,7 @@ export default function CassaPage() {
   var [movimenti, setMovimenti] = useState([]);
   var [centri, setCentri] = useState([]);
   var [tavoli, setTavoli] = useState([]);
+  var [eventi, setEventi] = useState([]);
   var [saldoContantiStorico, setSaldoContantiStorico] = useState(0);
   var [saldoCassaforte, setSaldoCassaforte] = useState(null);
   var [loading, setLoading] = useState(false);
@@ -741,11 +779,24 @@ export default function CassaPage() {
     });
   }, []);
 
-  // Carica tavoli attivi (usati sia per Vista Tavoli che per il form movimento)
+  // Carica tavoli da tavoli_sala (allineato con SalePage)
   useEffect(function() {
-    supabase.from('tavoli').select('id, nome, capacita').eq('attivo', true).order('nome').then(function(r) {
+    supabase.from('tavoli_sala').select('id, nome, capacita').eq('attivo', true).order('nome').then(function(r) {
       if (r.data) setTavoli(r.data);
     });
+  }, []);
+
+  // Carica eventi recenti e futuri per il collegamento caparre
+  useEffect(function() {
+    var treMesiFa = new Date();
+    treMesiFa.setMonth(treMesiFa.getMonth() - 3);
+    var treMesiFaISO = treMesiFa.toISOString().split('T')[0];
+    supabase.from('event_dates').select('id, event_date, title, event_type, meal_type')
+      .gte('event_date', treMesiFaISO)
+      .order('event_date', { ascending: false })
+      .then(function(r) {
+        if (r.data) setEventi(r.data);
+      });
   }, []);
 
   useEffect(function() {
@@ -768,11 +819,15 @@ export default function CassaPage() {
       .then(function(r) {
         setLoading(false);
         if (r.data) {
-          // Arricchisce con nome tavolo in memoria
           var lista = r.data.map(function(m) {
             if (m.tavolo_id) {
               for (var i = 0; i < tavoli.length; i++) {
                 if (tavoli[i].id === m.tavolo_id) { m._tavolo_nome = tavoli[i].nome; break; }
+              }
+            }
+            if (m.event_id) {
+              for (var j = 0; j < eventi.length; j++) {
+                if (eventi[j].id === m.event_id) { m._evento_titolo = eventi[j].title; break; }
               }
             }
             return m;
@@ -803,6 +858,21 @@ export default function CassaPage() {
       });
     });
   }, [tavoli]);
+
+  // Quando gli eventi vengono caricati, arricchisce i movimenti gia in lista
+  useEffect(function() {
+    if (eventi.length === 0) return;
+    setMovimenti(function(prev) {
+      return prev.map(function(m) {
+        if (m.event_id && !m._evento_titolo) {
+          for (var j = 0; j < eventi.length; j++) {
+            if (eventi[j].id === m.event_id) { return Object.assign({}, m, { _evento_titolo: eventi[j].title }); }
+          }
+        }
+        return m;
+      });
+    });
+  }, [eventi]);
 
   var totFiscaleGiorno = 0;
   var totPrelieviGiorno = 0;
@@ -842,7 +912,6 @@ export default function CassaPage() {
   var saldoContantiTotale = arrotonda(saldoContantiStorico + contantiGiorno);
   tagliCassaAgg._totale = saldoContantiTotale;
 
-  // Movimenti filtrati per tavolo (se filtro attivo)
   var movimentiFiltrati = filtroTavoloId
     ? movimenti.filter(function(m) { return m.tavolo_id === filtroTavoloId; })
     : movimenti;
@@ -910,7 +979,6 @@ export default function CassaPage() {
     });
   }
 
-  // Lista sezioni disponibili
   var sezioniDisponibili = [
     { id: 'movimenti', label: 'Movimenti' },
     { id: 'chiusura', label: 'Chiusura' }
@@ -1071,6 +1139,7 @@ export default function CassaPage() {
           centri={centri}
           userId={userId}
           tavoli={tavoli}
+          eventi={eventi}
           movimento={movimentoDaModificare}
           onSave={handleSaveMovimento}
           onClose={function() { setShowForm(false); setMovimentoDaModificare(null); }}

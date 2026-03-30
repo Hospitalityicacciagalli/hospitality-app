@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Plus, ArrowLeft, Users, Clock, Phone, AlertTriangle, CalendarDays, Baby, User } from 'lucide-react'
+import { Plus, ArrowLeft, Users, Clock, Phone, AlertTriangle, CalendarDays, Baby, User, Star, Calendar } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 function formatDateDisplay(dateStr) {
@@ -10,6 +10,227 @@ function formatDateDisplay(dateStr) {
   return d.toLocaleDateString('it-IT', options)
 }
 
+var STATO_EVENTO_LABELS = {
+  option: 'Opzione',
+  confirmed: 'Confermato'
+}
+
+var PASTO_LABELS = {
+  lunch: 'Pranzo',
+  dinner: 'Cena',
+  both: 'Giornata intera'
+}
+
+// ── FORM EVENTO ──────────────────────────────────────────────
+function FormEvento(props) {
+  var onSave = props.onSave
+  var onClose = props.onClose
+  var dateStr = props.dateStr
+  var eventoEsistente = props.evento || null
+  var isModifica = eventoEsistente !== null
+
+  var [title, setTitle] = useState(isModifica ? eventoEsistente.title : '')
+  var [eventType, setEventType] = useState(isModifica ? eventoEsistente.event_type : 'option')
+  var [mealType, setMealType] = useState(isModifica ? eventoEsistente.meal_type : 'dinner')
+  var [coversReserved, setCoversReserved] = useState(isModifica ? String(eventoEsistente.covers_reserved || '') : '')
+  var [notes, setNotes] = useState(isModifica ? (eventoEsistente.notes || '') : '')
+  var [saving, setSaving] = useState(false)
+  var [errore, setErrore] = useState('')
+
+  function handleSave() {
+    if (!title.trim()) { setErrore('Inserisci il titolo dell\'evento.'); return; }
+    setErrore('')
+    setSaving(true)
+
+    var payload = {
+      event_date: dateStr,
+      title: title.trim(),
+      event_type: eventType,
+      meal_type: mealType,
+      covers_reserved: parseInt(coversReserved, 10) || null,
+      notes: notes.trim() || null
+    }
+
+    var query = isModifica
+      ? supabase.from('event_dates').update(payload).eq('id', eventoEsistente.id).select()
+      : supabase.from('event_dates').insert([payload]).select()
+
+    query.then(function(result) {
+      setSaving(false)
+      if (result.error) { setErrore('Errore: ' + result.error.message); return; }
+      if (result.data && result.data.length > 0) {
+        onSave(result.data[0], isModifica)
+      }
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
+        <div className="flex items-center justify-between p-6 border-b border-gray-100">
+          <h2 className="text-lg font-bold text-gray-900">
+            {isModifica ? 'Modifica Evento' : 'Nuovo Evento'}
+          </h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+        </div>
+        <div className="p-6 space-y-4">
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Titolo evento *</label>
+            <input
+              type="text"
+              placeholder="es. Matrimonio Rossi, Compleanno 50 anni..."
+              value={title}
+              onChange={function(e) { setTitle(e.target.value); }}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
+              autoFocus
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Stato</label>
+            <div className="flex gap-2">
+              <button
+                onClick={function() { setEventType('option'); }}
+                className={"flex-1 py-2 px-3 rounded-lg text-sm font-medium border transition-colors " + (eventType === 'option' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50')}
+              >
+                Opzione
+              </button>
+              <button
+                onClick={function() { setEventType('confirmed'); }}
+                className={"flex-1 py-2 px-3 rounded-lg text-sm font-medium border transition-colors " + (eventType === 'confirmed' ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50')}
+              >
+                Confermato
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Pasto</label>
+            <div className="flex gap-2">
+              {['lunch', 'dinner', 'both'].map(function(p) {
+                return (
+                  <button
+                    key={p}
+                    onClick={function() { setMealType(p); }}
+                    className={"flex-1 py-2 px-2 rounded-lg text-xs font-medium border transition-colors " + (mealType === p ? 'bg-wine-700 text-white border-wine-700' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50')}
+                  >
+                    {PASTO_LABELS[p]}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Ospiti previsti (opzionale)</label>
+            <input
+              type="number"
+              min="1"
+              placeholder="es. 80"
+              value={coversReserved}
+              onChange={function(e) { setCoversReserved(e.target.value); }}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Note (opzionale)</label>
+            <textarea
+              rows={2}
+              placeholder="Note interne sull'evento..."
+              value={notes}
+              onChange={function(e) { setNotes(e.target.value); }}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 resize-none"
+            />
+          </div>
+
+          {errore && (
+            <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">
+              {errore}
+            </div>
+          )}
+        </div>
+
+        <div className="flex gap-3 p-6 pt-0">
+          <button
+            onClick={onClose}
+            className="flex-1 py-2.5 px-4 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          >
+            Annulla
+          </button>
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className={"flex-1 py-2.5 px-4 rounded-lg text-sm font-medium transition-colors " + (saving ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-wine-700 text-white hover:bg-wine-800')}
+          >
+            {saving ? 'Salvataggio...' : (isModifica ? 'Aggiorna' : 'Salva Evento')}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── CARD EVENTO ──────────────────────────────────────────────
+function CardEvento(props) {
+  var ev = props.evento
+  var onModifica = props.onModifica
+  var onElimina = props.onElimina
+
+  var isConfirmato = ev.event_type === 'confirmed'
+  var bgColor = isConfirmato ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-200'
+  var badgeColor = isConfirmato ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
+
+  return (
+    <div className={"rounded-xl border p-4 " + bgColor}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap mb-1">
+            {isConfirmato
+              ? <Star size={14} className="text-amber-500 fill-amber-500 flex-shrink-0" />
+              : <Clock size={14} className="text-blue-500 flex-shrink-0" />
+            }
+            <span className="font-semibold text-gray-900 text-sm">{ev.title}</span>
+            <span className={"px-2 py-0.5 rounded-full text-xs font-medium " + badgeColor}>
+              {STATO_EVENTO_LABELS[ev.event_type]}
+            </span>
+            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">
+              {PASTO_LABELS[ev.meal_type] || ev.meal_type}
+            </span>
+          </div>
+          <div className="flex items-center gap-3 text-xs text-gray-500 mt-1 flex-wrap">
+            {ev.covers_reserved && (
+              <span className="flex items-center gap-1">
+                <Users size={12} />
+                {ev.covers_reserved + ' ospiti previsti'}
+              </span>
+            )}
+            {ev.notes && (
+              <span className="text-gray-400 italic truncate max-w-xs">{ev.notes}</span>
+            )}
+          </div>
+        </div>
+        <div className="flex gap-1 flex-shrink-0">
+          <button
+            onClick={function() { onModifica(ev); }}
+            className="text-xs px-2 py-1 bg-white text-gray-600 rounded border border-gray-200 hover:bg-gray-50 transition-colors"
+          >
+            Modifica
+          </button>
+          <button
+            onClick={function() { onElimina(ev.id); }}
+            className="text-xs px-2 py-1 bg-white text-red-600 rounded border border-red-200 hover:bg-red-50 transition-colors"
+          >
+            Elimina
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── PAGINA GIORNALIERA ───────────────────────────────────────
 function ReservationDay() {
   var params = useParams()
   var dateStr = params.date
@@ -35,8 +256,25 @@ function ReservationDay() {
   var settings = settingsState[0]
   var setSettings = settingsState[1]
 
+  var eventiState = useState([])
+  var eventi = eventiState[0]
+  var setEventi = eventiState[1]
+
+  var showFormEventoState = useState(false)
+  var showFormEvento = showFormEventoState[0]
+  var setShowFormEvento = showFormEventoState[1]
+
+  var eventoInModificaState = useState(null)
+  var eventoInModifica = eventoInModificaState[0]
+  var setEventoInModifica = eventoInModificaState[1]
+
+  var sezioneState = useState('prenotazioni')
+  var sezione = sezioneState[0]
+  var setSezione = sezioneState[1]
+
   useEffect(function() {
     loadSettings()
+    loadEventi()
   }, [])
 
   useEffect(function() {
@@ -52,6 +290,19 @@ function ReservationDay() {
       .then(function(result) {
         if (!result.error && result.data) {
           setSettings(result.data)
+        }
+      })
+  }
+
+  function loadEventi() {
+    supabase
+      .from('event_dates')
+      .select('*')
+      .eq('event_date', dateStr)
+      .order('created_at', { ascending: true })
+      .then(function(result) {
+        if (!result.error) {
+          setEventi(result.data || [])
         }
       })
   }
@@ -109,6 +360,34 @@ function ReservationDay() {
       })
   }
 
+  function handleSaveEvento(eventoSalvato, isModifica) {
+    if (isModifica) {
+      setEventi(function(prev) {
+        return prev.map(function(ev) { return ev.id === eventoSalvato.id ? eventoSalvato : ev; })
+      })
+    } else {
+      setEventi(function(prev) { return prev.concat([eventoSalvato]); })
+    }
+    setShowFormEvento(false)
+    setEventoInModifica(null)
+  }
+
+  function handleModificaEvento(ev) {
+    setEventoInModifica(ev)
+    setShowFormEvento(true)
+  }
+
+  function handleEliminaEvento(id) {
+    if (!confirm('Eliminare questo evento dalla data? I movimenti di cassa collegati non vengono eliminati.')) return;
+    supabase.from('event_dates').delete().eq('id', id).then(function(result) {
+      if (result.error) {
+        alert('Errore eliminazione: ' + result.error.message)
+      } else {
+        setEventi(function(prev) { return prev.filter(function(ev) { return ev.id !== id; }); })
+      }
+    })
+  }
+
   var maxCovers = selectedMeal === 'lunch' ? settings.max_covers_lunch : settings.max_covers_dinner
   var remainingCovers = maxCovers - summary.total
 
@@ -149,6 +428,9 @@ function ReservationDay() {
   var activeReservations = reservations.filter(function(r) { return r.status !== 'cancelled' })
   var cancelledReservations = reservations.filter(function(r) { return r.status === 'cancelled' })
 
+  var eventiConfermati = eventi.filter(function(ev) { return ev.event_type === 'confirmed'; })
+  var eventiOpzione = eventi.filter(function(ev) { return ev.event_type === 'option'; })
+
   return (
     <div>
       {/* Intestazione */}
@@ -162,16 +444,65 @@ function ReservationDay() {
           </button>
           <div>
             <h1 className="text-2xl font-bold text-gray-900 capitalize">{formatDateDisplay(dateStr)}</h1>
+            {eventi.length > 0 && (
+              <div className="flex items-center gap-2 mt-0.5">
+                {eventiConfermati.length > 0 && (
+                  <span className="flex items-center gap-1 text-xs text-amber-700 font-medium">
+                    <Star size={12} className="fill-amber-500 text-amber-500" />
+                    {eventiConfermati.length === 1 ? '1 evento confermato' : eventiConfermati.length + ' eventi confermati'}
+                  </span>
+                )}
+                {eventiOpzione.length > 0 && (
+                  <span className="flex items-center gap-1 text-xs text-blue-600 font-medium">
+                    <Clock size={12} />
+                    {eventiOpzione.length === 1 ? '1 opzione' : eventiOpzione.length + ' opzioni'}
+                  </span>
+                )}
+              </div>
+            )}
           </div>
         </div>
-        <Link
-          to={"/prenotazioni/nuova?date=" + dateStr + "&meal=" + selectedMeal}
-          className="inline-flex items-center gap-2 bg-wine-700 text-white px-5 py-3 rounded-xl hover:bg-wine-800 transition-colors font-medium shadow-sm"
-        >
-          <Plus size={20} />
-          <span>Nuova Prenotazione</span>
-        </Link>
+        <div className="flex gap-2">
+          <button
+            onClick={function() { setEventoInModifica(null); setShowFormEvento(true); }}
+            className="inline-flex items-center gap-2 bg-amber-500 text-white px-4 py-2.5 rounded-xl hover:bg-amber-600 transition-colors font-medium shadow-sm text-sm"
+          >
+            <Calendar size={16} />
+            <span>Nuovo Evento</span>
+          </button>
+          <Link
+            to={"/prenotazioni/nuova?date=" + dateStr + "&meal=" + selectedMeal}
+            className="inline-flex items-center gap-2 bg-wine-700 text-white px-4 py-2.5 rounded-xl hover:bg-wine-800 transition-colors font-medium shadow-sm text-sm"
+          >
+            <Plus size={16} />
+            <span>Nuova Prenotazione</span>
+          </Link>
+        </div>
       </div>
+
+      {/* Sezione eventi (visibile se ci sono eventi) */}
+      {eventi.length > 0 && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-5">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+              <Star size={14} className="text-amber-500" />
+              {eventi.length === 1 ? 'Evento del giorno' : 'Eventi del giorno'}
+            </h2>
+          </div>
+          <div className="space-y-2">
+            {eventi.map(function(ev) {
+              return (
+                <CardEvento
+                  key={ev.id}
+                  evento={ev}
+                  onModifica={handleModificaEvento}
+                  onElimina={handleEliminaEvento}
+                />
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Tabs Pranzo / Cena */}
       <div className="flex gap-2 mb-4">
@@ -397,6 +728,16 @@ function ReservationDay() {
       )}
 
       <div className="h-8" />
+
+      {/* Form evento (modale) */}
+      {showFormEvento && (
+        <FormEvento
+          dateStr={dateStr}
+          evento={eventoInModifica}
+          onSave={handleSaveEvento}
+          onClose={function() { setShowFormEvento(false); setEventoInModifica(null); }}
+        />
+      )}
     </div>
   )
 }
