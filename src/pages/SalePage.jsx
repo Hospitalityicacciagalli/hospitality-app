@@ -2192,7 +2192,9 @@ export default function SalePage() {
       }
       var headerLabel = etichetta + partnerLabel + (partnerLabel ? ' <span style="font-size:10px;font-weight:400">(uniti)</span>' : '');
       var nAssegn = assegnazioni.length;
+      var haBambiniCucina = assegnazioni.some(function(tp) { return (tp.n_bambini_tavolo || 0) > 0; });
       var blocco = '<div class="tavolo-block"><div class="tavolo-header">' + headerLabel;
+      if (haBambiniCucina) blocco += ' <span style="font-size:13px">👶</span>';
       if (nAssegn > 1) blocco += ' <span style="font-size:10px;font-weight:400;background:#FEF3C7;color:#92400E;padding:1px 5px;border-radius:3px">' + nAssegn + ' prenotazioni</span>';
       blocco += '</div>';
       for (var a = 0; a < assegnazioni.length; a++) {
