@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Plus, ArrowLeft, Users, Clock, Phone, AlertTriangle, CalendarDays, Baby, User, Star, Calendar } from 'lucide-react'
+import { Plus, ArrowLeft, Users, Clock, Phone, AlertTriangle, CalendarDays, Baby, User, Star, Calendar, TableProperties, X, Check } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 function formatDateDisplay(dateStr) {
@@ -74,7 +74,6 @@ function FormEvento(props) {
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
         </div>
         <div className="p-6 space-y-4">
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Titolo evento *</label>
             <input
@@ -86,7 +85,6 @@ function FormEvento(props) {
               autoFocus
             />
           </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Stato</label>
             <div className="flex gap-2">
@@ -104,7 +102,6 @@ function FormEvento(props) {
               </button>
             </div>
           </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Pasto</label>
             <div className="flex gap-2">
@@ -121,7 +118,6 @@ function FormEvento(props) {
               })}
             </div>
           </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Ospiti previsti (opzionale)</label>
             <input
@@ -133,7 +129,6 @@ function FormEvento(props) {
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
             />
           </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Note (opzionale)</label>
             <textarea
@@ -144,14 +139,12 @@ function FormEvento(props) {
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 resize-none"
             />
           </div>
-
           {errore && (
             <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">
               {errore}
             </div>
           )}
         </div>
-
         <div className="flex gap-3 p-6 pt-0">
           <button
             onClick={onClose}
@@ -230,6 +223,320 @@ function CardEvento(props) {
   )
 }
 
+// ── PANNELLO ASSEGNAZIONE TAVOLI ─────────────────────────────
+function PannelloTavoli(props) {
+  var prenotazione = props.prenotazione
+  var dateStr = props.dateStr
+  var turno = props.turno
+  var onClose = props.onClose
+
+  var [sale, setSale] = useState([])
+  var [tavoliPerSala, setTavoliPerSala] = useState({})
+  var [tavoliOccupati, setTavoliOccupati] = useState([]) // id tavoli occupati da ALTRE prenotazioni
+  var [tavoliSelezionati, setTavoliSelezionati] = useState([]) // id tavoli già assegnati a QUESTA prenotazione
+  var [loading, setLoading] = useState(true)
+  var [saving, setSaving] = useState(false)
+  var [salaAttiva, setSalaAttiva] = useState(null)
+
+  var customer = prenotazione.customers
+
+  useEffect(function() {
+    loadDati()
+  }, [])
+
+  function loadDati() {
+    setLoading(true)
+
+    // Carica sale attive
+    supabase
+      .from('sale')
+      .select('*')
+      .eq('attiva', true)
+      .order('ordine', { ascending: true })
+      .then(function(result) {
+        if (result.error || !result.data) { setLoading(false); return }
+        var saleData = result.data
+        setSale(saleData)
+        if (saleData.length > 0) setSalaAttiva(saleData[0].id)
+
+        // Carica tavoli attivi di tutte le sale
+        return supabase
+          .from('tavoli_sala')
+          .select('*')
+          .eq('attivo', true)
+          .order('nome', { ascending: true })
+      })
+      .then(function(result) {
+        if (!result || result.error || !result.data) { setLoading(false); return }
+        var mappa = {}
+        result.data.forEach(function(t) {
+          if (!mappa[t.sala_id]) mappa[t.sala_id] = []
+          mappa[t.sala_id].push(t)
+        })
+        setTavoliPerSala(mappa)
+
+        // Carica assegnazioni già presenti per questo turno e data
+        return supabase
+          .from('tavoli_prenotazioni')
+          .select('tavolo_id, prenotazione_id')
+          .eq('data', dateStr)
+          .eq('turno', turno)
+      })
+      .then(function(result) {
+        setLoading(false)
+        if (!result || result.error || !result.data) return
+
+        var occupatiDaAltri = []
+        var giaMiei = []
+
+        result.data.forEach(function(tp) {
+          if (tp.prenotazione_id === prenotazione.id) {
+            giaMiei.push(tp.tavolo_id)
+          } else {
+            occupatiDaAltri.push(tp.tavolo_id)
+          }
+        })
+
+        setTavoliOccupati(occupatiDaAltri)
+        setTavoliSelezionati(giaMiei)
+      })
+  }
+
+  function toggleTavolo(tavoloId) {
+    var isOccupato = tavoliOccupati.indexOf(tavoloId) !== -1
+    if (isOccupato) return // non selezionabile
+
+    setTavoliSelezionati(function(prev) {
+      if (prev.indexOf(tavoloId) !== -1) {
+        return prev.filter(function(id) { return id !== tavoloId })
+      } else {
+        return prev.concat([tavoloId])
+      }
+    })
+  }
+
+  function handleSalva() {
+    setSaving(true)
+
+    // Prima elimina tutte le assegnazioni esistenti per questa prenotazione in questo turno/data
+    supabase
+      .from('tavoli_prenotazioni')
+      .delete()
+      .eq('prenotazione_id', prenotazione.id)
+      .eq('data', dateStr)
+      .eq('turno', turno)
+      .then(function(result) {
+        if (result.error) {
+          setSaving(false)
+          alert('Errore: ' + result.error.message)
+          return
+        }
+
+        // Se non ci sono tavoli selezionati, fine
+        if (tavoliSelezionati.length === 0) {
+          setSaving(false)
+          onClose(true)
+          return
+        }
+
+        // Inserisce le nuove assegnazioni
+        var righe = tavoliSelezionati.map(function(tavoloId) {
+          return {
+            prenotazione_id: prenotazione.id,
+            tavolo_id: tavoloId,
+            data: dateStr,
+            turno: turno,
+            n_ospiti_assegnati: 0,
+            n_bambini_tavolo: 0,
+            allergie_tavolo: []
+          }
+        })
+
+        return supabase.from('tavoli_prenotazioni').insert(righe)
+      })
+      .then(function(result) {
+        setSaving(false)
+        if (result && result.error) {
+          alert('Errore salvataggio: ' + result.error.message)
+          return
+        }
+        onClose(true)
+      })
+  }
+
+  // Calcola decine per griglia
+  function getDecina(nome) {
+    var num = parseInt(nome.replace(/[^0-9]/g, ''), 10)
+    if (isNaN(num)) return 0
+    return Math.floor(num / 10) * 10
+  }
+
+  function buildGriglia(tavoli) {
+    var colonneMap = {}
+    tavoli.forEach(function(t) {
+      var dec = getDecina(t.nome)
+      if (!colonneMap[dec]) colonneMap[dec] = []
+      colonneMap[dec].push(t)
+    })
+    var keys = Object.keys(colonneMap).map(Number).sort(function(a, b) { return a - b })
+    return keys.map(function(k) {
+      var col = colonneMap[k].slice().sort(function(a, b) {
+        var na = parseInt(a.nome.replace(/[^0-9]/g, ''), 10)
+        var nb = parseInt(b.nome.replace(/[^0-9]/g, ''), 10)
+        return na - nb
+      })
+      return { decina: k, tavoli: col }
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-2xl shadow-2xl flex flex-col max-h-screen sm:max-h-[90vh]">
+
+        {/* Header */}
+        <div className="flex items-center justify-between p-5 border-b border-gray-100 flex-shrink-0">
+          <div>
+            <h2 className="text-base font-bold text-gray-900">Assegna Tavoli</h2>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {customer.last_name + ' ' + customer.first_name + ' · ' + prenotazione.guests_count + ' ospiti'}
+            </p>
+          </div>
+          <button onClick={function() { onClose(false) }} className="text-gray-400 hover:text-gray-600 p-1">
+            <X size={22} />
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center h-40">
+            <p className="text-gray-400 text-sm">Caricamento...</p>
+          </div>
+        ) : (
+          <>
+            {/* Tabs sale */}
+            {sale.length > 1 && (
+              <div className="flex gap-2 px-5 pt-4 flex-shrink-0 overflow-x-auto">
+                {sale.map(function(s) {
+                  return (
+                    <button
+                      key={s.id}
+                      onClick={function() { setSalaAttiva(s.id) }}
+                      className={"px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors " + (salaAttiva === s.id ? 'bg-wine-700 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200')}
+                    >
+                      {s.nome}
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Griglia tavoli */}
+            <div className="flex-1 overflow-y-auto px-5 py-4">
+              {sale.map(function(s) {
+                if (s.id !== salaAttiva) return null
+                var tavoli = tavoliPerSala[s.id] || []
+                if (tavoli.length === 0) {
+                  return (
+                    <div key={s.id} className="text-center py-8 text-gray-400 text-sm">
+                      Nessun tavolo configurato per questa sala.
+                    </div>
+                  )
+                }
+                var griglia = buildGriglia(tavoli)
+                return (
+                  <div key={s.id}>
+                    <div className="flex gap-3 overflow-x-auto pb-2">
+                      {griglia.map(function(colonna) {
+                        return (
+                          <div key={colonna.decina} className="flex flex-col gap-2 flex-shrink-0">
+                            {colonna.tavoli.map(function(t) {
+                              var isOccupato = tavoliOccupati.indexOf(t.id) !== -1
+                              var isSelezionato = tavoliSelezionati.indexOf(t.id) !== -1
+
+                              var stile = 'bg-gray-50 border-gray-200 text-gray-700 hover:bg-gray-100'
+                              if (isOccupato) stile = 'bg-red-50 border-red-200 text-red-400 cursor-not-allowed opacity-60'
+                              else if (isSelezionato) stile = 'bg-green-500 border-green-600 text-white shadow-sm'
+
+                              return (
+                                <button
+                                  key={t.id}
+                                  onClick={function() { toggleTavolo(t.id) }}
+                                  disabled={isOccupato}
+                                  className={"w-16 h-12 rounded-lg border-2 text-sm font-mono font-semibold transition-all relative " + stile}
+                                >
+                                  {t.nome}
+                                  {isSelezionato && (
+                                    <span className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-green-600 rounded-full flex items-center justify-center">
+                                      <Check size={10} className="text-white" />
+                                    </span>
+                                  )}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        )
+                      })}
+                    </div>
+
+                    {/* Legenda */}
+                    <div className="flex gap-4 mt-4 text-xs text-gray-500">
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-4 h-4 rounded bg-gray-100 border border-gray-200 inline-block"></span>
+                        Libero
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-4 h-4 rounded bg-green-500 inline-block"></span>
+                        Selezionato
+                      </span>
+                      <span className="flex items-center gap-1.5">
+                        <span className="w-4 h-4 rounded bg-red-100 border border-red-200 inline-block"></span>
+                        Occupato
+                      </span>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Riepilogo selezione */}
+            {tavoliSelezionati.length > 0 && (
+              <div className="px-5 py-3 bg-green-50 border-t border-green-100 flex-shrink-0">
+                <p className="text-sm text-green-700 font-medium">
+                  {tavoliSelezionati.length === 1 ? '1 tavolo selezionato' : tavoliSelezionati.length + ' tavoli selezionati'}
+                  {': '}
+                  {tavoliSelezionati.map(function(id) {
+                    var trovato = null
+                    Object.values(tavoliPerSala).forEach(function(lista) {
+                      lista.forEach(function(t) { if (t.id === id) trovato = t })
+                    })
+                    return trovato ? trovato.nome : id
+                  }).join(', ')}
+                </p>
+              </div>
+            )}
+
+            {/* Footer */}
+            <div className="flex gap-3 p-5 border-t border-gray-100 flex-shrink-0">
+              <button
+                onClick={function() { onClose(false) }}
+                className="flex-1 py-3 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Annulla
+              </button>
+              <button
+                onClick={handleSalva}
+                disabled={saving}
+                className={"flex-1 py-3 rounded-xl text-sm font-medium transition-colors " + (saving ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-wine-700 text-white hover:bg-wine-800')}
+              >
+                {saving ? 'Salvataggio...' : 'Salva assegnazione'}
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── PAGINA GIORNALIERA ───────────────────────────────────────
 function ReservationDay() {
   var params = useParams()
@@ -268,9 +575,14 @@ function ReservationDay() {
   var eventoInModifica = eventoInModificaState[0]
   var setEventoInModifica = eventoInModificaState[1]
 
-  var sezioneState = useState('prenotazioni')
-  var sezione = sezioneState[0]
-  var setSezione = sezioneState[1]
+  var pannelloTavoliState = useState(null) // prenotazione selezionata
+  var pannelloTavoli = pannelloTavoliState[0]
+  var setPannelloTavoli = pannelloTavoliState[1]
+
+  // Mappa prenotazione_id -> nomi tavoli assegnati (per mostrare badge)
+  var tavoliAssegnatiState = useState({})
+  var tavoliAssegnati = tavoliAssegnatiState[0]
+  var setTavoliAssegnati = tavoliAssegnatiState[1]
 
   useEffect(function() {
     loadSettings()
@@ -344,6 +656,24 @@ function ReservationDay() {
         }
         setLoading(false)
       })
+
+    // Carica anche le assegnazioni tavoli per questa data/turno
+    supabase
+      .from('tavoli_prenotazioni')
+      .select('prenotazione_id, tavolo_id, tavoli_sala(nome)')
+      .eq('data', dateStr)
+      .eq('turno', selectedMeal)
+      .then(function(result) {
+        if (result.error || !result.data) return
+        var mappa = {}
+        result.data.forEach(function(tp) {
+          if (!mappa[tp.prenotazione_id]) mappa[tp.prenotazione_id] = []
+          if (tp.tavoli_sala && tp.tavoli_sala.nome) {
+            mappa[tp.prenotazione_id].push(tp.tavoli_sala.nome)
+          }
+        })
+        setTavoliAssegnati(mappa)
+      })
   }
 
   function updateStatus(reservationId, newStatus) {
@@ -386,6 +716,29 @@ function ReservationDay() {
         setEventi(function(prev) { return prev.filter(function(ev) { return ev.id !== id; }); })
       }
     })
+  }
+
+  function handleChiudiPannelloTavoli(aggiornato) {
+    setPannelloTavoli(null)
+    if (aggiornato) {
+      // Ricarica le assegnazioni tavoli
+      supabase
+        .from('tavoli_prenotazioni')
+        .select('prenotazione_id, tavolo_id, tavoli_sala(nome)')
+        .eq('data', dateStr)
+        .eq('turno', selectedMeal)
+        .then(function(result) {
+          if (result.error || !result.data) return
+          var mappa = {}
+          result.data.forEach(function(tp) {
+            if (!mappa[tp.prenotazione_id]) mappa[tp.prenotazione_id] = []
+            if (tp.tavoli_sala && tp.tavoli_sala.nome) {
+              mappa[tp.prenotazione_id].push(tp.tavoli_sala.nome)
+            }
+          })
+          setTavoliAssegnati(mappa)
+        })
+    }
   }
 
   var maxCovers = selectedMeal === 'lunch' ? settings.max_covers_lunch : settings.max_covers_dinner
@@ -432,7 +785,8 @@ function ReservationDay() {
   var eventiOpzione = eventi.filter(function(ev) { return ev.event_type === 'option'; })
 
   return (
-    <div>
+    <div className="max-w-3xl mx-auto px-4 py-6">
+
       {/* Intestazione */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div className="flex items-center gap-4">
@@ -480,7 +834,7 @@ function ReservationDay() {
         </div>
       </div>
 
-      {/* Sezione eventi (visibile se ci sono eventi) */}
+      {/* Sezione eventi */}
       {eventi.length > 0 && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-5">
           <div className="flex items-center justify-between mb-3">
@@ -582,6 +936,7 @@ function ReservationDay() {
           {activeReservations.map(function(res) {
             var customer = res.customers
             var timeStr = res.requested_time ? res.requested_time.substring(0, 5) : null
+            var tavoli = tavoliAssegnati[res.id] || []
 
             return (
               <div
@@ -630,14 +985,25 @@ function ReservationDay() {
                       )}
                     </div>
 
+                    {/* Badge tavoli assegnati */}
+                    {tavoli.length > 0 && (
+                      <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                        <TableProperties size={13} className="text-wine-600" />
+                        {tavoli.map(function(nome) {
+                          return (
+                            <span key={nome} className="px-2 py-0.5 rounded-md text-xs font-mono font-medium bg-wine-50 text-wine-700 border border-wine-200">
+                              {nome}
+                            </span>
+                          )
+                        })}
+                      </div>
+                    )}
+
                     {res.notes && (
                       <p className="text-sm text-gray-600 mt-2">{res.notes}</p>
                     )}
                     {res.special_requests && (
                       <p className="text-sm text-orange-600 mt-1">{"★ " + res.special_requests}</p>
-                    )}
-                    {res.table_info && (
-                      <p className="text-sm text-gray-500 mt-1">{"Tavolo: " + res.table_info}</p>
                     )}
                   </div>
 
@@ -647,6 +1013,15 @@ function ReservationDay() {
                     </span>
 
                     <div className="flex gap-1 flex-wrap justify-end">
+                      {/* Pulsante tavoli */}
+                      <button
+                        onClick={function() { setPannelloTavoli(res) }}
+                        className={"text-xs px-2 py-1 rounded border transition-colors " + (tavoli.length > 0 ? 'bg-wine-50 text-wine-700 border-wine-200 hover:bg-wine-100' : 'bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100')}
+                        title="Assegna tavoli"
+                      >
+                        <TableProperties size={13} />
+                      </button>
+
                       {res.status === 'confirmed' && (
                         <button
                           onClick={function() { updateStatus(res.id, 'arrived') }}
@@ -738,6 +1113,17 @@ function ReservationDay() {
           onClose={function() { setShowFormEvento(false); setEventoInModifica(null); }}
         />
       )}
+
+      {/* Pannello assegnazione tavoli */}
+      {pannelloTavoli && (
+        <PannelloTavoli
+          prenotazione={pannelloTavoli}
+          dateStr={dateStr}
+          turno={selectedMeal}
+          onClose={handleChiudiPannelloTavoli}
+        />
+      )}
+
     </div>
   )
 }

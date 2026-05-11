@@ -65,18 +65,7 @@ export default function Layout({ children }) {
           Clienti
         </NavLink>
 
-        {hasRole(['super_admin', 'proprieta', 'direttore', 'reception', 'sala']) && (
-          <NavLink
-            to="/sale"
-            className={function(p) { return navClass(p.isActive); }}
-            onClick={function() { setMobileOpen(false); }}
-          >
-            <span className="text-base">🗺️</span>
-            Sale e Tavoli
-          </NavLink>
-        )}
-
-        {hasRole(['super_admin', 'direttore', 'reception']) && (
+        {hasRole(['super_admin', 'direttore', 'reception', 'sala']) && (
           <NavLink
             to="/staff"
             className={function(p) { return navClass(p.isActive); }}
@@ -101,6 +90,15 @@ export default function Layout({ children }) {
         {hasRole(['super_admin', 'direttore']) && (
           <>
             <div className="text-wine-400 text-xs font-semibold uppercase tracking-wider px-3 mt-4 mb-2">Amministrazione</div>
+
+            <NavLink
+              to="/gestione-sale"
+              className={function(p) { return navClass(p.isActive); }}
+              onClick={function() { setMobileOpen(false); }}
+            >
+              <span className="text-base">🪑</span>
+              Sale e Tavoli
+            </NavLink>
 
             <NavLink
               to="/impostazioni"

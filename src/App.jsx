@@ -16,6 +16,7 @@ import UserManagement from './pages/UserManagement';
 import ProfilePage from './pages/ProfilePage';
 import CassaPage from './pages/CassaPage';
 import SalePage from './pages/SalePage';
+import GestioneSalePage from './pages/GestioneSalePage';
 
 function ProtectedRoute({ children, roles }) {
   var { session, profile, loading } = useAuth();
@@ -111,9 +112,16 @@ function AppRoutes() {
           </ProtectedRoute>
         } />
 
-        {/* Sale e Tavoli */}
+        {/* Gestione sale e tavoli (tutti gli utenti operativi - via menu) */}
+        <Route path="/gestione-sale" element={
+          <ProtectedRoute roles={['super_admin', 'direttore']}>
+            <GestioneSalePage />
+          </ProtectedRoute>
+        } />
+
+        {/* Mappa sala grafica (solo admin - non nel menu) */}
         <Route path="/sale" element={
-          <ProtectedRoute roles={['super_admin', 'proprieta', 'direttore', 'reception', 'sala']}>
+          <ProtectedRoute roles={['super_admin', 'direttore']}>
             <SalePage />
           </ProtectedRoute>
         } />
@@ -140,7 +148,7 @@ function AppRoutes() {
           </ProtectedRoute>
         } />
 
-        {/* Cassa - Reception e Ristorante */}
+        {/* Cassa */}
         <Route path="/cassa" element={
           <ProtectedRoute roles={['super_admin', 'proprieta', 'direttore', 'reception', 'sala']}>
             <CassaPage />

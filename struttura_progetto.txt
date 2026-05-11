@@ -1,0 +1,47 @@
+Elenco del percorso delle cartelle
+Numero di serie del volume: DA6C-C0DF
+C:.
+¦   .env.local
+¦   .gitignore
+¦   index.html
+¦   package.json
+¦   postcss.config.js
+¦   struttura.txt
+¦   struttura_progetto.txt
+¦   tailwind.config.js
+¦   vite.config.js
+¦   
++---public
+¦       vite.svg
+¦       
++---src
+    ¦   App.jsx
+    ¦   index.css
+    ¦   main.jsx
+    ¦   
+    +---components
+    ¦       AllergenBadge.jsx
+    ¦       Layout.jsx
+    ¦       
+    +---lib
+    ¦       AuthContext.jsx
+    ¦       supabase.js
+    ¦       
+    +---pages
+            CassaPage.jsx
+            CustomerDetail.jsx
+            CustomerForm.jsx
+            CustomerList.jsx
+            Gestionale_Azienda_agricola_i_Cacciagalli.md
+            LoginPage.jsx
+            ProfilePage.jsx
+            ReservationCalendar.jsx
+            ReservationDay.jsx
+            ReservationForm.jsx
+            SalePage.jsx
+            SettingsPage.jsx
+            StaffDetail.jsx
+            StaffForm.jsx
+            StaffList.jsx
+            UserManagement.jsx
+            
