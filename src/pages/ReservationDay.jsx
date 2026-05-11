@@ -21,6 +21,10 @@ var PASTO_LABELS = {
   both: 'Giornata intera'
 }
 
+function turnoDb(turno) {
+  return turno === 'lunch' ? 'pranzo' : 'cena'
+}
+
 // ── FORM EVENTO ──────────────────────────────────────────────
 function FormEvento(props) {
   var onSave = props.onSave
@@ -280,7 +284,7 @@ function PannelloTavoli(props) {
           .from('tavoli_prenotazioni')
           .select('tavolo_id, prenotazione_id')
           .eq('data', dateStr)
-          .eq('turno', turno)
+          .eq('turno', turnoDb(turno))
       })
       .then(function(result) {
         setLoading(false)
@@ -324,7 +328,7 @@ function PannelloTavoli(props) {
       .delete()
       .eq('prenotazione_id', prenotazione.id)
       .eq('data', dateStr)
-      .eq('turno', turno)
+      .eq('turno', turnoDb(turno))
       .then(function(result) {
         if (result.error) {
           setSaving(false)
@@ -345,7 +349,7 @@ function PannelloTavoli(props) {
             prenotazione_id: prenotazione.id,
             tavolo_id: tavoloId,
             data: dateStr,
-            turno: turno,
+            turno: turnoDb(turno),
             n_ospiti_assegnati: 0,
             n_bambini_tavolo: 0,
             allergie_tavolo: []
@@ -662,7 +666,7 @@ function ReservationDay() {
       .from('tavoli_prenotazioni')
       .select('prenotazione_id, tavolo_id, tavoli_sala(nome)')
       .eq('data', dateStr)
-      .eq('turno', selectedMeal)
+      .eq('turno', turnoDb(selectedMeal))
       .then(function(result) {
         if (result.error || !result.data) return
         var mappa = {}
@@ -726,7 +730,7 @@ function ReservationDay() {
         .from('tavoli_prenotazioni')
         .select('prenotazione_id, tavolo_id, tavoli_sala(nome)')
         .eq('data', dateStr)
-        .eq('turno', selectedMeal)
+        .eq('turno', turnoDb(selectedMeal))
         .then(function(result) {
           if (result.error || !result.data) return
           var mappa = {}
