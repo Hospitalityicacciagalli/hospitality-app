@@ -205,11 +205,10 @@ function PannelloTavoli(props) {
         result.data.forEach(function(tp) {
           if (tp.prenotazione_id === prenotazione.id) {
             giaMiei.push(tp.tavolo_id)
-            var allergeArr = tp.allergie_tavolo || []
             dettagli[tp.tavolo_id] = {
               ospiti: tp.n_ospiti_assegnati || 0,
               bambini: tp.n_bambini_tavolo || 0,
-              allergeni: allergeArr.join(', '),
+              allergeni: (tp.allergie_tavolo || []).join(', '),
               note: tp.note_tavolo || ''
             }
           } else {
@@ -227,9 +226,7 @@ function PannelloTavoli(props) {
     setTavoliSelezionati(function(prev) {
       if (prev.indexOf(tavoloId) !== -1) {
         setDettagliTavoli(function(d) {
-          var next = Object.assign({}, d)
-          delete next[tavoloId]
-          return next
+          var next = Object.assign({}, d); delete next[tavoloId]; return next
         })
         return prev.filter(function(id) { return id !== tavoloId })
       } else {
@@ -334,7 +331,6 @@ function PannelloTavoli(props) {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
       <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-2xl shadow-2xl flex flex-col max-h-screen sm:max-h-[92vh]">
-
         <div className="flex items-center justify-between p-5 border-b border-gray-100 flex-shrink-0">
           <div>
             <h2 className="text-base font-bold text-gray-900">Assegna Tavoli</h2>
@@ -501,7 +497,7 @@ function StampaMenu(props) {
     return function() { document.removeEventListener('mousedown', handleClick) }
   }, [])
 
-  var stileBase = '<style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px;} h1{font-size:16px;margin-bottom:4px;} .sub{color:#666;font-size:11px;margin-bottom:16px;} table{width:100%;border-collapse:collapse;margin-bottom:16px;} th{background:#7a1b2e;color:white;padding:6px 8px;text-align:left;font-size:11px;} td{padding:6px 8px;border-bottom:1px solid #eee;vertical-align:top;} .section-title{font-weight:bold;font-size:13px;color:#7a1b2e;margin:18px 0 6px;border-bottom:2px solid #7a1b2e;padding-bottom:3px;} .badge{display:inline-block;background:#fee2e2;color:#991b1b;border-radius:4px;padding:1px 5px;font-size:10px;margin-right:3px;} .badge-bam{display:inline-block;background:#fef9c3;color:#854d0e;border-radius:4px;padding:1px 5px;font-size:10px;} .note{color:#666;font-style:italic;font-size:11px;} .avviso{background:#fff7ed;border:1px solid #fed7aa;border-radius:4px;padding:4px 8px;font-size:11px;color:#9a3412;margin-top:4px;} .card{border:1px solid #ddd;border-radius:6px;padding:10px 14px;margin-bottom:10px;page-break-inside:avoid;} .cliente{font-weight:bold;font-size:13px;} .row{display:flex;gap:16px;margin-top:4px;flex-wrap:wrap;} @media print{body{padding:8px;}}</style>'
+  var stileBase = '<style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px;} h1{font-size:16px;margin-bottom:4px;} .sub{color:#666;font-size:11px;margin-bottom:16px;} table{width:100%;border-collapse:collapse;margin-bottom:16px;} th{background:#7a1b2e;color:white;padding:6px 8px;text-align:left;font-size:11px;} td{padding:6px 8px;border-bottom:1px solid #eee;vertical-align:top;} .section-title{font-weight:bold;font-size:13px;color:#7a1b2e;margin:18px 0 6px;border-bottom:2px solid #7a1b2e;padding-bottom:3px;} .badge{display:inline-block;background:#fee2e2;color:#991b1b;border-radius:4px;padding:1px 5px;font-size:10px;margin-right:3px;} .badge-bam{display:inline-block;background:#fef9c3;color:#854d0e;border-radius:4px;padding:1px 5px;font-size:10px;} .badge-stato{display:inline-block;border-radius:4px;padding:1px 6px;font-size:10px;margin-right:3px;} .note{color:#666;font-style:italic;font-size:11px;} .avviso{background:#fff7ed;border:1px solid #fed7aa;border-radius:4px;padding:4px 8px;font-size:11px;color:#9a3412;margin-top:3px;} .card{border:1px solid #ddd;border-radius:6px;padding:10px 14px;margin-bottom:10px;page-break-inside:avoid;} .cliente{font-weight:bold;font-size:13px;} .row{display:flex;gap:16px;margin-top:4px;flex-wrap:wrap;align-items:center;} @media print{body{padding:8px;}}</style>'
 
   function buildStampaSalaHtml(salaFiltro, righeAll, turnoLabel) {
     var titolo = salaFiltro ? 'Sala: ' + salaFiltro.nome : 'Riepilogo tutte le sale'
@@ -525,8 +521,7 @@ function StampaMenu(props) {
       html += '<table><tr><th>Tavolo</th><th>Cliente</th><th>Ospiti</th><th>Bambini</th><th>Allergeni</th><th>Note</th></tr>'
       nomiTavoli.forEach(function(nomeTavolo) {
         perTavolo[nomeTavolo].forEach(function(item) {
-          var res = item.res
-          var tp = item.tp
+          var res = item.res; var tp = item.tp
           var cliente = res.customers ? (res.customers.last_name + ' ' + res.customers.first_name) : '\u2014'
           var allerge = tp.allergie_tavolo || []
           var allergeLabel = allerge.length > 0 ? allerge.map(function(a) { return '<span class="badge">' + a + '</span>' }).join('') : '\u2014'
@@ -586,11 +581,14 @@ function StampaMenu(props) {
           if (bambiniTotRes > 0) html += '<span class="badge-bam">\ud83c\udf7c ' + bambiniTotRes + ' bambini</span>'
           if (res.requested_time) html += '<span>\u23f0 ' + res.requested_time.substring(0, 5) + '</span>'
           html += '</div>'
+          if (res.allergie_prenotazione) {
+            html += '<div class="avviso">\u26a0 Allergeni prenotazione: ' + res.allergie_prenotazione + '</div>'
+          }
           if (allergeClienti.length > 0) {
             html += '<div class="avviso">\u26a0 Allergeni cliente: ' + allergeClienti.map(function(a) { return '<span class="badge">' + a + '</span>' }).join('') + '</div>'
           }
           if (tavRighe.length > 0) {
-            html += '<table style="margin-top:8px;"><tr><th>Tavolo</th><th>Sala</th><th>Ospiti</th><th>Bambini</th><th>Allergeni</th><th>Note</th></tr>'
+            html += '<table style="margin-top:8px;"><tr><th>Tavolo</th><th>Sala</th><th>Ospiti</th><th>Bambini</th><th>Allergeni tavolo</th><th>Note</th></tr>'
             tavRighe.forEach(function(r) {
               var nomeTav = r.tavoli_sala ? r.tavoli_sala.nome : '\u2014'
               var salaObj = r.tavoli_sala ? sale.find(function(s) { return s.id === r.tavoli_sala.sala_id }) : null
@@ -618,6 +616,62 @@ function StampaMenu(props) {
       })
   }
 
+  function stampaPrenotazioni() {
+    setAperto(false)
+    var turnoLabel = turno === 'lunch' ? 'Pranzo' : 'Cena'
+    var statusLabels = { confirmed: 'Confermata', arrived: 'Arrivato', seated: 'Accomodato', completed: 'Completato', no_show: 'No Show' }
+    var statusColors = { confirmed: '#dbeafe', arrived: '#fef9c3', seated: '#dcfce7', completed: '#f3f4f6', no_show: '#ffedd5' }
+    var categoryLabels = { standard: '', vip: 'VIP', press: 'Stampa', business: 'Business', hotel_guest: 'Ospite Hotel' }
+
+    // Separa prenotazioni con e senza orario, ordina per orario
+    var conOrario = reservations.filter(function(r) { return r.requested_time }).slice().sort(function(a, b) { return a.requested_time > b.requested_time ? 1 : -1 })
+    var senzaOrario = reservations.filter(function(r) { return !r.requested_time })
+    var ordinate = conOrario.concat(senzaOrario)
+
+    var html = '<html><head><title>Prenotazioni ' + turnoLabel + '</title>' + stileBase + '</head><body>'
+    html += '<h1>Prenotazioni \u2014 ' + turnoLabel + '</h1>'
+    html += '<div class="sub">' + formatDateDisplay(dateStr) + ' \u00b7 ' + reservations.length + ' prenotazioni</div>'
+    html += '<table>'
+    html += '<tr><th>Orario</th><th>Cliente</th><th>Ospiti</th><th>Stato</th><th>Allergeni</th><th>Note</th></tr>'
+    ordinate.forEach(function(res) {
+      var cliente = res.customers ? (res.customers.last_name + ' ' + res.customers.first_name) : '\u2014'
+      var cat = res.customers && res.customers.category !== 'standard' ? categoryLabels[res.customers.category] : ''
+      var orario = res.requested_time ? res.requested_time.substring(0, 5) : '\u2014'
+      var stato = statusLabels[res.status] || res.status
+      var statoColor = statusColors[res.status] || '#f3f4f6'
+      var ospiti = res.guests_count + ' (' + res.adults_count + ' ad.'
+      if (res.children_count > 0) ospiti += ' + ' + res.children_count + ' ba.'
+      ospiti += ')'
+
+      var allergeList = []
+      if (res.has_allergen_alerts) allergeList.push('\u26a0 cliente')
+      if (res.allergie_prenotazione) allergeList.push(res.allergie_prenotazione)
+      var allergeLabel = allergeList.length > 0
+        ? allergeList.map(function(a) { return '<span class="badge">' + a + '</span>' }).join('')
+        : '\u2014'
+
+      var noteList = []
+      if (res.notes) noteList.push(res.notes)
+      if (res.special_requests) noteList.push('\u2605 ' + res.special_requests)
+      var noteLabel = noteList.length > 0 ? noteList.join(' | ') : '\u2014'
+
+      html += '<tr>'
+      html += '<td>' + orario + '</td>'
+      html += '<td><strong>' + cliente + '</strong>' + (cat ? ' <span class="badge-stato" style="background:#ede9fe;color:#4c1d95;">' + cat + '</span>' : '') + '</td>'
+      html += '<td>' + ospiti + '</td>'
+      html += '<td><span class="badge-stato" style="background:' + statoColor + ';color:#111;">' + stato + '</span></td>'
+      html += '<td>' + allergeLabel + '</td>'
+      html += '<td class="note">' + noteLabel + '</td>'
+      html += '</tr>'
+    })
+    html += '</table>'
+    html += '</body></html>'
+    var w = window.open('', '_blank')
+    w.document.write(html)
+    w.document.close()
+    w.print()
+  }
+
   return (
     <div className="relative" ref={ref}>
       <button onClick={function() { setAperto(!aperto) }}
@@ -635,6 +689,10 @@ function StampaMenu(props) {
           <button onClick={stampaCucina}
             className="w-full text-left px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100">
             {'👨‍🍳 Lista Cucina'}
+          </button>
+          <button onClick={stampaPrenotazioni}
+            className="w-full text-left px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100">
+            {'📋 Riepilogo Prenotazioni'}
           </button>
           {sale.length > 0 && (
             <>
@@ -874,6 +932,7 @@ function ReservationDay() {
             var customer = res.customers
             var timeStr = res.requested_time ? res.requested_time.substring(0, 5) : null
             var tavoliInfo = tavoliAssegnati[res.id] || { nomi: [], hasAllergeni: false }
+            var hasAnyAllergen = res.has_allergen_alerts || tavoliInfo.hasAllergeni || (res.allergie_prenotazione && res.allergie_prenotazione.trim().length > 0)
             return (
               <div key={res.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:border-wine-300 transition-all">
                 <div className="flex items-start justify-between gap-4">
@@ -883,7 +942,7 @@ function ReservationDay() {
                       {customer.category !== 'standard' && (
                         <span className={"px-2 py-0.5 rounded-full text-xs font-medium " + categoryColors[customer.category]}>{categoryLabels[customer.category]}</span>
                       )}
-                      {(res.has_allergen_alerts || tavoliInfo.hasAllergeni) && (
+                      {hasAnyAllergen && (
                         <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
                           <AlertTriangle size={12} />Allergeni
                         </span>
@@ -906,7 +965,13 @@ function ReservationDay() {
                         })}
                       </div>
                     )}
-                    {res.notes && <p className="text-sm text-gray-600 mt-2">{res.notes}</p>}
+                    {res.allergie_prenotazione && (
+                      <p className="text-xs text-red-700 mt-1.5 flex items-center gap-1">
+                        <AlertTriangle size={11} className="flex-shrink-0" />
+                        {res.allergie_prenotazione}
+                      </p>
+                    )}
+                    {res.notes && <p className="text-sm text-gray-600 mt-1">{res.notes}</p>}
                     {res.special_requests && <p className="text-sm text-orange-600 mt-1">{'★ ' + res.special_requests}</p>}
                   </div>
                   <div className="flex flex-col items-end gap-2">
