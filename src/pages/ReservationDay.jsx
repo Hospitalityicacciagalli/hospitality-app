@@ -17,23 +17,6 @@ function turnoDb(turno) {
   return turno === 'lunch' ? 'pranzo' : 'cena'
 }
 
-var ALLERGENI_14 = [
-  { id: 'glutine', label: 'Glutine' },
-  { id: 'crostacei', label: 'Crostacei' },
-  { id: 'uova', label: 'Uova' },
-  { id: 'pesce', label: 'Pesce' },
-  { id: 'arachidi', label: 'Arachidi' },
-  { id: 'soia', label: 'Soia' },
-  { id: 'latte', label: 'Latte/Lattosio' },
-  { id: 'frutta_guscio', label: 'Frutta a guscio' },
-  { id: 'sedano', label: 'Sedano' },
-  { id: 'senape', label: 'Senape' },
-  { id: 'sesamo', label: 'Sesamo' },
-  { id: 'solfiti', label: 'Solfiti' },
-  { id: 'lupini', label: 'Lupini' },
-  { id: 'molluschi', label: 'Molluschi' }
-]
-
 // ── FORM EVENTO ──────────────────────────────────────────────
 function FormEvento(props) {
   var onSave = props.onSave
@@ -151,9 +134,7 @@ function CardEvento(props) {
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-1">
-            {isConfirmato
-              ? <Star size={14} className="text-amber-500 fill-amber-500 flex-shrink-0" />
-              : <Clock size={14} className="text-blue-500 flex-shrink-0" />}
+            {isConfirmato ? <Star size={14} className="text-amber-500 fill-amber-500 flex-shrink-0" /> : <Clock size={14} className="text-blue-500 flex-shrink-0" />}
             <span className="font-semibold text-gray-900 text-sm">{ev.title}</span>
             <span className={"px-2 py-0.5 rounded-full text-xs font-medium " + badgeColor}>{STATO_EVENTO_LABELS[ev.event_type]}</span>
             <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">{PASTO_LABELS[ev.meal_type] || ev.meal_type}</span>
@@ -224,18 +205,11 @@ function PannelloTavoli(props) {
         result.data.forEach(function(tp) {
           if (tp.prenotazione_id === prenotazione.id) {
             giaMiei.push(tp.tavolo_id)
-            var allergeStd = []
-            var allergeManuale = ''
             var allergeArr = tp.allergie_tavolo || []
-            allergeArr.forEach(function(a) {
-              var found = ALLERGENI_14.find(function(x) { return x.id === a })
-              if (found) { allergeStd.push(a) } else { allergeManuale = a }
-            })
             dettagli[tp.tavolo_id] = {
               ospiti: tp.n_ospiti_assegnati || 0,
               bambini: tp.n_bambini_tavolo || 0,
-              allergeni: allergeStd,
-              allergeneManualeInput: allergeManuale,
+              allergeni: allergeArr.join(', '),
               note: tp.note_tavolo || ''
             }
           } else {
@@ -261,7 +235,7 @@ function PannelloTavoli(props) {
       } else {
         setDettagliTavoli(function(d) {
           var next = Object.assign({}, d)
-          if (!next[tavoloId]) next[tavoloId] = { ospiti: 0, bambini: 0, allergeni: [], allergeneManualeInput: '', note: '' }
+          if (!next[tavoloId]) next[tavoloId] = { ospiti: 0, bambini: 0, allergeni: '', note: '' }
           return next
         })
         return prev.concat([tavoloId])
@@ -274,18 +248,6 @@ function PannelloTavoli(props) {
       var next = Object.assign({}, prev)
       next[tavoloId] = Object.assign({}, next[tavoloId])
       next[tavoloId][campo] = valore
-      return next
-    })
-  }
-
-  function toggleAllergene(tavoloId, allergeneId) {
-    setDettagliTavoli(function(prev) {
-      var next = Object.assign({}, prev)
-      var cur = next[tavoloId] || { ospiti: 0, bambini: 0, allergeni: [], allergeneManualeInput: '', note: '' }
-      var arr = cur.allergeni.slice()
-      var idx = arr.indexOf(allergeneId)
-      if (idx !== -1) { arr.splice(idx, 1) } else { arr.push(allergeneId) }
-      next[tavoloId] = Object.assign({}, cur, { allergeni: arr })
       return next
     })
   }
@@ -311,10 +273,7 @@ function PannelloTavoli(props) {
         if (tavoliSelezionati.length === 0) { setSaving(false); onClose(true); return }
         var righe = tavoliSelezionati.map(function(tavoloId) {
           var det = dettagliTavoli[tavoloId] || {}
-          var allergeFinali = (det.allergeni || []).slice()
-          if (det.allergeneManualeInput && det.allergeneManualeInput.trim()) {
-            allergeFinali.push(det.allergeneManualeInput.trim())
-          }
+          var allergeFinali = det.allergeni && det.allergeni.trim() ? [det.allergeni.trim()] : []
           return {
             prenotazione_id: prenotazione.id,
             tavolo_id: tavoloId,
@@ -380,7 +339,7 @@ function PannelloTavoli(props) {
           <div>
             <h2 className="text-base font-bold text-gray-900">Assegna Tavoli</h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              {customer.last_name + ' ' + customer.first_name + ' · ' + totOspiti + ' ospiti (' + (totOspiti - totBambini) + ' adulti + ' + totBambini + ' bambini)'}
+              {customer.last_name + ' ' + customer.first_name + ' \u00b7 ' + totOspiti + ' ospiti (' + (totOspiti - totBambini) + ' adulti + ' + totBambini + ' bambini)'}
             </p>
           </div>
           <button onClick={function() { onClose(false) }} className="text-gray-400 hover:text-gray-600 p-1"><X size={22} /></button>
@@ -395,7 +354,7 @@ function PannelloTavoli(props) {
                 <div className={"flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm " + (ospitiRimanenti < 0 ? 'bg-red-50 text-red-700' : ospitiRimanenti === 0 && ospitiTot > 0 ? 'bg-green-50 text-green-700' : 'bg-blue-50 text-blue-700')}>
                   <Users size={14} />
                   <span className="font-medium">{ospitiTot + ' / ' + totOspiti + ' ospiti assegnati'}</span>
-                  {ospitiRimanenti > 0 && <span className="text-xs opacity-75">({ospitiRimanenti} rimanenti)</span>}
+                  {ospitiRimanenti > 0 && <span className="text-xs opacity-75">{'(' + ospitiRimanenti + ' rimanenti)'}</span>}
                   {ospitiRimanenti < 0 && <span className="text-xs font-semibold">troppi!</span>}
                 </div>
                 {totBambini > 0 && (
@@ -467,8 +426,9 @@ function PannelloTavoli(props) {
                 <div className="mt-4 space-y-4">
                   <p className="text-sm font-semibold text-gray-700 border-t border-gray-100 pt-3">Dettaglio tavoli selezionati</p>
                   {tavoliSelezionati.map(function(tavoloId) {
-                    var det = dettagliTavoli[tavoloId] || { ospiti: 0, bambini: 0, allergeni: [], allergeneManualeInput: '', note: '' }
+                    var det = dettagliTavoli[tavoloId] || { ospiti: 0, bambini: 0, allergeni: '', note: '' }
                     var nomeTavolo = getNomeTavolo(tavoloId)
+                    var hasAllergeni = det.allergeni && det.allergeni.trim().length > 0
                     return (
                       <div key={tavoloId} className="border border-gray-200 rounded-xl p-4 bg-gray-50">
                         <p className="font-mono font-semibold text-wine-700 text-sm mb-3">{nomeTavolo}</p>
@@ -487,29 +447,21 @@ function PannelloTavoli(props) {
                           </div>
                         </div>
                         <div className="mb-3">
-                          <label className="block text-xs font-medium text-gray-600 mb-2">Allergeni / Intolleranze</label>
-                          <div className="flex flex-wrap gap-1.5">
-                            {ALLERGENI_14.map(function(all) {
-                              var attivo = (det.allergeni || []).indexOf(all.id) !== -1
-                              return (
-                                <button key={all.id} onClick={function() { toggleAllergene(tavoloId, all.id) }}
-                                  className={"px-2 py-1 rounded-md text-xs font-medium border transition-colors " + (attivo ? 'bg-red-500 text-white border-red-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-red-50 hover:border-red-300')}>
-                                  {all.label}
-                                </button>
-                              )
-                            })}
-                          </div>
-                          <input type="text" placeholder="Altro allergene (scrivi qui)"
-                            value={det.allergeneManualeInput || ''}
-                            onChange={function(e) { aggiornaDettaglio(tavoloId, 'allergeneManualeInput', e.target.value) }}
-                            className="mt-2 w-full border border-gray-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                          <label className={"block text-xs font-medium mb-1 " + (hasAllergeni ? 'text-red-600' : 'text-gray-600')}>
+                            {hasAllergeni ? '\u26a0 Allergeni / Intolleranze segnalati' : 'Allergeni / Intolleranze'}
+                          </label>
+                          <input type="text"
+                            placeholder="Scrivi qui la lista degli allergeni o intolleranze"
+                            value={det.allergeni || ''}
+                            onChange={function(e) { aggiornaDettaglio(tavoloId, 'allergeni', e.target.value) }}
+                            className={"w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 " + (hasAllergeni ? 'border-red-400 bg-red-50 focus:ring-red-400' : 'border-gray-300 focus:ring-wine-500')} />
                         </div>
                         <div>
                           <label className="block text-xs font-medium text-gray-600 mb-1">Note tavolo</label>
-                          <input type="text" placeholder="es. menù vegetariano, sediolino bambino, cambio menù..."
+                          <input type="text" placeholder="es. menu vegetariano, sediolino bambino, cambio menu..."
                             value={det.note || ''}
                             onChange={function(e) { aggiornaDettaglio(tavoloId, 'note', e.target.value) }}
-                            className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-wine-500" />
                         </div>
                       </div>
                     )
@@ -549,51 +501,56 @@ function StampaMenu(props) {
     return function() { document.removeEventListener('mousedown', handleClick) }
   }, [])
 
-  function stampaSala(sala) {
+  var stileBase = '<style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px;} h1{font-size:16px;margin-bottom:4px;} .sub{color:#666;font-size:11px;margin-bottom:16px;} table{width:100%;border-collapse:collapse;margin-bottom:16px;} th{background:#7a1b2e;color:white;padding:6px 8px;text-align:left;font-size:11px;} td{padding:6px 8px;border-bottom:1px solid #eee;vertical-align:top;} .section-title{font-weight:bold;font-size:13px;color:#7a1b2e;margin:18px 0 6px;border-bottom:2px solid #7a1b2e;padding-bottom:3px;} .badge{display:inline-block;background:#fee2e2;color:#991b1b;border-radius:4px;padding:1px 5px;font-size:10px;margin-right:3px;} .badge-bam{display:inline-block;background:#fef9c3;color:#854d0e;border-radius:4px;padding:1px 5px;font-size:10px;} .note{color:#666;font-style:italic;font-size:11px;} .avviso{background:#fff7ed;border:1px solid #fed7aa;border-radius:4px;padding:4px 8px;font-size:11px;color:#9a3412;margin-top:4px;} .card{border:1px solid #ddd;border-radius:6px;padding:10px 14px;margin-bottom:10px;page-break-inside:avoid;} .cliente{font-weight:bold;font-size:13px;} .row{display:flex;gap:16px;margin-top:4px;flex-wrap:wrap;} @media print{body{padding:8px;}}</style>'
+
+  function buildStampaSalaHtml(salaFiltro, righeAll, turnoLabel) {
+    var titolo = salaFiltro ? 'Sala: ' + salaFiltro.nome : 'Riepilogo tutte le sale'
+    var html = '<html><head><title>' + titolo + '</title>' + stileBase + '</head><body>'
+    html += '<h1>' + titolo + ' \u2014 ' + turnoLabel + '</h1>'
+    html += '<div class="sub">' + formatDateDisplay(dateStr) + '</div>'
+    var saleConTavoli = salaFiltro ? [salaFiltro] : sale
+    saleConTavoli.forEach(function(s) {
+      var righe = righeAll.filter(function(r) { return r.tavoli_sala && r.tavoli_sala.sala_id === s.id })
+      if (!salaFiltro) html += '<div class="section-title">' + s.nome + '</div>'
+      if (righe.length === 0) { html += '<p class="note">Nessun tavolo assegnato per questa sala.</p>'; return }
+      var perTavolo = {}
+      righe.forEach(function(r) {
+        var nomeTavolo = r.tavoli_sala.nome
+        if (!perTavolo[nomeTavolo]) perTavolo[nomeTavolo] = []
+        var res = reservations.find(function(x) { return x.id === r.prenotazione_id })
+        if (res) perTavolo[nomeTavolo].push({ res: res, tp: r })
+      })
+      var nomiTavoli = Object.keys(perTavolo).sort()
+      if (nomiTavoli.length === 0) { html += '<p class="note">Nessun tavolo assegnato.</p>'; return }
+      html += '<table><tr><th>Tavolo</th><th>Cliente</th><th>Ospiti</th><th>Bambini</th><th>Allergeni</th><th>Note</th></tr>'
+      nomiTavoli.forEach(function(nomeTavolo) {
+        perTavolo[nomeTavolo].forEach(function(item) {
+          var res = item.res
+          var tp = item.tp
+          var cliente = res.customers ? (res.customers.last_name + ' ' + res.customers.first_name) : '\u2014'
+          var allerge = tp.allergie_tavolo || []
+          var allergeLabel = allerge.length > 0 ? allerge.map(function(a) { return '<span class="badge">' + a + '</span>' }).join('') : '\u2014'
+          html += '<tr><td><strong>' + nomeTavolo + '</strong></td><td>' + cliente + '</td>'
+          html += '<td>' + (tp.n_ospiti_assegnati || res.guests_count) + '</td>'
+          html += '<td>' + (tp.n_bambini_tavolo || 0) + '</td>'
+          html += '<td>' + allergeLabel + '</td>'
+          html += '<td class="note">' + (tp.note_tavolo || '\u2014') + '</td></tr>'
+        })
+      })
+      html += '</table>'
+    })
+    html += '</body></html>'
+    return html
+  }
+
+  function stampaSala(salaFiltro) {
     setAperto(false)
     supabase.from('tavoli_prenotazioni')
       .select('prenotazione_id, tavolo_id, n_ospiti_assegnati, n_bambini_tavolo, allergie_tavolo, note_tavolo, tavoli_sala(nome, sala_id)')
       .eq('data', dateStr).eq('turno', turnoDb(turno))
       .then(function(result) {
-        var righe = (result.data || []).filter(function(r) { return r.tavoli_sala && r.tavoli_sala.sala_id === sala.id })
-        var perTavolo = {}
-        righe.forEach(function(r) {
-          var nomeTavolo = r.tavoli_sala.nome
-          if (!perTavolo[nomeTavolo]) perTavolo[nomeTavolo] = []
-          var res = reservations.find(function(x) { return x.id === r.prenotazione_id })
-          if (res) perTavolo[nomeTavolo].push({ res: res, tp: r })
-        })
         var turnoLabel = turno === 'lunch' ? 'Pranzo' : 'Cena'
-        var html = '<html><head><title>Sala ' + sala.nome + '</title>'
-        html += '<style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px;} h1{font-size:16px;margin-bottom:4px;} .sub{color:#666;font-size:11px;margin-bottom:16px;} table{width:100%;border-collapse:collapse;margin-bottom:12px;} th{background:#7a1b2e;color:white;padding:6px 8px;text-align:left;font-size:11px;} td{padding:6px 8px;border-bottom:1px solid #eee;vertical-align:top;} .tavolo-title{font-weight:bold;font-size:13px;color:#7a1b2e;margin:14px 0 4px;} .badge{display:inline-block;background:#fee2e2;color:#991b1b;border-radius:4px;padding:1px 5px;font-size:10px;margin-right:3px;} .note{color:#666;font-style:italic;font-size:11px;} @media print{body{padding:8px;}}</style>'
-        html += '</head><body>'
-        html += '<h1>Sala: ' + sala.nome + ' \u2014 ' + turnoLabel + '</h1>'
-        html += '<div class="sub">' + formatDateDisplay(dateStr) + '</div>'
-        var nomiTavoli = Object.keys(perTavolo).sort()
-        if (nomiTavoli.length === 0) {
-          html += '<p>Nessun tavolo assegnato per questa sala in questo turno.</p>'
-        } else {
-          nomiTavoli.forEach(function(nomeTavolo) {
-            html += '<div class="tavolo-title">Tavolo ' + nomeTavolo + '</div>'
-            html += '<table><tr><th>Cliente</th><th>Ospiti</th><th>Bambini</th><th>Allergeni</th><th>Note</th></tr>'
-            perTavolo[nomeTavolo].forEach(function(item) {
-              var res = item.res
-              var tp = item.tp
-              var cliente = res.customers ? (res.customers.last_name + ' ' + res.customers.first_name) : '\u2014'
-              var allerge = tp.allergie_tavolo || []
-              var allergeLabel = allerge.length > 0 ? allerge.map(function(a) { return '<span class="badge">' + a + '</span>' }).join('') : '\u2014'
-              html += '<tr>'
-              html += '<td>' + cliente + '</td>'
-              html += '<td>' + (tp.n_ospiti_assegnati || res.guests_count) + '</td>'
-              html += '<td>' + (tp.n_bambini_tavolo || 0) + '</td>'
-              html += '<td>' + allergeLabel + '</td>'
-              html += '<td class="note">' + (tp.note_tavolo || '\u2014') + '</td>'
-              html += '</tr>'
-            })
-            html += '</table>'
-          })
-        }
-        html += '</body></html>'
+        var html = buildStampaSalaHtml(salaFiltro, result.data || [], turnoLabel)
         var w = window.open('', '_blank')
         w.document.write(html)
         w.document.close()
@@ -604,7 +561,7 @@ function StampaMenu(props) {
   function stampaCucina() {
     setAperto(false)
     supabase.from('tavoli_prenotazioni')
-      .select('prenotazione_id, tavolo_id, n_ospiti_assegnati, n_bambini_tavolo, allergie_tavolo, note_tavolo, tavoli_sala(nome)')
+      .select('prenotazione_id, tavolo_id, n_ospiti_assegnati, n_bambini_tavolo, allergie_tavolo, note_tavolo, tavoli_sala(nome, sala_id)')
       .eq('data', dateStr).eq('turno', turnoDb(turno))
       .then(function(result) {
         var righe = result.data || []
@@ -614,39 +571,43 @@ function StampaMenu(props) {
           perPrenotazione[r.prenotazione_id].push(r)
         })
         var turnoLabel = turno === 'lunch' ? 'Pranzo' : 'Cena'
-        var html = '<html><head><title>Lista Cucina</title>'
-        html += '<style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px;} h1{font-size:16px;margin-bottom:4px;} .sub{color:#666;font-size:11px;margin-bottom:16px;} .card{border:1px solid #ddd;border-radius:6px;padding:10px 14px;margin-bottom:10px;page-break-inside:avoid;} .cliente{font-weight:bold;font-size:13px;} .row{display:flex;gap:16px;margin-top:4px;flex-wrap:wrap;} .badge-all{display:inline-block;background:#fee2e2;color:#991b1b;border-radius:4px;padding:1px 5px;font-size:10px;margin-right:3px;} .badge-bam{display:inline-block;background:#fef9c3;color:#854d0e;border-radius:4px;padding:1px 5px;font-size:10px;} .badge-tav{display:inline-block;background:#e0f2fe;color:#075985;border-radius:4px;padding:1px 5px;font-size:10px;margin-right:3px;} .note{color:#666;font-style:italic;font-size:11px;margin-top:3px;} .avviso{background:#fff7ed;border:1px solid #fed7aa;border-radius:4px;padding:4px 8px;font-size:11px;color:#9a3412;margin-top:4px;} @media print{body{padding:8px;}}</style>'
-        html += '</head><body>'
+        var html = '<html><head><title>Lista Cucina</title>' + stileBase + '</head><body>'
         html += '<h1>Lista Cucina \u2014 ' + turnoLabel + '</h1>'
         html += '<div class="sub">' + formatDateDisplay(dateStr) + ' \u00b7 ' + reservations.length + ' prenotazioni</div>'
         reservations.forEach(function(res) {
           var tavRighe = perPrenotazione[res.id] || []
-          var tavoliNomi = tavRighe.map(function(r) { return r.tavoli_sala ? r.tavoli_sala.nome : '' }).filter(Boolean)
-          var allergeTavoli = []
-          var noteTavoli = []
-          var bambiniTot = 0
-          tavRighe.forEach(function(r) {
-            ;(r.allergie_tavolo || []).forEach(function(a) { if (allergeTavoli.indexOf(a) === -1) allergeTavoli.push(a) })
-            if (r.note_tavolo) noteTavoli.push((r.tavoli_sala ? r.tavoli_sala.nome : '') + ': ' + r.note_tavolo)
-            bambiniTot += r.n_bambini_tavolo || 0
-          })
+          var bambiniTotRes = 0
+          tavRighe.forEach(function(r) { bambiniTotRes += r.n_bambini_tavolo || 0 })
           var allergeClienti = res.has_allergen_alerts ? ['\u26a0 vedi scheda cliente'] : []
-          var tuttiAllergeni = allergeClienti.concat(allergeTavoli)
           html += '<div class="card">'
           html += '<div class="cliente">' + (res.customers ? res.customers.last_name + ' ' + res.customers.first_name : '\u2014') + '</div>'
           html += '<div class="row">'
           html += '<span>\ud83d\udc65 ' + res.guests_count + ' ospiti</span>'
-          if (bambiniTot > 0) html += '<span class="badge-bam">\ud83c\udf7c ' + bambiniTot + ' bambini</span>'
+          if (bambiniTotRes > 0) html += '<span class="badge-bam">\ud83c\udf7c ' + bambiniTotRes + ' bambini</span>'
           if (res.requested_time) html += '<span>\u23f0 ' + res.requested_time.substring(0, 5) + '</span>'
           html += '</div>'
-          if (tavoliNomi.length > 0) {
-            html += '<div style="margin-top:4px;">' + tavoliNomi.map(function(n) { return '<span class="badge-tav">' + n + '</span>' }).join('') + '</div>'
+          if (allergeClienti.length > 0) {
+            html += '<div class="avviso">\u26a0 Allergeni cliente: ' + allergeClienti.map(function(a) { return '<span class="badge">' + a + '</span>' }).join('') + '</div>'
           }
-          if (tuttiAllergeni.length > 0) {
-            html += '<div class="avviso">\u26a0 Allergeni: ' + tuttiAllergeni.map(function(a) { return '<span class="badge-all">' + a + '</span>' }).join('') + '</div>'
+          if (tavRighe.length > 0) {
+            html += '<table style="margin-top:8px;"><tr><th>Tavolo</th><th>Sala</th><th>Ospiti</th><th>Bambini</th><th>Allergeni</th><th>Note</th></tr>'
+            tavRighe.forEach(function(r) {
+              var nomeTav = r.tavoli_sala ? r.tavoli_sala.nome : '\u2014'
+              var salaObj = r.tavoli_sala ? sale.find(function(s) { return s.id === r.tavoli_sala.sala_id }) : null
+              var nomeSala = salaObj ? salaObj.nome : ''
+              var allerge = r.allergie_tavolo || []
+              var allergeLabel = allerge.length > 0 ? allerge.map(function(a) { return '<span class="badge">' + a + '</span>' }).join('') : '\u2014'
+              html += '<tr><td><strong>' + nomeTav + '</strong></td><td>' + nomeSala + '</td>'
+              html += '<td>' + (r.n_ospiti_assegnati || '\u2014') + '</td>'
+              html += '<td>' + (r.n_bambini_tavolo || 0) + '</td>'
+              html += '<td>' + allergeLabel + '</td>'
+              html += '<td class="note">' + (r.note_tavolo || '\u2014') + '</td></tr>'
+            })
+            html += '</table>'
+          } else {
+            html += '<p class="note" style="margin-top:6px;">Nessun tavolo assegnato</p>'
           }
-          if (noteTavoli.length > 0) html += '<div class="note">\ud83d\udcdd ' + noteTavoli.join(' | ') + '</div>'
-          if (res.special_requests) html += '<div class="note">\u2605 ' + res.special_requests + '</div>'
+          if (res.special_requests) html += '<div class="note">\u2605 Richieste speciali: ' + res.special_requests + '</div>'
           html += '</div>'
         })
         html += '</body></html>'
@@ -666,22 +627,28 @@ function StampaMenu(props) {
         <ChevronDown size={14} />
       </button>
       {aperto && (
-        <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-30 min-w-48 overflow-hidden">
-          <div className="px-3 py-2 text-xs font-semibold text-gray-400 uppercase tracking-wider border-b border-gray-100">Per sala</div>
-          {sale.map(function(s) {
-            return (
-              <button key={s.id} onClick={function() { stampaSala(s) }}
-                className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-                {'🪑 ' + s.nome}
-              </button>
-            )
-          })}
-          <div className="border-t border-gray-100">
-            <button onClick={stampaCucina}
-              className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
-              {'👨\u200d🍳 Lista Cucina'}
-            </button>
-          </div>
+        <div className="absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-xl shadow-lg z-30 min-w-52 overflow-hidden">
+          <button onClick={function() { stampaSala(null) }}
+            className="w-full text-left px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100">
+            {'🏠 Riepilogo tutte le sale'}
+          </button>
+          <button onClick={stampaCucina}
+            className="w-full text-left px-4 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50 flex items-center gap-2 border-b border-gray-100">
+            {'👨‍🍳 Lista Cucina'}
+          </button>
+          {sale.length > 0 && (
+            <>
+              <div className="px-3 py-1.5 text-xs font-semibold text-gray-400 uppercase tracking-wider">Per sala</div>
+              {sale.map(function(s) {
+                return (
+                  <button key={s.id} onClick={function() { stampaSala(s) }}
+                    className="w-full text-left px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2">
+                    {'🪑 ' + s.nome}
+                  </button>
+                )
+              })}
+            </>
+          )}
         </div>
       )}
     </div>
