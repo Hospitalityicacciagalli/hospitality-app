@@ -87,7 +87,24 @@ function ModaleGiftCard(props) {
   }
 
   function handleChange(campo, valore) {
-    setForm(function(prev) { var next = Object.assign({}, prev); next[campo] = valore; return next })
+    setForm(function(prev) {
+      var next = Object.assign({}, prev)
+      next[campo] = valore
+      // Quando cambia la data acquisto, calcola automaticamente scadenza a 6 mesi
+      // solo se la scadenza è vuota oppure era già stata calcolata automaticamente
+      if (campo === 'data_acquisto' && valore) {
+        var dataAcquisto = new Date(valore)
+        if (!isNaN(dataAcquisto.getTime())) {
+          var scadenza = new Date(dataAcquisto)
+          scadenza.setMonth(scadenza.getMonth() + 6)
+          var y = scadenza.getFullYear()
+          var m = String(scadenza.getMonth() + 1).padStart(2, '0')
+          var d = String(scadenza.getDate()).padStart(2, '0')
+          next.scadenza = y + '-' + m + '-' + d
+        }
+      }
+      return next
+    })
   }
 
   function handleSave() {
