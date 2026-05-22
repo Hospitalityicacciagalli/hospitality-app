@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { Plus, Search, X, Check, Gift, PencilLine, Trash2, ChevronDown, ChevronUp, AlertTriangle } from 'lucide-react'
+import { Plus, Search, X, Check, Gift, PencilLine, Trash2, ChevronDown, ChevronUp, AlertTriangle, Hotel, Wine, ChefHat, UtensilsCrossed, Globe } from 'lucide-react'
 
 // ── UTILITY ──────────────────────────────────────────────────
 function formatData(dateStr) {
   if (!dateStr) return '—'
-  var parts = dateStr.split('-')
+  var parts = String(dateStr).split('T')[0].split('-')
   if (parts.length !== 3) return dateStr
   return parts[2] + '/' + parts[1] + '/' + parts[0]
 }
@@ -19,6 +19,11 @@ function badgeStato(gc) {
   if (gc.usata) return { label: 'Utilizzata', cls: 'bg-gray-100 text-gray-600' }
   if (isScaduta(gc.scadenza)) return { label: 'Scaduta', cls: 'bg-red-100 text-red-700' }
   return { label: 'Valida', cls: 'bg-green-100 text-green-700' }
+}
+
+function badgeLingua(lingua) {
+  if (!lingua || lingua === 'ITA') return null
+  return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">🇬🇧 ENG</span>
 }
 
 // ── MODALE CONFERMA ───────────────────────────────────────────
@@ -43,7 +48,6 @@ function ModaleGiftCard(props) {
   var tipologie = props.tipologie
   var gcEsistente = props.gc || null
   var isModifica = gcEsistente !== null
-
   var oggi = new Date().toISOString().split('T')[0]
 
   var [form, setForm] = useState({
@@ -59,13 +63,13 @@ function ModaleGiftCard(props) {
     numero_scontrino: isModifica ? (gcEsistente.numero_scontrino || '') : '',
     prezzo_pagato: isModifica ? String(gcEsistente.prezzo_pagato || '') : '',
     numero_persone: isModifica ? String(gcEsistente.numero_persone || '1') : '1',
+    lingua: isModifica ? (gcEsistente.lingua || 'ITA') : 'ITA',
     note: isModifica ? (gcEsistente.note || '') : ''
   })
 
   var [saving, setSaving] = useState(false)
   var [errore, setErrore] = useState('')
 
-  // Quando cambia tipologia, precompila il prezzo
   function handleTipologiaChange(tipologiaId) {
     setForm(function(prev) {
       var next = Object.assign({}, prev)
@@ -82,11 +86,7 @@ function ModaleGiftCard(props) {
   }
 
   function handleChange(campo, valore) {
-    setForm(function(prev) {
-      var next = Object.assign({}, prev)
-      next[campo] = valore
-      return next
-    })
+    setForm(function(prev) { var next = Object.assign({}, prev); next[campo] = valore; return next })
   }
 
   function handleSave() {
@@ -94,11 +94,9 @@ function ModaleGiftCard(props) {
     if (!form.tipologia_id) { setErrore('Seleziona una tipologia.'); return }
     setErrore('')
     setSaving(true)
-
     var codiciCollegatiArr = form.codici_collegati.trim()
       ? form.codici_collegati.split(',').map(function(c) { return c.trim() }).filter(function(c) { return c.length > 0 })
       : []
-
     var payload = {
       tipologia_id: form.tipologia_id,
       codice: form.codice.trim().toUpperCase(),
@@ -112,13 +110,12 @@ function ModaleGiftCard(props) {
       numero_scontrino: form.numero_scontrino.trim() || null,
       prezzo_pagato: parseFloat(form.prezzo_pagato) || null,
       numero_persone: parseInt(form.numero_persone, 10) || 1,
+      lingua: form.lingua,
       note: form.note.trim() || null
     }
-
     var query = isModifica
       ? supabase.from('gift_card').update(payload).eq('id', gcEsistente.id).select()
       : supabase.from('gift_card').insert([payload]).select()
-
     query.then(function(result) {
       setSaving(false)
       if (result.error) {
@@ -135,19 +132,14 @@ function ModaleGiftCard(props) {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
       <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-2xl shadow-2xl flex flex-col max-h-screen sm:max-h-[92vh]">
-
         <div className="flex items-center justify-between p-5 border-b border-gray-100 flex-shrink-0">
           <h2 className="text-base font-bold text-gray-900">{isModifica ? 'Modifica Gift Card' : 'Nuova Gift Card'}</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1"><X size={22} /></button>
         </div>
-
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
-
-          {/* Tipologia */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Tipologia *</label>
-            <select value={form.tipologia_id}
-              onChange={function(e) { handleTipologiaChange(e.target.value) }}
+            <select value={form.tipologia_id} onChange={function(e) { handleTipologiaChange(e.target.value) }}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 bg-white">
               <option value="">Seleziona tipologia...</option>
               {tipologie.map(function(t) {
@@ -156,114 +148,95 @@ function ModaleGiftCard(props) {
             </select>
             {tipologiaSelezionata && (
               <div className="mt-2 flex flex-wrap gap-2">
-                <span className="px-2 py-0.5 bg-wine-50 text-wine-700 rounded text-xs">€{tipologiaSelezionata.prezzo}{tipologiaSelezionata.prezzo_per_persona ? '/persona' : ' per coppia'}</span>
+                <span className="px-2 py-0.5 bg-wine-50 text-wine-700 rounded text-xs">€{tipologiaSelezionata.prezzo}{tipologiaSelezionata.prezzo_per_persona ? '/p' : ' coppia'}</span>
                 {tipologiaSelezionata.pernottamento && <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">{tipologiaSelezionata.notti} notte/i</span>}
                 {tipologiaSelezionata.wine_tour && <span className="px-2 py-0.5 bg-purple-50 text-purple-700 rounded text-xs">Wine Tour</span>}
                 {tipologiaSelezionata.cooking_class && <span className="px-2 py-0.5 bg-orange-50 text-orange-700 rounded text-xs">Cooking Class</span>}
               </div>
             )}
           </div>
-
-          {/* Codice e codici collegati */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Codice *</label>
-              <input type="text" value={form.codice}
-                onChange={function(e) { handleChange('codice', e.target.value.toUpperCase()) }}
+              <input type="text" value={form.codice} onChange={function(e) { handleChange('codice', e.target.value.toUpperCase()) }}
                 placeholder="es. FB40-855A"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-wine-500" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Codici collegati</label>
-              <input type="text" value={form.codici_collegati}
-                onChange={function(e) { handleChange('codici_collegati', e.target.value.toUpperCase()) }}
+              <input type="text" value={form.codici_collegati} onChange={function(e) { handleChange('codici_collegati', e.target.value.toUpperCase()) }}
                 placeholder="es. AB12-CD34, EF56-GH78"
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-wine-500" />
-              <p className="text-xs text-gray-400 mt-0.5">Separa più codici con una virgola</p>
             </div>
           </div>
-
-          {/* Committente e beneficiario */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Committente (chi acquista)</label>
-              <input type="text" value={form.committente_nome}
-                onChange={function(e) { handleChange('committente_nome', e.target.value) }}
-                placeholder="Nome e cognome"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+              <label className="block text-sm font-medium text-gray-700 mb-1">Committente</label>
+              <input type="text" value={form.committente_nome} onChange={function(e) { handleChange('committente_nome', e.target.value) }}
+                placeholder="Nome e cognome" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Contatto committente</label>
-              <input type="text" value={form.committente_contatto}
-                onChange={function(e) { handleChange('committente_contatto', e.target.value) }}
-                placeholder="Telefono o email"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+              <input type="text" value={form.committente_contatto} onChange={function(e) { handleChange('committente_contatto', e.target.value) }}
+                placeholder="Telefono o email" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
             </div>
           </div>
-
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Beneficiario (chi riceve)</label>
-            <input type="text" value={form.beneficiario_nome}
-              onChange={function(e) { handleChange('beneficiario_nome', e.target.value) }}
-              placeholder="Nome e cognome"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+            <label className="block text-sm font-medium text-gray-700 mb-1">Beneficiario</label>
+            <input type="text" value={form.beneficiario_nome} onChange={function(e) { handleChange('beneficiario_nome', e.target.value) }}
+              placeholder="Nome e cognome" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
           </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Messaggio</label>
-            <textarea rows={2} value={form.messaggio}
-              onChange={function(e) { handleChange('messaggio', e.target.value) }}
-              placeholder="Messaggio personalizzato della gift card..."
+            <textarea rows={2} value={form.messaggio} onChange={function(e) { handleChange('messaggio', e.target.value) }}
+              placeholder="Messaggio personalizzato..."
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 resize-none" />
           </div>
-
-          {/* Dati acquisto */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Data acquisto</label>
-              <input type="date" value={form.data_acquisto}
-                onChange={function(e) { handleChange('data_acquisto', e.target.value) }}
+              <input type="date" value={form.data_acquisto} onChange={function(e) { handleChange('data_acquisto', e.target.value) }}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Scadenza</label>
-              <input type="date" value={form.scadenza}
-                onChange={function(e) { handleChange('scadenza', e.target.value) }}
+              <input type="date" value={form.scadenza} onChange={function(e) { handleChange('scadenza', e.target.value) }}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">N° scontrino</label>
-              <input type="text" value={form.numero_scontrino}
-                onChange={function(e) { handleChange('numero_scontrino', e.target.value) }}
-                placeholder="es. 1856-0002"
+              <input type="text" value={form.numero_scontrino} onChange={function(e) { handleChange('numero_scontrino', e.target.value) }}
+                placeholder="es. 1856-0002" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Prezzo € pagato</label>
+              <input type="number" step="0.01" min="0" value={form.prezzo_pagato} onChange={function(e) { handleChange('prezzo_pagato', e.target.value) }}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">N° persone</label>
+              <input type="number" min="1" max="20" value={form.numero_persone} onChange={function(e) { handleChange('numero_persone', e.target.value) }}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Prezzo pagato €</label>
-              <input type="number" step="0.01" min="0" value={form.prezzo_pagato}
-                onChange={function(e) { handleChange('prezzo_pagato', e.target.value) }}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+              <label className="block text-sm font-medium text-gray-700 mb-1">Lingua servizio</label>
+              <select value={form.lingua} onChange={function(e) { handleChange('lingua', e.target.value) }}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 bg-white">
+                <option value="ITA">🇮🇹 Italiano</option>
+                <option value="ENG">🇬🇧 English</option>
+                <option value="ENTRAMBE">🇮🇹 / 🇬🇧 Entrambe</option>
+              </select>
             </div>
           </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Numero persone</label>
-            <input type="number" min="1" max="20" value={form.numero_persone}
-              onChange={function(e) { handleChange('numero_persone', e.target.value) }}
-              className="w-32 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
-          </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Note interne</label>
-            <textarea rows={2} value={form.note}
-              onChange={function(e) { handleChange('note', e.target.value) }}
-              placeholder="Note interne..."
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 resize-none" />
+            <textarea rows={2} value={form.note} onChange={function(e) { handleChange('note', e.target.value) }}
+              placeholder="Note interne..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 resize-none" />
           </div>
-
           {errore && <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">{errore}</div>}
         </div>
-
         <div className="flex gap-3 p-5 border-t border-gray-100 flex-shrink-0">
           <button onClick={onClose} className="flex-1 py-3 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">Annulla</button>
           <button onClick={handleSave} disabled={saving}
@@ -276,14 +249,556 @@ function ModaleGiftCard(props) {
   )
 }
 
+// ── PANNELLO RIEPILOGO SERVIZI ────────────────────────────────
+function PannelloServizi(props) {
+  var gc = props.gc
+  var tipologia = props.tipologia
+  var onClose = props.onClose
+  var onAggiorna = props.onAggiorna
+
+  var [formPernottamento, setFormPernottamento] = useState({
+    pernottamento_data_inizio: gc.pernottamento_data_inizio || '',
+    pernottamento_data_fine: gc.pernottamento_data_fine || '',
+    pernottamento_camera: gc.pernottamento_camera || '',
+    pernottamento_note: gc.pernottamento_note || ''
+  })
+  var [savingPernottamento, setSavingPernottamento] = useState(false)
+  var [pernottamentoAperto, setPernottamentoAperto] = useState(false)
+
+  var [sessioniWT, setSessioniWT] = useState([])
+  var [prenotazioniWT, setPrenotazioniWT] = useState([])
+  var [sessioniCC, setSessioniCC] = useState([])
+  var [prenotazioniCC, setPrenotazioniCC] = useState([])
+  var [pastiCollegati, setPastiCollegati] = useState([])
+
+  var [showFormWT, setShowFormWT] = useState(false)
+  var [showFormCC, setShowFormCC] = useState(false)
+  var [showFormPasto, setShowFormPasto] = useState(false)
+
+  var [formWT, setFormWT] = useState({ data: '', orario: '18:00', lingua: gc.lingua || 'ITA', num_persone: String(gc.numero_persone || 2), note: '' })
+  var [formCC, setFormCC] = useState({ data: '', orario: '15:00', lingua: gc.lingua || 'ITA', num_persone: String(gc.numero_persone || 2), note: '' })
+  var [formPasto, setFormPasto] = useState({ data: '', turno: 'dinner', note: '', tipo: 'degustazione' })
+
+  var [saving, setSaving] = useState(false)
+  var [loading, setLoading] = useState(true)
+
+  useEffect(function() { loadDatiServizi() }, [])
+
+  function loadDatiServizi() {
+    setLoading(true)
+    var promises = [
+      supabase.from('wine_tour_prenotazioni').select('*, wine_tour_sessioni(id, data, orario, lingua)').eq('gift_card_id', gc.id),
+      supabase.from('cooking_class_prenotazioni').select('*, cooking_class_sessioni(id, data, orario, lingua)').eq('gift_card_id', gc.id),
+      supabase.from('reservations').select('id, reservation_date, meal_type, guests_count, notes, allergie_prenotazione, customers(first_name, last_name)').eq('gift_card_id', gc.id)
+    ]
+    Promise.all(promises).then(function(results) {
+      setLoading(false)
+      if (!results[0].error) setPrenotazioniWT(results[0].data || [])
+      if (!results[1].error) setPrenotazioniCC(results[1].data || [])
+      if (!results[2].error) setPastiCollegati(results[2].data || [])
+    })
+  }
+
+  function salvaPernottamento() {
+    setSavingPernottamento(true)
+    supabase.from('gift_card').update({
+      pernottamento_data_inizio: formPernottamento.pernottamento_data_inizio || null,
+      pernottamento_data_fine: formPernottamento.pernottamento_data_fine || null,
+      pernottamento_camera: formPernottamento.pernottamento_camera || null,
+      pernottamento_note: formPernottamento.pernottamento_note || null
+    }).eq('id', gc.id).select().then(function(result) {
+      setSavingPernottamento(false)
+      if (!result.error && result.data && result.data.length > 0) {
+        onAggiorna(result.data[0])
+        setPernottamentoAperto(false)
+      }
+    })
+  }
+
+  function creaSessioneWT() {
+    if (!formWT.data) { alert('Inserisci la data del wine tour.'); return }
+    setSaving(true)
+    supabase.from('wine_tour_sessioni').insert([{
+      data: formWT.data,
+      orario: formWT.orario,
+      lingua: formWT.lingua
+    }]).select().then(function(result) {
+      if (result.error || !result.data || !result.data.length) { setSaving(false); alert('Errore creazione sessione.'); return }
+      var sessione = result.data[0]
+      return supabase.from('wine_tour_prenotazioni').insert([{
+        sessione_id: sessione.id,
+        gift_card_id: gc.id,
+        num_persone: parseInt(formWT.num_persone) || 2,
+        lingua: formWT.lingua,
+        note: formWT.note || null
+      }]).select('*, wine_tour_sessioni(id, data, orario, lingua)')
+    }).then(function(result) {
+      setSaving(false)
+      if (result && !result.error && result.data) {
+        setPrenotazioniWT(function(prev) { return prev.concat(result.data) })
+        setShowFormWT(false)
+        setFormWT({ data: '', orario: '18:00', lingua: gc.lingua || 'ITA', num_persone: String(gc.numero_persone || 2), note: '' })
+      }
+    })
+  }
+
+  function creaSessioneCC() {
+    if (!formCC.data) { alert('Inserisci la data della cooking class.'); return }
+    setSaving(true)
+    supabase.from('cooking_class_sessioni').insert([{
+      data: formCC.data,
+      orario: formCC.orario,
+      lingua: formCC.lingua
+    }]).select().then(function(result) {
+      if (result.error || !result.data || !result.data.length) { setSaving(false); alert('Errore creazione sessione.'); return }
+      var sessione = result.data[0]
+      return supabase.from('cooking_class_prenotazioni').insert([{
+        sessione_id: sessione.id,
+        gift_card_id: gc.id,
+        num_persone: parseInt(formCC.num_persone) || 2,
+        lingua: formCC.lingua,
+        note: formCC.note || null
+      }]).select('*, cooking_class_sessioni(id, data, orario, lingua)')
+    }).then(function(result) {
+      setSaving(false)
+      if (result && !result.error && result.data) {
+        setPrenotazioniCC(function(prev) { return prev.concat(result.data) })
+        setShowFormCC(false)
+        setFormCC({ data: '', orario: '15:00', lingua: gc.lingua || 'ITA', num_persone: String(gc.numero_persone || 2), note: '' })
+      }
+    })
+  }
+
+  function creaPasto() {
+    if (!formPasto.data) { alert('Inserisci la data del pasto.'); return }
+    setSaving(true)
+    var notePasto = '[' + (formPasto.tipo === 'cooking' ? 'Pasto Cooking Class' : 'Pasto Degustazione') + '] ' + (formPasto.note || '')
+    supabase.from('reservations').insert([{
+      gift_card_id: gc.id,
+      reservation_date: formPasto.data,
+      meal_type: formPasto.turno,
+      guests_count: gc.numero_persone || 2,
+      adults_count: gc.numero_persone || 2,
+      children_count: 0,
+      status: 'confirmed',
+      source: 'gift_card',
+      notes: notePasto.trim()
+    }]).select('id, reservation_date, meal_type, guests_count, notes').then(function(result) {
+      setSaving(false)
+      if (result.error) { alert('Errore: ' + result.error.message); return }
+      if (result.data && result.data.length > 0) {
+        setPastiCollegati(function(prev) { return prev.concat(result.data) })
+        setShowFormPasto(false)
+        setFormPasto({ data: '', turno: 'dinner', note: '', tipo: 'degustazione' })
+      }
+    })
+  }
+
+  function eliminaPrenotazioneWT(id) {
+    if (!confirm('Eliminare questa prenotazione wine tour?')) return
+    supabase.from('wine_tour_prenotazioni').delete().eq('id', id).then(function(result) {
+      if (!result.error) setPrenotazioniWT(function(prev) { return prev.filter(function(p) { return p.id !== id }) })
+    })
+  }
+
+  function eliminaPrenotazioneCC(id) {
+    if (!confirm('Eliminare questa prenotazione cooking class?')) return
+    supabase.from('cooking_class_prenotazioni').delete().eq('id', id).then(function(result) {
+      if (!result.error) setPrenotazioniCC(function(prev) { return prev.filter(function(p) { return p.id !== id }) })
+    })
+  }
+
+  var mealLabels = { lunch: 'Pranzo', dinner: 'Cena' }
+  var linguaLabels = { ITA: '🇮🇹', ENG: '🇬🇧', ENTRAMBE: '🇮🇹/🇬🇧' }
+
+  // Calcolo completamento servizi
+  var serviziPrevisti = []
+  if (tipologia) {
+    if (tipologia.pernottamento) serviziPrevisti.push('pernottamento')
+    if (tipologia.wine_tour) serviziPrevisti.push('wine_tour')
+    if (tipologia.cooking_class) serviziPrevisti.push('cooking_class')
+    if (tipologia.tipologia_pasto_1) serviziPrevisti.push('pasto_1')
+    if (tipologia.tipologia_pasto_2) serviziPrevisti.push('pasto_2')
+  }
+
+  var serviziCompletati = 0
+  if (gc.pernottamento_data_inizio) serviziCompletati++
+  if (prenotazioniWT.length > 0) serviziCompletati++
+  if (prenotazioniCC.length > 0) serviziCompletati++
+  var pastiNecessari = (tipologia && tipologia.tipologia_pasto_1 ? 1 : 0) + (tipologia && tipologia.tipologia_pasto_2 ? 1 : 0)
+  serviziCompletati += Math.min(pastiCollegati.length, pastiNecessari)
+  var totServizi = serviziPrevisti.length
+
+  function FormSemplice(fprops) {
+    return (
+      <div className="mt-3 bg-gray-50 rounded-xl p-4 border border-gray-200 space-y-3">
+        {fprops.children}
+        <div className="flex gap-2 pt-1">
+          <button onClick={fprops.onAnnulla} className="flex-1 py-2 border border-gray-300 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100">Annulla</button>
+          <button onClick={fprops.onSalva} disabled={saving}
+            className={"flex-1 py-2 rounded-lg text-xs font-medium " + (saving ? 'bg-gray-300 text-gray-400' : 'bg-wine-700 text-white hover:bg-wine-800')}>
+            {saving ? 'Salvataggio...' : 'Salva'}
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-60 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
+      <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-2xl shadow-2xl flex flex-col max-h-screen sm:max-h-[94vh]">
+
+        {/* Header */}
+        <div className="flex items-start justify-between p-5 border-b border-gray-100 flex-shrink-0">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-base font-bold text-gray-900">{tipologia ? tipologia.nome : 'Gift Card'}</h2>
+              {badgeLingua(gc.lingua)}
+              <span className={"px-2 py-0.5 rounded-full text-xs font-medium " + badgeStato(gc).cls}>{badgeStato(gc).label}</span>
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5 font-mono">{gc.codice}</p>
+            {(gc.committente_nome || gc.beneficiario_nome) && (
+              <p className="text-xs text-gray-500 mt-0.5">
+                {gc.committente_nome && 'Da: ' + gc.committente_nome}
+                {gc.committente_nome && gc.beneficiario_nome && ' → '}
+                {gc.beneficiario_nome && gc.beneficiario_nome}
+              </p>
+            )}
+            {totServizi > 0 && (
+              <div className="mt-2 flex items-center gap-2">
+                <div className="flex-1 bg-gray-200 rounded-full h-1.5">
+                  <div className="bg-wine-600 h-1.5 rounded-full transition-all"
+                    style={{ width: Math.round((serviziCompletati / totServizi) * 100) + '%' }} />
+                </div>
+                <span className="text-xs text-gray-500">{serviziCompletati}/{totServizi} servizi</span>
+              </div>
+            )}
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 ml-3 flex-shrink-0"><X size={22} /></button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-5 space-y-4">
+          {loading ? (
+            <div className="text-center py-8 text-gray-400 text-sm">Caricamento servizi...</div>
+          ) : (
+            <>
+
+              {/* PERNOTTAMENTO */}
+              {tipologia && tipologia.pernottamento && (
+                <div className="border border-gray-200 rounded-xl overflow-hidden">
+                  <button onClick={function() { setPernottamentoAperto(!pernottamentoAperto) }}
+                    className="w-full flex items-center justify-between p-4 hover:bg-gray-50 text-left">
+                    <div className="flex items-center gap-3">
+                      <Hotel size={18} className={gc.pernottamento_data_inizio ? 'text-green-600' : 'text-gray-300'} />
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">Pernottamento ({tipologia.notti} notte/i)</p>
+                        {gc.pernottamento_data_inizio ? (
+                          <p className="text-xs text-gray-500">{formatData(gc.pernottamento_data_inizio)} → {formatData(gc.pernottamento_data_fine)}{gc.pernottamento_camera ? ' · Camera ' + gc.pernottamento_camera : ''}</p>
+                        ) : (
+                          <p className="text-xs text-amber-600">⏳ Da pianificare</p>
+                        )}
+                      </div>
+                    </div>
+                    {pernottamentoAperto ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
+                  </button>
+                  {pernottamentoAperto && (
+                    <div className="border-t border-gray-100 p-4 space-y-3 bg-gray-50">
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Check-in</label>
+                          <input type="date" value={formPernottamento.pernottamento_data_inizio}
+                            onChange={function(e) { setFormPernottamento(function(p) { return Object.assign({}, p, { pernottamento_data_inizio: e.target.value }) }) }}
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Check-out</label>
+                          <input type="date" value={formPernottamento.pernottamento_data_fine}
+                            onChange={function(e) { setFormPernottamento(function(p) { return Object.assign({}, p, { pernottamento_data_fine: e.target.value }) }) }}
+                            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Camera</label>
+                        <input type="text" value={formPernottamento.pernottamento_camera}
+                          onChange={function(e) { setFormPernottamento(function(p) { return Object.assign({}, p, { pernottamento_camera: e.target.value }) }) }}
+                          placeholder="es. Camera 12, Suite Vista Vigneto..."
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Note (es. upgrade categoria)</label>
+                        <input type="text" value={formPernottamento.pernottamento_note}
+                          onChange={function(e) { setFormPernottamento(function(p) { return Object.assign({}, p, { pernottamento_note: e.target.value }) }) }}
+                          placeholder="es. Upgrade a camera Deluxe con extra €30..."
+                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                      </div>
+                      <button onClick={salvaPernottamento} disabled={savingPernottamento}
+                        className={"w-full py-2 rounded-lg text-sm font-medium " + (savingPernottamento ? 'bg-gray-300 text-gray-400' : 'bg-wine-700 text-white hover:bg-wine-800')}>
+                        {savingPernottamento ? 'Salvataggio...' : 'Salva pernottamento'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* WINE TOUR */}
+              {tipologia && tipologia.wine_tour && (
+                <div className="border border-gray-200 rounded-xl overflow-hidden">
+                  <div className="flex items-center justify-between p-4">
+                    <div className="flex items-center gap-3">
+                      <Wine size={18} className={prenotazioniWT.length > 0 ? 'text-purple-600' : 'text-gray-300'} />
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">Wine Tour</p>
+                        {tipologia.degustazione_vini_1 && <p className="text-xs text-gray-400">{tipologia.degustazione_vini_1}</p>}
+                      </div>
+                    </div>
+                    {!showFormWT && (
+                      <button onClick={function() { setShowFormWT(true) }}
+                        className="text-xs px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg border border-purple-200 hover:bg-purple-100 font-medium">
+                        + Aggiungi
+                      </button>
+                    )}
+                  </div>
+                  {prenotazioniWT.map(function(p) {
+                    var s = p.wine_tour_sessioni
+                    return (
+                      <div key={p.id} className="border-t border-gray-100 px-4 py-3 flex items-center justify-between bg-purple-50">
+                        <div className="text-sm">
+                          <span className="font-medium text-gray-800">{s ? formatData(s.data) : '—'}</span>
+                          <span className="text-gray-500 ml-2">{s ? s.orario : ''}</span>
+                          <span className="ml-2">{linguaLabels[p.lingua] || p.lingua}</span>
+                          <span className="text-gray-400 ml-2">{p.num_persone} pers.</span>
+                          {p.note && <span className="text-gray-400 ml-2 italic text-xs">{p.note}</span>}
+                        </div>
+                        <button onClick={function() { eliminaPrenotazioneWT(p.id) }} className="text-gray-300 hover:text-red-500 p-1"><Trash2 size={14} /></button>
+                      </div>
+                    )
+                  })}
+                  {prenotazioniWT.length === 0 && !showFormWT && (
+                    <div className="border-t border-gray-100 px-4 pb-3">
+                      <p className="text-xs text-amber-600">⏳ Da pianificare</p>
+                    </div>
+                  )}
+                  {showFormWT && (
+                    <div className="border-t border-gray-100 p-4">
+                      <FormSemplice onAnnulla={function() { setShowFormWT(false) }} onSalva={creaSessioneWT}>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Data</label>
+                            <input type="date" value={formWT.data} onChange={function(e) { setFormWT(function(p) { return Object.assign({}, p, { data: e.target.value }) }) }}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Orario</label>
+                            <input type="time" value={formWT.orario} onChange={function(e) { setFormWT(function(p) { return Object.assign({}, p, { orario: e.target.value }) }) }}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Lingua</label>
+                            <select value={formWT.lingua} onChange={function(e) { setFormWT(function(p) { return Object.assign({}, p, { lingua: e.target.value }) }) }}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-wine-500">
+                              <option value="ITA">🇮🇹 Italiano</option>
+                              <option value="ENG">🇬🇧 English</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">N° persone</label>
+                            <input type="number" min="1" value={formWT.num_persone} onChange={function(e) { setFormWT(function(p) { return Object.assign({}, p, { num_persone: e.target.value }) }) }}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Note</label>
+                          <input type="text" value={formWT.note} onChange={function(e) { setFormWT(function(p) { return Object.assign({}, p, { note: e.target.value }) }) }}
+                            placeholder="Note aggiuntive..." className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                        </div>
+                      </FormSemplice>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* COOKING CLASS */}
+              {tipologia && tipologia.cooking_class && (
+                <div className="border border-gray-200 rounded-xl overflow-hidden">
+                  <div className="flex items-center justify-between p-4">
+                    <div className="flex items-center gap-3">
+                      <ChefHat size={18} className={prenotazioniCC.length > 0 ? 'text-orange-600' : 'text-gray-300'} />
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">Cooking Class</p>
+                        <p className="text-xs text-gray-400">Inclusa visita all'orto</p>
+                      </div>
+                    </div>
+                    {!showFormCC && (
+                      <button onClick={function() { setShowFormCC(true) }}
+                        className="text-xs px-3 py-1.5 bg-orange-50 text-orange-700 rounded-lg border border-orange-200 hover:bg-orange-100 font-medium">
+                        + Aggiungi
+                      </button>
+                    )}
+                  </div>
+                  {prenotazioniCC.map(function(p) {
+                    var s = p.cooking_class_sessioni
+                    return (
+                      <div key={p.id} className="border-t border-gray-100 px-4 py-3 flex items-center justify-between bg-orange-50">
+                        <div className="text-sm">
+                          <span className="font-medium text-gray-800">{s ? formatData(s.data) : '—'}</span>
+                          <span className="text-gray-500 ml-2">{s ? s.orario : ''}</span>
+                          <span className="ml-2">{linguaLabels[p.lingua] || p.lingua}</span>
+                          <span className="text-gray-400 ml-2">{p.num_persone} pers.</span>
+                          {p.note && <span className="text-gray-400 ml-2 italic text-xs">{p.note}</span>}
+                        </div>
+                        <button onClick={function() { eliminaPrenotazioneCC(p.id) }} className="text-gray-300 hover:text-red-500 p-1"><Trash2 size={14} /></button>
+                      </div>
+                    )
+                  })}
+                  {prenotazioniCC.length === 0 && !showFormCC && (
+                    <div className="border-t border-gray-100 px-4 pb-3">
+                      <p className="text-xs text-amber-600">⏳ Da pianificare</p>
+                    </div>
+                  )}
+                  {showFormCC && (
+                    <div className="border-t border-gray-100 p-4">
+                      <FormSemplice onAnnulla={function() { setShowFormCC(false) }} onSalva={creaSessioneCC}>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Data</label>
+                            <input type="date" value={formCC.data} onChange={function(e) { setFormCC(function(p) { return Object.assign({}, p, { data: e.target.value }) }) }}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Orario (pref. pomeriggio)</label>
+                            <input type="time" value={formCC.orario} onChange={function(e) { setFormCC(function(p) { return Object.assign({}, p, { orario: e.target.value }) }) }}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Lingua</label>
+                            <select value={formCC.lingua} onChange={function(e) { setFormCC(function(p) { return Object.assign({}, p, { lingua: e.target.value }) }) }}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-wine-500">
+                              <option value="ITA">🇮🇹 Italiano</option>
+                              <option value="ENG">🇬🇧 English</option>
+                            </select>
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">N° persone</label>
+                            <input type="number" min="1" value={formCC.num_persone} onChange={function(e) { setFormCC(function(p) { return Object.assign({}, p, { num_persone: e.target.value }) }) }}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Note</label>
+                          <input type="text" value={formCC.note} onChange={function(e) { setFormCC(function(p) { return Object.assign({}, p, { note: e.target.value }) }) }}
+                            placeholder="Note aggiuntive..." className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                        </div>
+                      </FormSemplice>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* PASTI */}
+              {tipologia && (tipologia.tipologia_pasto_1 || tipologia.tipologia_pasto_2) && (
+                <div className="border border-gray-200 rounded-xl overflow-hidden">
+                  <div className="flex items-center justify-between p-4">
+                    <div className="flex items-center gap-3">
+                      <UtensilsCrossed size={18} className={pastiCollegati.length > 0 ? 'text-wine-600' : 'text-gray-300'} />
+                      <div>
+                        <p className="text-sm font-medium text-gray-900">Pasti inclusi</p>
+                        <p className="text-xs text-gray-400">
+                          {[tipologia.tipologia_pasto_1, tipologia.tipologia_pasto_2].filter(Boolean).join(' + ')}
+                        </p>
+                      </div>
+                    </div>
+                    {!showFormPasto && (
+                      <button onClick={function() { setShowFormPasto(true) }}
+                        className="text-xs px-3 py-1.5 bg-wine-50 text-wine-700 rounded-lg border border-wine-200 hover:bg-wine-100 font-medium">
+                        + Aggiungi
+                      </button>
+                    )}
+                  </div>
+                  {pastiCollegati.map(function(p) {
+                    return (
+                      <div key={p.id} className="border-t border-gray-100 px-4 py-3 bg-wine-50">
+                        <div className="text-sm">
+                          <span className="font-medium text-gray-800">{formatData(p.reservation_date)}</span>
+                          <span className="text-gray-500 ml-2">{mealLabels[p.meal_type] || p.meal_type}</span>
+                          <span className="text-gray-400 ml-2">{p.guests_count} pers.</span>
+                          {p.notes && <p className="text-xs text-gray-500 italic mt-0.5">{p.notes}</p>}
+                        </div>
+                      </div>
+                    )
+                  })}
+                  {pastiCollegati.length === 0 && !showFormPasto && (
+                    <div className="border-t border-gray-100 px-4 pb-3">
+                      <p className="text-xs text-amber-600">⏳ Da pianificare</p>
+                    </div>
+                  )}
+                  {showFormPasto && (
+                    <div className="border-t border-gray-100 p-4">
+                      <FormSemplice onAnnulla={function() { setShowFormPasto(false) }} onSalva={creaPasto}>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Tipo pasto</label>
+                          <select value={formPasto.tipo} onChange={function(e) { setFormPasto(function(p) { return Object.assign({}, p, { tipo: e.target.value }) }) }}
+                            className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-wine-500">
+                            {tipologia.tipologia_pasto_1 && <option value="cooking">Pasto Cooking Class — {tipologia.tipologia_pasto_1}</option>}
+                            {tipologia.tipologia_pasto_2 && <option value="degustazione">Pasto Degustazione — {tipologia.tipologia_pasto_2}</option>}
+                          </select>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Data</label>
+                            <input type="date" value={formPasto.data} onChange={function(e) { setFormPasto(function(p) { return Object.assign({}, p, { data: e.target.value }) }) }}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-medium text-gray-600 mb-1">Turno</label>
+                            <select value={formPasto.turno} onChange={function(e) { setFormPasto(function(p) { return Object.assign({}, p, { turno: e.target.value }) }) }}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-wine-500">
+                              <option value="lunch">Pranzo</option>
+                              <option value="dinner">Cena</option>
+                            </select>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Note</label>
+                          <input type="text" value={formPasto.note} onChange={function(e) { setFormPasto(function(p) { return Object.assign({}, p, { note: e.target.value }) }) }}
+                            placeholder="Richieste particolari, allergeni..." className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                        </div>
+                      </FormSemplice>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Se non ci sono servizi strutturati (Ad Hoc o Scoprendo) */}
+              {(!tipologia || (!tipologia.pernottamento && !tipologia.wine_tour && !tipologia.cooking_class && !tipologia.tipologia_pasto_1)) && (
+                <div className="text-center py-6 text-gray-400 text-sm">
+                  <Gift size={32} className="mx-auto mb-2 opacity-30" />
+                  <p>Questa tipologia non ha servizi strutturati.</p>
+                  <p className="text-xs mt-1">Usa le note per tracciare i servizi concordati.</p>
+                </div>
+              )}
+
+            </>
+          )}
+        </div>
+        <div className="p-5 border-t border-gray-100 flex-shrink-0">
+          <button onClick={onClose} className="w-full py-3 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">Chiudi</button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── MODALE SEGNA COME USATA ───────────────────────────────────
 function ModaleUtilizzo(props) {
   var gc = props.gc
   var onSave = props.onSave
   var onClose = props.onClose
-
   var oggi = new Date().toISOString().split('T')[0]
-  var [dataUtilizzo, setDataUtilizzo] = useState(oggi)
+  var [dataUtilizzo, setDataUtilizzo] = useState(gc.data_utilizzo || oggi)
   var [prenotazioneSearch, setPrenotazioneSearch] = useState('')
   var [prenotazioniTrovate, setPrenotazioniTrovate] = useState([])
   var [prenotazioneSelezionata, setPrenotazioneSelezionata] = useState(null)
@@ -296,9 +811,7 @@ function ModaleUtilizzo(props) {
     setCercando(true)
     supabase.from('reservations')
       .select('id, reservation_date, meal_type, guests_count, customers(first_name, last_name)')
-      .or('customers.last_name.ilike.%' + query + '%,customers.first_name.ilike.%' + query + '%')
-      .order('reservation_date', { ascending: false })
-      .limit(8)
+      .order('reservation_date', { ascending: false }).limit(8)
       .then(function(result) {
         setCercando(false)
         if (!result.error && result.data) setPrenotazioniTrovate(result.data)
@@ -307,21 +820,18 @@ function ModaleUtilizzo(props) {
 
   function handleSalva() {
     setSaving(true)
-    var payload = {
+    supabase.from('gift_card').update({
       usata: true,
       data_utilizzo: dataUtilizzo,
       prenotazione_id: prenotazioneSelezionata ? prenotazioneSelezionata.id : null
-    }
-    supabase.from('gift_card').update(payload).eq('id', gc.id).select()
-      .then(function(result) {
-        setSaving(false)
-        if (result.error) { alert('Errore: ' + result.error.message); return }
-        if (result.data && result.data.length > 0) onSave(result.data[0])
-      })
+    }).eq('id', gc.id).select().then(function(result) {
+      setSaving(false)
+      if (result.error) { alert('Errore: ' + result.error.message); return }
+      if (result.data && result.data.length > 0) onSave(result.data[0])
+    })
   }
 
   var mealLabels = { lunch: 'Pranzo', dinner: 'Cena' }
-
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
       <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
@@ -335,32 +845,24 @@ function ModaleUtilizzo(props) {
         <div className="p-5 space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Data utilizzo</label>
-            <input type="date" value={dataUtilizzo}
-              onChange={function(e) { setDataUtilizzo(e.target.value) }}
+            <input type="date" value={dataUtilizzo} onChange={function(e) { setDataUtilizzo(e.target.value) }}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
           </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Collega a prenotazione (opzionale)</label>
             {prenotazioneSelezionata ? (
               <div className="flex items-center justify-between p-3 bg-green-50 border border-green-200 rounded-lg">
                 <div>
-                  <p className="text-sm font-medium text-gray-900">
-                    {prenotazioneSelezionata.customers.last_name + ' ' + prenotazioneSelezionata.customers.first_name}
-                  </p>
-                  <p className="text-xs text-gray-500">
-                    {formatData(prenotazioneSelezionata.reservation_date) + ' · ' + (mealLabels[prenotazioneSelezionata.meal_type] || prenotazioneSelezionata.meal_type) + ' · ' + prenotazioneSelezionata.guests_count + ' ospiti'}
-                  </p>
+                  <p className="text-sm font-medium text-gray-900">{prenotazioneSelezionata.customers.last_name + ' ' + prenotazioneSelezionata.customers.first_name}</p>
+                  <p className="text-xs text-gray-500">{formatData(prenotazioneSelezionata.reservation_date) + ' · ' + (mealLabels[prenotazioneSelezionata.meal_type] || prenotazioneSelezionata.meal_type)}</p>
                 </div>
-                <button onClick={function() { setPrenotazioneSelezionata(null); setPrenotazioneSearch('') }}
-                  className="text-gray-400 hover:text-red-500 p-1"><X size={16} /></button>
+                <button onClick={function() { setPrenotazioneSelezionata(null); setPrenotazioneSearch('') }} className="text-gray-400 hover:text-red-500 p-1"><X size={16} /></button>
               </div>
             ) : (
               <div>
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-                  <input type="text" value={prenotazioneSearch}
-                    onChange={function(e) { cercaPrenotazione(e.target.value) }}
+                  <input type="text" value={prenotazioneSearch} onChange={function(e) { cercaPrenotazione(e.target.value) }}
                     placeholder="Cerca per cognome cliente..."
                     className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
                 </div>
@@ -398,82 +900,55 @@ function ModaleUtilizzo(props) {
 function ModaleTipologia(props) {
   var onSave = props.onSave
   var onClose = props.onClose
-  var tipologiaEsistente = props.tipologia || null
-  var isModifica = tipologiaEsistente !== null
+  var t = props.tipologia || null
+  var isModifica = t !== null
 
-  function initForm(t) {
+  function initForm(tip) {
     return {
-      nome: t ? t.nome : '',
-      prezzo: t ? String(t.prezzo) : '',
-      prezzo_precedente: t ? String(t.prezzo_precedente || '') : '',
-      persone_min: t ? String(t.persone_min) : '1',
-      persone_max: t ? String(t.persone_max) : '1',
-      prezzo_per_persona: t ? t.prezzo_per_persona : true,
-      pernottamento: t ? t.pernottamento : false,
-      notti: t ? String(t.notti) : '0',
-      calice_benvenuto: t ? t.calice_benvenuto : false,
-      wine_tour: t ? t.wine_tour : false,
-      visita_orto: t ? t.visita_orto : false,
-      degustazione_vini_1: t ? (t.degustazione_vini_1 || '') : '',
-      degustazione_vini_2: t ? (t.degustazione_vini_2 || '') : '',
-      tipologia_pasto_1: t ? (t.tipologia_pasto_1 || '') : '',
-      tipologia_pasto_2: t ? (t.tipologia_pasto_2 || '') : '',
-      cooking_class: t ? t.cooking_class : false,
-      omaggio: t ? (t.omaggio || '') : '',
-      attiva: t ? t.attiva : true,
-      note: t ? (t.note || '') : ''
+      nome: tip ? tip.nome : '', prezzo: tip ? String(tip.prezzo) : '',
+      prezzo_precedente: tip ? String(tip.prezzo_precedente || '') : '',
+      persone_min: tip ? String(tip.persone_min) : '1', persone_max: tip ? String(tip.persone_max) : '1',
+      prezzo_per_persona: tip ? tip.prezzo_per_persona : true,
+      pernottamento: tip ? tip.pernottamento : false, notti: tip ? String(tip.notti) : '0',
+      calice_benvenuto: tip ? tip.calice_benvenuto : false, wine_tour: tip ? tip.wine_tour : false,
+      visita_orto: tip ? tip.visita_orto : false,
+      degustazione_vini_1: tip ? (tip.degustazione_vini_1 || '') : '',
+      degustazione_vini_2: tip ? (tip.degustazione_vini_2 || '') : '',
+      tipologia_pasto_1: tip ? (tip.tipologia_pasto_1 || '') : '',
+      tipologia_pasto_2: tip ? (tip.tipologia_pasto_2 || '') : '',
+      cooking_class: tip ? tip.cooking_class : false, omaggio: tip ? (tip.omaggio || '') : '',
+      attiva: tip ? tip.attiva : true, note: tip ? (tip.note || '') : ''
     }
   }
 
-  var [form, setForm] = useState(initForm(tipologiaEsistente))
+  var [form, setForm] = useState(initForm(t))
   var [saving, setSaving] = useState(false)
   var [errore, setErrore] = useState('')
 
-  function handleChange(campo, valore) {
-    setForm(function(prev) {
-      var next = Object.assign({}, prev)
-      next[campo] = valore
-      return next
-    })
-  }
+  function hc(campo, valore) { setForm(function(prev) { var next = Object.assign({}, prev); next[campo] = valore; return next }) }
 
   function handleSave() {
     if (!form.nome.trim()) { setErrore('Il nome è obbligatorio.'); return }
     if (!form.prezzo) { setErrore('Il prezzo è obbligatorio.'); return }
-    setErrore('')
-    setSaving(true)
-
+    setErrore(''); setSaving(true)
     var payload = {
-      nome: form.nome.trim(),
-      prezzo: parseFloat(form.prezzo),
+      nome: form.nome.trim(), prezzo: parseFloat(form.prezzo),
       prezzo_precedente: form.prezzo_precedente ? parseFloat(form.prezzo_precedente) : null,
-      persone_min: parseInt(form.persone_min, 10) || 1,
-      persone_max: parseInt(form.persone_max, 10) || 1,
-      prezzo_per_persona: form.prezzo_per_persona,
-      pernottamento: form.pernottamento,
-      notti: parseInt(form.notti, 10) || 0,
-      calice_benvenuto: form.calice_benvenuto,
-      wine_tour: form.wine_tour,
-      visita_orto: form.visita_orto,
+      persone_min: parseInt(form.persone_min) || 1, persone_max: parseInt(form.persone_max) || 1,
+      prezzo_per_persona: form.prezzo_per_persona, pernottamento: form.pernottamento,
+      notti: parseInt(form.notti) || 0, calice_benvenuto: form.calice_benvenuto,
+      wine_tour: form.wine_tour, visita_orto: form.visita_orto,
       degustazione_vini_1: form.degustazione_vini_1.trim() || null,
       degustazione_vini_2: form.degustazione_vini_2.trim() || null,
       tipologia_pasto_1: form.tipologia_pasto_1.trim() || null,
       tipologia_pasto_2: form.tipologia_pasto_2.trim() || null,
-      cooking_class: form.cooking_class,
-      omaggio: form.omaggio.trim() || null,
-      attiva: form.attiva,
-      note: form.note.trim() || null
+      cooking_class: form.cooking_class, omaggio: form.omaggio.trim() || null,
+      attiva: form.attiva, note: form.note.trim() || null
     }
-
-    // Se il prezzo è cambiato in modifica, aggiorna data_variazione_prezzo
-    if (isModifica && tipologiaEsistente.prezzo !== payload.prezzo) {
-      payload.data_variazione_prezzo = new Date().toISOString().split('T')[0]
-    }
-
+    if (isModifica && t.prezzo !== payload.prezzo) payload.data_variazione_prezzo = new Date().toISOString().split('T')[0]
     var query = isModifica
-      ? supabase.from('gift_card_tipologie').update(payload).eq('id', tipologiaEsistente.id).select()
+      ? supabase.from('gift_card_tipologie').update(payload).eq('id', t.id).select()
       : supabase.from('gift_card_tipologie').insert([payload]).select()
-
     query.then(function(result) {
       setSaving(false)
       if (result.error) { setErrore('Errore: ' + result.error.message); return }
@@ -481,13 +956,13 @@ function ModaleTipologia(props) {
     })
   }
 
-  function Toggle(tprops) {
+  function Toggle(tp) {
     return (
       <div className="flex items-center justify-between py-2">
-        <span className="text-sm text-gray-700">{tprops.label}</span>
-        <button type="button" onClick={function() { handleChange(tprops.campo, !form[tprops.campo]) }}
-          className={"w-10 h-6 rounded-full transition-colors flex-shrink-0 " + (form[tprops.campo] ? 'bg-wine-700' : 'bg-gray-300')}>
-          <span className={"block w-4 h-4 rounded-full bg-white shadow transform transition-transform mx-1 " + (form[tprops.campo] ? 'translate-x-4' : 'translate-x-0')} />
+        <span className="text-sm text-gray-700">{tp.label}</span>
+        <button type="button" onClick={function() { hc(tp.campo, !form[tp.campo]) }}
+          className={"w-10 h-6 rounded-full transition-colors flex-shrink-0 " + (form[tp.campo] ? 'bg-wine-700' : 'bg-gray-300')}>
+          <span className={"block w-4 h-4 rounded-full bg-white shadow transform transition-transform mx-1 " + (form[tp.campo] ? 'translate-x-4' : 'translate-x-0')} />
         </button>
       </div>
     )
@@ -500,52 +975,29 @@ function ModaleTipologia(props) {
           <h2 className="text-base font-bold text-gray-900">{isModifica ? 'Modifica Tipologia' : 'Nuova Tipologia'}</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1"><X size={22} /></button>
         </div>
-
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Nome *</label>
-            <input type="text" value={form.nome} onChange={function(e) { handleChange('nome', e.target.value) }}
-              placeholder="es. L'Anfora nel Bicchiere"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" autoFocus />
-          </div>
-
+          <div><label className="block text-sm font-medium text-gray-700 mb-1">Nome *</label>
+            <input type="text" value={form.nome} onChange={function(e) { hc('nome', e.target.value) }} autoFocus
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" /></div>
           <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Prezzo attuale € *</label>
-              <input type="number" step="0.01" min="0" value={form.prezzo}
-                onChange={function(e) { handleChange('prezzo', e.target.value) }}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Prezzo precedente €</label>
-              <input type="number" step="0.01" min="0" value={form.prezzo_precedente}
-                onChange={function(e) { handleChange('prezzo_precedente', e.target.value) }}
-                placeholder="Lascia vuoto se invariato"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
-            </div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Prezzo attuale € *</label>
+              <input type="number" step="0.01" min="0" value={form.prezzo} onChange={function(e) { hc('prezzo', e.target.value) }}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" /></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Prezzo precedente €</label>
+              <input type="number" step="0.01" min="0" value={form.prezzo_precedente} onChange={function(e) { hc('prezzo_precedente', e.target.value) }}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" /></div>
           </div>
-
           <div className="grid grid-cols-3 gap-3">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Persone min</label>
-              <input type="number" min="1" value={form.persone_min}
-                onChange={function(e) { handleChange('persone_min', e.target.value) }}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Persone max</label>
-              <input type="number" min="1" value={form.persone_max}
-                onChange={function(e) { handleChange('persone_max', e.target.value) }}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Notti</label>
-              <input type="number" min="0" value={form.notti}
-                onChange={function(e) { handleChange('notti', e.target.value) }}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
-            </div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Pers. min</label>
+              <input type="number" min="1" value={form.persone_min} onChange={function(e) { hc('persone_min', e.target.value) }}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" /></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Pers. max</label>
+              <input type="number" min="1" value={form.persone_max} onChange={function(e) { hc('persone_max', e.target.value) }}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" /></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Notti</label>
+              <input type="number" min="0" value={form.notti} onChange={function(e) { hc('notti', e.target.value) }}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" /></div>
           </div>
-
           <div className="border border-gray-200 rounded-xl p-4 space-y-1">
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Servizi inclusi</p>
             <Toggle label="Prezzo per persona" campo="prezzo_per_persona" />
@@ -555,58 +1007,19 @@ function ModaleTipologia(props) {
             <Toggle label="Visita Orto" campo="visita_orto" />
             <Toggle label="Cooking Class" campo="cooking_class" />
           </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Degustazione vini 1</label>
-            <input type="text" value={form.degustazione_vini_1}
-              onChange={function(e) { handleChange('degustazione_vini_1', e.target.value) }}
-              placeholder="es. 3 vini in anfora"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Degustazione vini 2</label>
-            <input type="text" value={form.degustazione_vini_2}
-              onChange={function(e) { handleChange('degustazione_vini_2', e.target.value) }}
-              placeholder="es. 4 vini i Cacciagalli"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Tipologia pasto 1</label>
-            <input type="text" value={form.tipologia_pasto_1}
-              onChange={function(e) { handleChange('tipologia_pasto_1', e.target.value) }}
-              placeholder="es. Tapas, Pranzo/Cena 4 portate"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Tipologia pasto 2</label>
-            <input type="text" value={form.tipologia_pasto_2}
-              onChange={function(e) { handleChange('tipologia_pasto_2', e.target.value) }}
-              placeholder="es. Pranzo/Cena 4 portate"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Omaggio</label>
-            <input type="text" value={form.omaggio}
-              onChange={function(e) { handleChange('omaggio', e.target.value) }}
-              placeholder="es. Grembiule e tote bag I Cacciagalli"
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
-          </div>
-
-          <div className="border border-gray-200 rounded-xl p-4">
-            <Toggle label="Tipologia attiva (in vendita)" campo="attiva" />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Note interne</label>
-            <textarea rows={2} value={form.note}
-              onChange={function(e) { handleChange('note', e.target.value) }}
-              placeholder="Note interne sulla tipologia..."
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 resize-none" />
-          </div>
-
+          {[['degustazione_vini_1','Degustazione vini 1','es. 3 vini in anfora'],['degustazione_vini_2','Degustazione vini 2','es. 4 vini i Cacciagalli'],
+            ['tipologia_pasto_1','Tipologia pasto 1','es. Tapas, Pranzo/Cena 4 portate'],['tipologia_pasto_2','Tipologia pasto 2','es. Pranzo/Cena 4 portate'],
+            ['omaggio','Omaggio','es. Grembiule e tote bag I Cacciagalli']].map(function(f) {
+            return (<div key={f[0]}><label className="block text-sm font-medium text-gray-700 mb-1">{f[1]}</label>
+              <input type="text" value={form[f[0]]} onChange={function(e) { hc(f[0], e.target.value) }} placeholder={f[2]}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" /></div>)
+          })}
+          <div className="border border-gray-200 rounded-xl p-4"><Toggle label="Tipologia attiva (in vendita)" campo="attiva" /></div>
+          <div><label className="block text-sm font-medium text-gray-700 mb-1">Note interne</label>
+            <textarea rows={2} value={form.note} onChange={function(e) { hc('note', e.target.value) }}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 resize-none" /></div>
           {errore && <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">{errore}</div>}
         </div>
-
         <div className="flex gap-3 p-5 border-t border-gray-100 flex-shrink-0">
           <button onClick={onClose} className="flex-1 py-3 border border-gray-300 rounded-xl text-sm font-medium text-gray-700 hover:bg-gray-50">Annulla</button>
           <button onClick={handleSave} disabled={saving}
@@ -622,7 +1035,6 @@ function ModaleTipologia(props) {
 // ── TAB ARCHIVIO ──────────────────────────────────────────────
 function TabArchivio(props) {
   var tipologie = props.tipologie
-
   var [giftCard, setGiftCard] = useState([])
   var [loading, setLoading] = useState(true)
   var [filtroStato, setFiltroStato] = useState('valide')
@@ -631,6 +1043,7 @@ function TabArchivio(props) {
   var [showModale, setShowModale] = useState(false)
   var [gcInModifica, setGcInModifica] = useState(null)
   var [gcPerUtilizzo, setGcPerUtilizzo] = useState(null)
+  var [gcPerServizi, setGcPerServizi] = useState(null)
   var [confermaElimina, setConfermaElimina] = useState(null)
 
   useEffect(function() { loadGiftCard() }, [])
@@ -638,7 +1051,7 @@ function TabArchivio(props) {
   function loadGiftCard() {
     setLoading(true)
     supabase.from('gift_card')
-      .select('*, gift_card_tipologie(nome, prezzo, prezzo_per_persona, pernottamento, wine_tour, cooking_class, tipologia_pasto_1)')
+      .select('*, gift_card_tipologie(id, nome, prezzo, prezzo_per_persona, pernottamento, notti, wine_tour, cooking_class, tipologia_pasto_1, tipologia_pasto_2, degustazione_vini_1, calice_benvenuto, visita_orto, omaggio)')
       .order('created_at', { ascending: false })
       .then(function(result) {
         setLoading(false)
@@ -648,12 +1061,9 @@ function TabArchivio(props) {
 
   function handleSaveGc(gcSalvata, isModifica) {
     if (isModifica) {
-      setGiftCard(function(prev) { return prev.map(function(g) { return g.id === gcSalvata.id ? Object.assign({}, gcSalvata, { gift_card_tipologie: g.gift_card_tipologie }) : g }) })
-    } else {
-      loadGiftCard()
-    }
-    setShowModale(false)
-    setGcInModifica(null)
+      setGiftCard(function(prev) { return prev.map(function(g) { return g.id === gcSalvata.id ? Object.assign({}, g, gcSalvata) : g }) })
+    } else { loadGiftCard() }
+    setShowModale(false); setGcInModifica(null)
   }
 
   function handleSaveUtilizzo(gcAggiornata) {
@@ -661,16 +1071,20 @@ function TabArchivio(props) {
     setGcPerUtilizzo(null)
   }
 
+  function handleAggiornaGc(gcAggiornata) {
+    setGiftCard(function(prev) { return prev.map(function(g) { return g.id === gcAggiornata.id ? Object.assign({}, g, gcAggiornata) : g }) })
+    if (gcPerServizi && gcPerServizi.id === gcAggiornata.id) setGcPerServizi(Object.assign({}, gcPerServizi, gcAggiornata))
+  }
+
   function handleElimina() {
     var gc = confermaElimina
     supabase.from('gift_card').delete().eq('id', gc.id).then(function(result) {
       setConfermaElimina(null)
       if (!result.error) setGiftCard(function(prev) { return prev.filter(function(g) { return g.id !== gc.id }) })
-      else alert('Errore eliminazione: ' + result.error.message)
+      else alert('Errore: ' + result.error.message)
     })
   }
 
-  // Filtraggio
   var oggi = new Date()
   var gcFiltrate = giftCard.filter(function(gc) {
     var scaduta = gc.scadenza && new Date(gc.scadenza) < oggi
@@ -695,13 +1109,10 @@ function TabArchivio(props) {
 
   return (
     <div>
-      {/* Contatori */}
       <div className="grid grid-cols-3 gap-3 mb-5">
-        {[
-          { key: 'valide', label: 'Valide', count: countValide, color: 'green' },
+        {[{ key: 'valide', label: 'Valide', count: countValide, color: 'green' },
           { key: 'usate', label: 'Utilizzate', count: countUsate, color: 'gray' },
-          { key: 'scadute', label: 'Scadute', count: countScadute, color: 'red' }
-        ].map(function(s) {
+          { key: 'scadute', label: 'Scadute', count: countScadute, color: 'red' }].map(function(s) {
           var isAttivo = filtroStato === s.key
           return (
             <button key={s.key} onClick={function() { setFiltroStato(s.key) }}
@@ -715,17 +1126,13 @@ function TabArchivio(props) {
         })}
       </div>
 
-      {/* Filtri */}
       <div className="flex gap-2 mb-4 flex-wrap">
         <div className="relative flex-1 min-w-48">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
-          <input type="text" value={ricerca}
-            onChange={function(e) { setRicerca(e.target.value) }}
-            placeholder="Cerca codice, nome..."
-            className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+          <input type="text" value={ricerca} onChange={function(e) { setRicerca(e.target.value) }}
+            placeholder="Cerca codice, nome..." className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
         </div>
-        <select value={filtroTipologia}
-          onChange={function(e) { setFiltroTipologia(e.target.value) }}
+        <select value={filtroTipologia} onChange={function(e) { setFiltroTipologia(e.target.value) }}
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-wine-500">
           <option value="">Tutte le tipologie</option>
           {tipologie.map(function(t) { return <option key={t.id} value={t.id}>{t.nome}</option> })}
@@ -736,7 +1143,6 @@ function TabArchivio(props) {
         </button>
       </div>
 
-      {/* Lista */}
       {loading ? (
         <div className="text-center py-12 text-gray-400 text-sm">Caricamento...</div>
       ) : gcFiltrate.length === 0 ? (
@@ -750,65 +1156,44 @@ function TabArchivio(props) {
               <div key={gc.id} className="bg-white rounded-xl border border-gray-200 shadow-sm p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
-                    {/* Header */}
                     <div className="flex items-center gap-2 flex-wrap mb-1">
                       <span className="font-mono font-bold text-wine-700 text-sm">{gc.codice}</span>
                       {gc.codici_collegati && gc.codici_collegati.length > 0 && (
                         <span className="text-xs text-gray-400">+ {gc.codici_collegati.join(', ')}</span>
                       )}
                       <span className={"px-2 py-0.5 rounded-full text-xs font-medium " + stato.cls}>{stato.label}</span>
-                      {tip && (
-                        <span className="px-2 py-0.5 rounded-full text-xs bg-wine-50 text-wine-700 font-medium">{tip.nome}</span>
-                      )}
+                      {tip && <span className="px-2 py-0.5 rounded-full text-xs bg-wine-50 text-wine-700 font-medium">{tip.nome}</span>}
+                      {gc.lingua && gc.lingua !== 'ITA' && badgeLingua(gc.lingua)}
                     </div>
-
-                    {/* Persone */}
-                    <div className="flex items-center gap-4 text-xs text-gray-500 mt-1 flex-wrap">
-                      {gc.committente_nome && (
-                        <span>Da: <span className="text-gray-700 font-medium">{gc.committente_nome}</span></span>
-                      )}
-                      {gc.beneficiario_nome && (
-                        <span>A: <span className="text-gray-700 font-medium">{gc.beneficiario_nome}</span></span>
-                      )}
-                      {gc.numero_persone > 1 && (
-                        <span>{gc.numero_persone} persone</span>
-                      )}
+                    <div className="flex items-center gap-3 text-xs text-gray-500 mt-1 flex-wrap">
+                      {gc.committente_nome && <span>Da: <span className="text-gray-700 font-medium">{gc.committente_nome}</span></span>}
+                      {gc.beneficiario_nome && <span>A: <span className="text-gray-700 font-medium">{gc.beneficiario_nome}</span></span>}
                     </div>
-
-                    {/* Date e prezzo */}
-                    <div className="flex items-center gap-4 text-xs text-gray-500 mt-1 flex-wrap">
+                    <div className="flex items-center gap-3 text-xs text-gray-500 mt-1 flex-wrap">
                       {gc.data_acquisto && <span>Acquistata: {formatData(gc.data_acquisto)}</span>}
-                      {gc.scadenza && (
-                        <span className={isScaduta(gc.scadenza) ? 'text-red-600 font-medium' : ''}>
-                          Scade: {formatData(gc.scadenza)}
-                        </span>
-                      )}
+                      {gc.scadenza && <span className={isScaduta(gc.scadenza) ? 'text-red-600 font-medium' : ''}>Scade: {formatData(gc.scadenza)}</span>}
                       {gc.prezzo_pagato && <span className="font-medium text-gray-700">€{gc.prezzo_pagato}</span>}
                       {gc.numero_scontrino && <span>Scontrino: {gc.numero_scontrino}</span>}
                     </div>
-
-                    {/* Servizi */}
                     {tip && (
                       <div className="flex gap-1 mt-2 flex-wrap">
-                        {tip.pernottamento && <span className="px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">Pernottamento</span>}
-                        {tip.wine_tour && <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded text-xs">Wine Tour</span>}
-                        {tip.cooking_class && <span className="px-1.5 py-0.5 bg-orange-50 text-orange-700 rounded text-xs">Cooking Class</span>}
-                        {tip.tipologia_pasto_1 && <span className="px-1.5 py-0.5 bg-gray-50 text-gray-600 rounded text-xs">{tip.tipologia_pasto_1}</span>}
+                        {tip.pernottamento && <span className={"px-1.5 py-0.5 rounded text-xs " + (gc.pernottamento_data_inizio ? 'bg-green-50 text-green-700' : 'bg-blue-50 text-blue-600')}>🏨 {gc.pernottamento_data_inizio ? formatData(gc.pernottamento_data_inizio) : 'Da pianif.'}</span>}
+                        {tip.wine_tour && <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded text-xs">🍷 Wine Tour</span>}
+                        {tip.cooking_class && <span className="px-1.5 py-0.5 bg-orange-50 text-orange-700 rounded text-xs">👨‍🍳 Cooking</span>}
                       </div>
                     )}
-
-                    {gc.usata && gc.data_utilizzo && (
-                      <p className="text-xs text-gray-400 mt-1">Utilizzata il {formatData(gc.data_utilizzo)}</p>
-                    )}
+                    {gc.usata && gc.data_utilizzo && <p className="text-xs text-gray-400 mt-1">Utilizzata il {formatData(gc.data_utilizzo)}</p>}
                     {gc.note && <p className="text-xs text-gray-400 italic mt-1">{gc.note}</p>}
                   </div>
-
-                  {/* Azioni */}
                   <div className="flex flex-col gap-1 flex-shrink-0">
+                    <button onClick={function() { setGcPerServizi(gc) }}
+                      className="text-xs px-2 py-1.5 bg-wine-50 text-wine-700 rounded-lg border border-wine-200 hover:bg-wine-100 font-medium flex items-center gap-1">
+                      <Gift size={12} />Servizi
+                    </button>
                     {!gc.usata && !isScaduta(gc.scadenza) && (
                       <button onClick={function() { setGcPerUtilizzo(gc) }}
                         className="text-xs px-2 py-1.5 bg-green-50 text-green-700 rounded-lg border border-green-200 hover:bg-green-100 font-medium">
-                        Segna usata
+                        ✓ Usata
                       </button>
                     )}
                     <button onClick={function() { setGcInModifica(gc); setShowModale(true) }}
@@ -828,28 +1213,23 @@ function TabArchivio(props) {
       )}
 
       {showModale && (
-        <ModaleGiftCard
-          tipologie={tipologie}
-          gc={gcInModifica}
-          onSave={handleSaveGc}
-          onClose={function() { setShowModale(false); setGcInModifica(null) }}
-        />
+        <ModaleGiftCard tipologie={tipologie} gc={gcInModifica} onSave={handleSaveGc}
+          onClose={function() { setShowModale(false); setGcInModifica(null) }} />
       )}
-
       {gcPerUtilizzo && (
-        <ModaleUtilizzo
-          gc={gcPerUtilizzo}
-          onSave={handleSaveUtilizzo}
-          onClose={function() { setGcPerUtilizzo(null) }}
+        <ModaleUtilizzo gc={gcPerUtilizzo} onSave={handleSaveUtilizzo} onClose={function() { setGcPerUtilizzo(null) }} />
+      )}
+      {gcPerServizi && (
+        <PannelloServizi
+          gc={gcPerServizi}
+          tipologia={gcPerServizi.gift_card_tipologie}
+          onClose={function() { setGcPerServizi(null) }}
+          onAggiorna={handleAggiornaGc}
         />
       )}
-
       {confermaElimina && (
-        <ModaleConferma
-          testo={'Eliminare la gift card "' + confermaElimina.codice + '"? Questa azione non è reversibile.'}
-          onConferma={handleElimina}
-          onAnnulla={function() { setConfermaElimina(null) }}
-        />
+        <ModaleConferma testo={'Eliminare la gift card "' + confermaElimina.codice + '"?'}
+          onConferma={handleElimina} onAnnulla={function() { setConfermaElimina(null) }} />
       )}
     </div>
   )
@@ -859,18 +1239,12 @@ function TabArchivio(props) {
 function TabTipologie(props) {
   var tipologie = props.tipologie
   var onUpdate = props.onUpdate
-
   var [showModale, setShowModale] = useState(false)
   var [tipologiaInModifica, setTipologiaInModifica] = useState(null)
   var [confermaElimina, setConfermaElimina] = useState(null)
   var [aperte, setAperte] = useState({})
 
-  function handleSave(tipSalvata, isModifica) {
-    onUpdate(tipSalvata, isModifica)
-    setShowModale(false)
-    setTipologiaInModifica(null)
-  }
-
+  function handleSave(tipSalvata, isModifica) { onUpdate(tipSalvata, isModifica); setShowModale(false); setTipologiaInModifica(null) }
   function handleElimina() {
     var tip = confermaElimina
     supabase.from('gift_card_tipologie').delete().eq('id', tip.id).then(function(result) {
@@ -879,65 +1253,42 @@ function TabTipologie(props) {
       else alert('Errore: ' + result.error.message)
     })
   }
-
-  function toggleAperta(id) {
-    setAperte(function(prev) {
-      var next = Object.assign({}, prev)
-      next[id] = !prev[id]
-      return next
-    })
-  }
+  function toggleAperta(id) { setAperte(function(prev) { var next = Object.assign({}, prev); next[id] = !prev[id]; return next }) }
 
   var attive = tipologie.filter(function(t) { return t.attiva })
   var legacy = tipologie.filter(function(t) { return !t.attiva })
 
-  function RigaTipologia(rprops) {
-    var t = rprops.t
-    var aperta = !!aperte[t.id]
+  function RigaTipologia(rp) {
+    var t = rp.t; var aperta = !!aperte[t.id]
     return (
       <div className={"bg-white rounded-xl border shadow-sm " + (t.attiva ? 'border-gray-200' : 'border-gray-100 opacity-70')}>
         <div className="flex items-center gap-3 p-4">
           <button onClick={function() { toggleAperta(t.id) }} className="flex-1 text-left flex items-center gap-3">
             <span className="font-semibold text-gray-900 text-sm">{t.nome}</span>
             <span className="text-wine-700 font-bold text-sm">€{t.prezzo}</span>
-            {t.prezzo_per_persona && <span className="text-xs text-gray-400">/persona</span>}
+            {t.prezzo_per_persona && <span className="text-xs text-gray-400">/p</span>}
             {!t.attiva && <span className="px-2 py-0.5 rounded-full text-xs bg-gray-100 text-gray-500">Legacy</span>}
             {aperta ? <ChevronUp size={14} className="text-gray-400 ml-auto" /> : <ChevronDown size={14} className="text-gray-400 ml-auto" />}
           </button>
-          <button onClick={function() { setTipologiaInModifica(t); setShowModale(true) }}
-            className="text-gray-400 hover:text-wine-700 p-1"><PencilLine size={15} /></button>
-          <button onClick={function() { setConfermaElimina(t) }}
-            className="text-gray-300 hover:text-red-500 p-1"><Trash2 size={15} /></button>
+          <button onClick={function() { setTipologiaInModifica(t); setShowModale(true) }} className="text-gray-400 hover:text-wine-700 p-1"><PencilLine size={15} /></button>
+          <button onClick={function() { setConfermaElimina(t) }} className="text-gray-300 hover:text-red-500 p-1"><Trash2 size={15} /></button>
         </div>
-
         {aperta && (
           <div className="border-t border-gray-100 px-4 pb-4 pt-3">
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs">
-              {[
-                { label: 'Persone', val: t.persone_min === t.persone_max ? t.persone_min : t.persone_min + '-' + t.persone_max },
-                { label: 'Pernottamento', val: t.pernottamento ? (t.notti + ' notte/i') : 'No' },
-                { label: 'Calice benvenuto', val: t.calice_benvenuto ? 'Sì' : 'No' },
-                { label: 'Wine Tour', val: t.wine_tour ? 'Sì' : 'No' },
-                { label: 'Visita Orto', val: t.visita_orto ? 'Sì' : 'No' },
-                { label: 'Cooking Class', val: t.cooking_class ? 'Sì' : 'No' }
-              ].map(function(item) {
-                return (
-                  <div key={item.label} className="bg-gray-50 rounded-lg p-2">
-                    <p className="text-gray-400 text-xs">{item.label}</p>
-                    <p className="font-medium text-gray-700">{item.val}</p>
-                  </div>
-                )
+              {[['Persone', t.persone_min === t.persone_max ? t.persone_min : t.persone_min + '-' + t.persone_max],
+                ['Pernottamento', t.pernottamento ? t.notti + ' notte/i' : 'No'],
+                ['Calice benvenuto', t.calice_benvenuto ? 'Sì' : 'No'],
+                ['Wine Tour', t.wine_tour ? 'Sì' : 'No'],
+                ['Visita Orto', t.visita_orto ? 'Sì' : 'No'],
+                ['Cooking Class', t.cooking_class ? 'Sì' : 'No']].map(function(item) {
+                return (<div key={item[0]} className="bg-gray-50 rounded-lg p-2">
+                  <p className="text-gray-400">{item[0]}</p><p className="font-medium text-gray-700">{item[1]}</p></div>)
               })}
             </div>
-            {t.degustazione_vini_1 && (
-              <p className="text-xs text-gray-500 mt-2">Degustazione: {t.degustazione_vini_1}{t.degustazione_vini_2 ? ' + ' + t.degustazione_vini_2 : ''}</p>
-            )}
-            {t.tipologia_pasto_1 && (
-              <p className="text-xs text-gray-500 mt-1">Pasto: {t.tipologia_pasto_1}{t.tipologia_pasto_2 ? ' + ' + t.tipologia_pasto_2 : ''}</p>
-            )}
-            {t.omaggio && (
-              <p className="text-xs text-gray-500 mt-1">Omaggio: {t.omaggio}</p>
-            )}
+            {t.degustazione_vini_1 && <p className="text-xs text-gray-500 mt-2">Degustazione: {t.degustazione_vini_1}{t.degustazione_vini_2 ? ' + ' + t.degustazione_vini_2 : ''}</p>}
+            {t.tipologia_pasto_1 && <p className="text-xs text-gray-500 mt-1">Pasto: {t.tipologia_pasto_1}{t.tipologia_pasto_2 ? ' + ' + t.tipologia_pasto_2 : ''}</p>}
+            {t.omaggio && <p className="text-xs text-gray-500 mt-1">Omaggio: {t.omaggio}</p>}
             {t.prezzo_precedente && (
               <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
                 <AlertTriangle size={11} />
@@ -960,34 +1311,19 @@ function TabTipologie(props) {
           <Plus size={16} />Nuova tipologia
         </button>
       </div>
-
-      <div className="space-y-3">
-        {attive.map(function(t) { return <RigaTipologia key={t.id} t={t} /> })}
-      </div>
-
+      <div className="space-y-3">{attive.map(function(t) { return <RigaTipologia key={t.id} t={t} /> })}</div>
       {legacy.length > 0 && (
         <div className="mt-6">
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Legacy — non più in vendita</p>
-          <div className="space-y-3">
-            {legacy.map(function(t) { return <RigaTipologia key={t.id} t={t} /> })}
-          </div>
+          <div className="space-y-3">{legacy.map(function(t) { return <RigaTipologia key={t.id} t={t} /> })}</div>
         </div>
       )}
-
       {showModale && (
-        <ModaleTipologia
-          tipologia={tipologiaInModifica}
-          onSave={handleSave}
-          onClose={function() { setShowModale(false); setTipologiaInModifica(null) }}
-        />
+        <ModaleTipologia tipologia={tipologiaInModifica} onSave={handleSave} onClose={function() { setShowModale(false); setTipologiaInModifica(null) }} />
       )}
-
       {confermaElimina && (
-        <ModaleConferma
-          testo={'Eliminare la tipologia "' + confermaElimina.nome + '"? Questa azione non è reversibile.'}
-          onConferma={handleElimina}
-          onAnnulla={function() { setConfermaElimina(null) }}
-        />
+        <ModaleConferma testo={'Eliminare la tipologia "' + confermaElimina.nome + '"?'}
+          onConferma={handleElimina} onAnnulla={function() { setConfermaElimina(null) }} />
       )}
     </div>
   )
@@ -1003,10 +1339,8 @@ export default function GiftCardPage() {
 
   function loadTipologie() {
     setLoadingTipologie(true)
-    supabase.from('gift_card_tipologie')
-      .select('*')
-      .order('attiva', { ascending: false })
-      .order('prezzo', { ascending: true })
+    supabase.from('gift_card_tipologie').select('*')
+      .order('attiva', { ascending: false }).order('prezzo', { ascending: true })
       .then(function(result) {
         setLoadingTipologie(false)
         if (!result.error && result.data) setTipologie(result.data)
@@ -1014,34 +1348,23 @@ export default function GiftCardPage() {
   }
 
   function handleUpdateTipologia(tipSalvata, isModifica, isElimina) {
-    if (isElimina) {
-      setTipologie(function(prev) { return prev.filter(function(t) { return t.id !== tipSalvata.id }) })
-    } else if (isModifica) {
-      setTipologie(function(prev) { return prev.map(function(t) { return t.id === tipSalvata.id ? tipSalvata : t }) })
-    } else {
-      setTipologie(function(prev) { return prev.concat([tipSalvata]) })
-    }
+    if (isElimina) { setTipologie(function(prev) { return prev.filter(function(t) { return t.id !== tipSalvata.id }) }) }
+    else if (isModifica) { setTipologie(function(prev) { return prev.map(function(t) { return t.id === tipSalvata.id ? tipSalvata : t }) }) }
+    else { setTipologie(function(prev) { return prev.concat([tipSalvata]) }) }
   }
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">
-
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <Gift size={24} className="text-wine-700" />
-            Gift Card
+            <Gift size={24} className="text-wine-700" />Gift Card
           </h1>
           <p className="text-sm text-gray-500 mt-0.5">Archivio e gestione buoni regalo</p>
         </div>
       </div>
-
-      {/* Tab */}
       <div className="flex gap-2 mb-6 border-b border-gray-200">
-        {[
-          { key: 'archivio', label: 'Archivio' },
-          { key: 'tipologie', label: 'Tipologie pacchetti' }
-        ].map(function(tab) {
+        {[{ key: 'archivio', label: 'Archivio' }, { key: 'tipologie', label: 'Tipologie pacchetti' }].map(function(tab) {
           return (
             <button key={tab.key} onClick={function() { setTabAttiva(tab.key) }}
               className={"px-4 py-2.5 text-sm font-medium border-b-2 transition-colors -mb-px " + (tabAttiva === tab.key ? 'border-wine-700 text-wine-700' : 'border-transparent text-gray-500 hover:text-gray-700')}>
@@ -1050,7 +1373,6 @@ export default function GiftCardPage() {
           )
         })}
       </div>
-
       {loadingTipologie ? (
         <div className="text-center py-12 text-gray-400 text-sm">Caricamento...</div>
       ) : tabAttiva === 'archivio' ? (
@@ -1058,7 +1380,6 @@ export default function GiftCardPage() {
       ) : (
         <TabTipologie tipologie={tipologie} onUpdate={handleUpdateTipologia} />
       )}
-
     </div>
   )
 }
