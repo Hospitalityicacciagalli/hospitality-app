@@ -773,7 +773,7 @@ function ReservationDay() {
   function loadReservations() {
     setLoading(true)
     supabase.from('reservations')
-      .select('*, customers(id, first_name, last_name, phone, email, category)')
+      .select('*, customers(id, first_name, last_name, phone, email, category), gift_card(id, codice, gift_card_tipologie(nome))')
       .eq('reservation_date', dateStr).eq('meal_type', selectedMeal)
       .order('requested_time', { ascending: true, nullsFirst: false })
       .then(function(result) {
@@ -929,7 +929,7 @@ function ReservationDay() {
       ) : (
         <div className="space-y-2">
           {activeReservations.map(function(res) {
-            var customer = res.customers
+            var customer = res.customers || { first_name: 'Gift Card', last_name: res.gift_card ? res.gift_card.codice : '—', phone: null, email: null, category: 'standard' }
             var timeStr = res.requested_time ? res.requested_time.substring(0, 5) : null
             var tavoliInfo = tavoliAssegnati[res.id] || { nomi: [], hasAllergeni: false }
             var hasAnyAllergen = res.has_allergen_alerts || tavoliInfo.hasAllergeni || (res.allergie_prenotazione && res.allergie_prenotazione.trim().length > 0)
@@ -945,6 +945,12 @@ function ReservationDay() {
                       {hasAnyAllergen && (
                         <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
                           <AlertTriangle size={12} />Allergeni
+                        </span>
+                      )}
+                      {res.gift_card && (
+                        <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
+                          🎁 {res.gift_card.codice}
+                          {res.gift_card.gift_card_tipologie && <span className="opacity-70">· {res.gift_card.gift_card_tipologie.nome}</span>}
                         </span>
                       )}
                     </div>
@@ -1002,10 +1008,11 @@ function ReservationDay() {
           </summary>
           <div className="mt-2 space-y-2 opacity-60">
             {cancelledReservations.map(function(res) {
+              var custCan = res.customers || { last_name: res.gift_card ? res.gift_card.codice : 'Gift Card', first_name: '' }
               return (
                 <div key={res.id} className="bg-white rounded-xl border border-gray-200 p-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-sm text-gray-500 line-through">{res.customers.last_name + ' ' + res.customers.first_name + ' - ' + res.guests_count + ' ospiti'}</span>
+                    <span className="text-sm text-gray-500 line-through">{custCan.last_name + ' ' + custCan.first_name + ' - ' + res.guests_count + ' ospiti'}</span>
                     <span className="px-2 py-0.5 rounded-full text-xs bg-red-100 text-red-800">Cancellata</span>
                   </div>
                 </div>

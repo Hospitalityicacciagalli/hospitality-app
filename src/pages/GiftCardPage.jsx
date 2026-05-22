@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
-import { Plus, Search, X, Check, Gift, PencilLine, Trash2, ChevronDown, ChevronUp, AlertTriangle, Hotel, Wine, ChefHat, UtensilsCrossed, Globe } from 'lucide-react'
+import { Plus, Search, X, Check, Gift, PencilLine, Trash2, ChevronDown, ChevronUp, AlertTriangle, Hotel, Wine, ChefHat, UtensilsCrossed } from 'lucide-react'
 
 // ── UTILITY ──────────────────────────────────────────────────
 function formatData(dateStr) {
@@ -26,6 +26,20 @@ function badgeLingua(lingua) {
   return <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">🇬🇧 ENG</span>
 }
 
+function aggiungiMesi(dateStr, mesi) {
+  if (!dateStr) return ''
+  var d = new Date(dateStr)
+  d.setMonth(d.getMonth() + mesi)
+  return d.toISOString().split('T')[0]
+}
+
+function aggiungiGiorni(dateStr, giorni) {
+  if (!dateStr) return ''
+  var d = new Date(dateStr)
+  d.setDate(d.getDate() + giorni)
+  return d.toISOString().split('T')[0]
+}
+
 // ── MODALE CONFERMA ───────────────────────────────────────────
 function ModaleConferma(props) {
   return (
@@ -41,7 +55,7 @@ function ModaleConferma(props) {
   )
 }
 
-// ── MODALE GIFT CARD (nuovo / modifica) ──────────────────────
+// ── MODALE GIFT CARD ──────────────────────────────────────────
 function ModaleGiftCard(props) {
   var onSave = props.onSave
   var onClose = props.onClose
@@ -59,7 +73,7 @@ function ModaleGiftCard(props) {
     beneficiario_nome: isModifica ? (gcEsistente.beneficiario_nome || '') : '',
     messaggio: isModifica ? (gcEsistente.messaggio || '') : '',
     data_acquisto: isModifica ? (gcEsistente.data_acquisto || '') : oggi,
-    scadenza: isModifica ? (gcEsistente.scadenza || '') : '',
+    scadenza: isModifica ? (gcEsistente.scadenza || '') : aggiungiMesi(oggi, 6),
     data_utilizzo: isModifica ? (gcEsistente.data_utilizzo || '') : '',
     numero_scontrino: isModifica ? (gcEsistente.numero_scontrino || '') : '',
     prezzo_pagato: isModifica ? String(gcEsistente.prezzo_pagato || '') : '',
@@ -67,7 +81,6 @@ function ModaleGiftCard(props) {
     lingua: isModifica ? (gcEsistente.lingua || 'ITA') : 'ITA',
     note: isModifica ? (gcEsistente.note || '') : ''
   })
-
   var [saving, setSaving] = useState(false)
   var [errore, setErrore] = useState('')
 
@@ -90,18 +103,8 @@ function ModaleGiftCard(props) {
     setForm(function(prev) {
       var next = Object.assign({}, prev)
       next[campo] = valore
-      // Quando cambia la data acquisto, calcola automaticamente scadenza a 6 mesi
-      // solo se la scadenza è vuota oppure era già stata calcolata automaticamente
       if (campo === 'data_acquisto' && valore) {
-        var dataAcquisto = new Date(valore)
-        if (!isNaN(dataAcquisto.getTime())) {
-          var scadenza = new Date(dataAcquisto)
-          scadenza.setMonth(scadenza.getMonth() + 6)
-          var y = scadenza.getFullYear()
-          var m = String(scadenza.getMonth() + 1).padStart(2, '0')
-          var d = String(scadenza.getDate()).padStart(2, '0')
-          next.scadenza = y + '-' + m + '-' + d
-        }
+        next.scadenza = aggiungiMesi(valore, 6)
       }
       return next
     })
@@ -178,14 +181,12 @@ function ModaleGiftCard(props) {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Codice *</label>
               <input type="text" value={form.codice} onChange={function(e) { handleChange('codice', e.target.value.toUpperCase()) }}
-                placeholder="es. FB40-855A"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                placeholder="es. FB40-855A" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-wine-500" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Codici collegati</label>
               <input type="text" value={form.codici_collegati} onChange={function(e) { handleChange('codici_collegati', e.target.value.toUpperCase()) }}
-                placeholder="es. AB12-CD34, EF56-GH78"
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                placeholder="es. AB12-CD34, EF56-GH78" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-wine-500" />
             </div>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -195,7 +196,7 @@ function ModaleGiftCard(props) {
                 placeholder="Nome e cognome" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Contatto committente</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Contatto</label>
               <input type="text" value={form.committente_contatto} onChange={function(e) { handleChange('committente_contatto', e.target.value) }}
                 placeholder="Telefono o email" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
             </div>
@@ -208,8 +209,7 @@ function ModaleGiftCard(props) {
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Messaggio</label>
             <textarea rows={2} value={form.messaggio} onChange={function(e) { handleChange('messaggio', e.target.value) }}
-              placeholder="Messaggio personalizzato..."
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 resize-none" />
+              placeholder="Messaggio personalizzato..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 resize-none" />
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div>
@@ -228,14 +228,14 @@ function ModaleGiftCard(props) {
                 placeholder="es. 1856-0002" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Prezzo € pagato</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Prezzo €</label>
               <input type="number" step="0.01" min="0" value={form.prezzo_pagato} onChange={function(e) { handleChange('prezzo_pagato', e.target.value) }}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
             </div>
           </div>
           <div>
             <label className={"block text-sm font-medium mb-1 " + (form.data_utilizzo ? 'text-gray-500' : 'text-gray-700')}>
-              Data utilizzo {form.data_utilizzo ? '✓' : '(lascia vuoto se non ancora utilizzata)'}
+              Data utilizzo {form.data_utilizzo ? '✓' : '(vuoto = non ancora utilizzata)'}
             </label>
             <input type="date" value={form.data_utilizzo} onChange={function(e) { handleChange('data_utilizzo', e.target.value) }}
               className={"w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 " + (form.data_utilizzo ? 'border-green-300 bg-green-50' : 'border-gray-300')} />
@@ -252,14 +252,14 @@ function ModaleGiftCard(props) {
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 bg-white">
                 <option value="ITA">🇮🇹 Italiano</option>
                 <option value="ENG">🇬🇧 English</option>
-                <option value="ENTRAMBE">🇮🇹 / 🇬🇧 Entrambe</option>
+                <option value="ENTRAMBE">🇮🇹/🇬🇧 Entrambe</option>
               </select>
             </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Note interne</label>
             <textarea rows={2} value={form.note} onChange={function(e) { handleChange('note', e.target.value) }}
-              placeholder="Note interne..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 resize-none" />
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 resize-none" />
           </div>
           {errore && <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">{errore}</div>}
         </div>
@@ -282,6 +282,9 @@ function PannelloServizi(props) {
   var onClose = props.onClose
   var onAggiorna = props.onAggiorna
 
+  // Calcolo data di riferimento (check-in o oggi)
+  var dataRiferimento = gc.pernottamento_data_inizio || new Date().toISOString().split('T')[0]
+
   var [formPernottamento, setFormPernottamento] = useState({
     pernottamento_data_inizio: gc.pernottamento_data_inizio || '',
     pernottamento_data_fine: gc.pernottamento_data_fine || '',
@@ -289,40 +292,63 @@ function PannelloServizi(props) {
     pernottamento_note: gc.pernottamento_note || ''
   })
   var [savingPernottamento, setSavingPernottamento] = useState(false)
-  var [pernottamentoAperto, setPernottamentoAperto] = useState(false)
+  var [pernottamentoAperto, setPernottamentoAperto] = useState(!gc.pernottamento_data_inizio)
 
-  var [sessioniWT, setSessioniWT] = useState([])
   var [prenotazioniWT, setPrenotazioniWT] = useState([])
-  var [sessioniCC, setSessioniCC] = useState([])
   var [prenotazioniCC, setPrenotazioniCC] = useState([])
   var [pastiCollegati, setPastiCollegati] = useState([])
-
-  var [showFormWT, setShowFormWT] = useState(false)
-  var [showFormCC, setShowFormCC] = useState(false)
-  var [showFormPasto, setShowFormPasto] = useState(false)
-
-  var [formWT, setFormWT] = useState({ data: '', orario: '18:00', lingua: gc.lingua || 'ITA', num_persone: String(gc.numero_persone || 2), note: '' })
-  var [formCC, setFormCC] = useState({ data: '', orario: '15:00', lingua: gc.lingua || 'ITA', num_persone: String(gc.numero_persone || 2), note: '' })
-  var [formPasto, setFormPasto] = useState({ data: '', turno: 'dinner', note: '', tipo: 'degustazione' })
-
-  var [saving, setSaving] = useState(false)
   var [loading, setLoading] = useState(true)
+
+  // Form wine tour
+  var [showFormWT, setShowFormWT] = useState(false)
+  var [formWT, setFormWT] = useState({ data: dataRiferimento, orario: '18:00', lingua: gc.lingua || 'ITA', num_persone: String(gc.numero_persone || 2), note: '' })
+  var [wtInModifica, setWtInModifica] = useState(null)
+  var [savingWT, setSavingWT] = useState(false)
+
+  // Form cooking class
+  var [showFormCC, setShowFormCC] = useState(false)
+  var [formCC, setFormCC] = useState({ data: dataRiferimento, orario: '15:00', lingua: gc.lingua || 'ITA', num_persone: String(gc.numero_persone || 2), note: '' })
+  var [ccInModifica, setCcInModifica] = useState(null)
+  var [savingCC, setSavingCC] = useState(false)
+
+  // Form pasto
+  var [showFormPasto, setShowFormPasto] = useState(false)
+  var [pastoInModifica, setPastoInModifica] = useState(null)
+  var [formPasto, setFormPasto] = useState({ data: dataRiferimento, turno: 'dinner', adulti: String(gc.numero_persone || 2), bambini: '0', note: '', tipo: 'degustazione' })
+  var [savingPasto, setSavingPasto] = useState(false)
 
   useEffect(function() { loadDatiServizi() }, [])
 
   function loadDatiServizi() {
     setLoading(true)
-    var promises = [
+    Promise.all([
       supabase.from('wine_tour_prenotazioni').select('*, wine_tour_sessioni(id, data, orario, lingua)').eq('gift_card_id', gc.id),
       supabase.from('cooking_class_prenotazioni').select('*, cooking_class_sessioni(id, data, orario, lingua)').eq('gift_card_id', gc.id),
-      supabase.from('reservations').select('id, reservation_date, meal_type, guests_count, notes, allergie_prenotazione, customers(first_name, last_name)').eq('gift_card_id', gc.id)
-    ]
-    Promise.all(promises).then(function(results) {
+      supabase.from('reservations').select('id, reservation_date, meal_type, guests_count, adults_count, children_count, notes').eq('gift_card_id', gc.id)
+    ]).then(function(results) {
       setLoading(false)
       if (!results[0].error) setPrenotazioniWT(results[0].data || [])
       if (!results[1].error) setPrenotazioniCC(results[1].data || [])
       if (!results[2].error) setPastiCollegati(results[2].data || [])
     })
+  }
+
+  // Aggiorna date di riferimento quando cambia check-in
+  function handleCheckInChange(val) {
+    setFormPernottamento(function(p) {
+      var next = Object.assign({}, p)
+      next.pernottamento_data_inizio = val
+      if (val && tipologia && tipologia.notti) {
+        next.pernottamento_data_fine = aggiungiGiorni(val, tipologia.notti)
+      }
+      return next
+    })
+    // Aggiorna date suggerite per gli altri servizi
+    if (val) {
+      setFormWT(function(p) { return Object.assign({}, p, { data: val }) })
+      setFormCC(function(p) { return Object.assign({}, p, { data: val }) })
+      setFormPasto(function(p) { return Object.assign({}, p, { data: aggiungiGiorni(val, 1) }) })
+    }
   }
 
   function salvaPernottamento() {
@@ -337,107 +363,217 @@ function PannelloServizi(props) {
       if (!result.error && result.data && result.data.length > 0) {
         onAggiorna(result.data[0])
         setPernottamentoAperto(false)
+        // Aggiorna date di riferimento
+        var nuovaDataInizio = formPernottamento.pernottamento_data_inizio
+        if (nuovaDataInizio) {
+          setFormWT(function(p) { return Object.assign({}, p, { data: nuovaDataInizio }) })
+          setFormCC(function(p) { return Object.assign({}, p, { data: nuovaDataInizio }) })
+          setFormPasto(function(p) { return Object.assign({}, p, { data: aggiungiGiorni(nuovaDataInizio, 1) }) })
+        }
       }
     })
   }
 
-  function creaSessioneWT() {
+  // ── WINE TOUR ──────────────────────────────────────────────
+  function salvaWT() {
     if (!formWT.data) { alert('Inserisci la data del wine tour.'); return }
-    setSaving(true)
-    supabase.from('wine_tour_sessioni').insert([{
-      data: formWT.data,
-      orario: formWT.orario,
-      lingua: formWT.lingua
-    }]).select().then(function(result) {
-      if (result.error || !result.data || !result.data.length) { setSaving(false); alert('Errore creazione sessione.'); return }
-      var sessione = result.data[0]
-      return supabase.from('wine_tour_prenotazioni').insert([{
-        sessione_id: sessione.id,
-        gift_card_id: gc.id,
-        num_persone: parseInt(formWT.num_persone) || 2,
-        lingua: formWT.lingua,
-        note: formWT.note || null
-      }]).select('*, wine_tour_sessioni(id, data, orario, lingua)')
-    }).then(function(result) {
-      setSaving(false)
-      if (result && !result.error && result.data) {
-        setPrenotazioniWT(function(prev) { return prev.concat(result.data) })
-        setShowFormWT(false)
-        setFormWT({ data: '', orario: '18:00', lingua: gc.lingua || 'ITA', num_persone: String(gc.numero_persone || 2), note: '' })
-      }
-    })
+    setSavingWT(true)
+    if (wtInModifica) {
+      // Modifica sessione esistente
+      supabase.from('wine_tour_sessioni').update({
+        data: formWT.data, orario: formWT.orario, lingua: formWT.lingua
+      }).eq('id', wtInModifica.wine_tour_sessioni.id).then(function() {
+        return supabase.from('wine_tour_prenotazioni').update({
+          num_persone: parseInt(formWT.num_persone) || 2,
+          lingua: formWT.lingua,
+          note: formWT.note || null
+        }).eq('id', wtInModifica.id).select('*, wine_tour_sessioni(id, data, orario, lingua)')
+      }).then(function(result) {
+        setSavingWT(false)
+        if (result && !result.error && result.data) {
+          setPrenotazioniWT(function(prev) { return prev.map(function(p) { return p.id === wtInModifica.id ? result.data[0] : p }) })
+          setShowFormWT(false); setWtInModifica(null)
+        }
+      })
+    } else {
+      // Nuova sessione
+      supabase.from('wine_tour_sessioni').insert([{ data: formWT.data, orario: formWT.orario, lingua: formWT.lingua }]).select()
+        .then(function(result) {
+          if (result.error || !result.data || !result.data.length) { setSavingWT(false); alert('Errore.'); return }
+          return supabase.from('wine_tour_prenotazioni').insert([{
+            sessione_id: result.data[0].id, gift_card_id: gc.id,
+            num_persone: parseInt(formWT.num_persone) || 2, lingua: formWT.lingua, note: formWT.note || null
+          }]).select('*, wine_tour_sessioni(id, data, orario, lingua)')
+        })
+        .then(function(result) {
+          setSavingWT(false)
+          if (result && !result.error && result.data) {
+            setPrenotazioniWT(function(prev) { return prev.concat(result.data) })
+            setShowFormWT(false)
+          }
+        })
+    }
   }
 
-  function creaSessioneCC() {
-    if (!formCC.data) { alert('Inserisci la data della cooking class.'); return }
-    setSaving(true)
-    supabase.from('cooking_class_sessioni').insert([{
-      data: formCC.data,
-      orario: formCC.orario,
-      lingua: formCC.lingua
-    }]).select().then(function(result) {
-      if (result.error || !result.data || !result.data.length) { setSaving(false); alert('Errore creazione sessione.'); return }
-      var sessione = result.data[0]
-      return supabase.from('cooking_class_prenotazioni').insert([{
-        sessione_id: sessione.id,
-        gift_card_id: gc.id,
-        num_persone: parseInt(formCC.num_persone) || 2,
-        lingua: formCC.lingua,
-        note: formCC.note || null
-      }]).select('*, cooking_class_sessioni(id, data, orario, lingua)')
-    }).then(function(result) {
-      setSaving(false)
-      if (result && !result.error && result.data) {
-        setPrenotazioniCC(function(prev) { return prev.concat(result.data) })
-        setShowFormCC(false)
-        setFormCC({ data: '', orario: '15:00', lingua: gc.lingua || 'ITA', num_persone: String(gc.numero_persone || 2), note: '' })
-      }
-    })
+  function apriModificaWT(p) {
+    var s = p.wine_tour_sessioni
+    setFormWT({ data: s ? s.data : '', orario: s ? s.orario : '18:00', lingua: p.lingua || 'ITA', num_persone: String(p.num_persone || 2), note: p.note || '' })
+    setWtInModifica(p)
+    setShowFormWT(true)
   }
 
-  function creaPasto() {
-    if (!formPasto.data) { alert('Inserisci la data del pasto.'); return }
-    setSaving(true)
-    var notePasto = '[' + (formPasto.tipo === 'cooking' ? 'Pasto Cooking Class' : 'Pasto Degustazione') + '] ' + (formPasto.note || '')
-    supabase.from('reservations').insert([{
-      gift_card_id: gc.id,
-      reservation_date: formPasto.data,
-      meal_type: formPasto.turno,
-      guests_count: gc.numero_persone || 2,
-      adults_count: gc.numero_persone || 2,
-      children_count: 0,
-      status: 'confirmed',
-      source: 'gift_card',
-      notes: notePasto.trim()
-    }]).select('id, reservation_date, meal_type, guests_count, notes').then(function(result) {
-      setSaving(false)
-      if (result.error) { alert('Errore: ' + result.error.message); return }
-      if (result.data && result.data.length > 0) {
-        setPastiCollegati(function(prev) { return prev.concat(result.data) })
-        setShowFormPasto(false)
-        setFormPasto({ data: '', turno: 'dinner', note: '', tipo: 'degustazione' })
-      }
-    })
-  }
-
-  function eliminaPrenotazioneWT(id) {
+  function eliminaWT(p) {
     if (!confirm('Eliminare questa prenotazione wine tour?')) return
-    supabase.from('wine_tour_prenotazioni').delete().eq('id', id).then(function(result) {
-      if (!result.error) setPrenotazioniWT(function(prev) { return prev.filter(function(p) { return p.id !== id }) })
+    supabase.from('wine_tour_prenotazioni').delete().eq('id', p.id).then(function(result) {
+      if (!result.error) setPrenotazioniWT(function(prev) { return prev.filter(function(x) { return x.id !== p.id }) })
     })
   }
 
-  function eliminaPrenotazioneCC(id) {
+  // ── COOKING CLASS ──────────────────────────────────────────
+  function salvaCC() {
+    if (!formCC.data) { alert('Inserisci la data della cooking class.'); return }
+    setSavingCC(true)
+    if (ccInModifica) {
+      supabase.from('cooking_class_sessioni').update({
+        data: formCC.data, orario: formCC.orario, lingua: formCC.lingua
+      }).eq('id', ccInModifica.cooking_class_sessioni.id).then(function() {
+        return supabase.from('cooking_class_prenotazioni').update({
+          num_persone: parseInt(formCC.num_persone) || 2,
+          lingua: formCC.lingua, note: formCC.note || null
+        }).eq('id', ccInModifica.id).select('*, cooking_class_sessioni(id, data, orario, lingua)')
+      }).then(function(result) {
+        setSavingCC(false)
+        if (result && !result.error && result.data) {
+          setPrenotazioniCC(function(prev) { return prev.map(function(p) { return p.id === ccInModifica.id ? result.data[0] : p }) })
+          setShowFormCC(false); setCcInModifica(null)
+        }
+      })
+    } else {
+      supabase.from('cooking_class_sessioni').insert([{ data: formCC.data, orario: formCC.orario, lingua: formCC.lingua }]).select()
+        .then(function(result) {
+          if (result.error || !result.data || !result.data.length) { setSavingCC(false); alert('Errore.'); return }
+          return supabase.from('cooking_class_prenotazioni').insert([{
+            sessione_id: result.data[0].id, gift_card_id: gc.id,
+            num_persone: parseInt(formCC.num_persone) || 2, lingua: formCC.lingua, note: formCC.note || null
+          }]).select('*, cooking_class_sessioni(id, data, orario, lingua)')
+        })
+        .then(function(result) {
+          setSavingCC(false)
+          if (result && !result.error && result.data) {
+            setPrenotazioniCC(function(prev) { return prev.concat(result.data) })
+            setShowFormCC(false)
+          }
+        })
+    }
+  }
+
+  function apriModificaCC(p) {
+    var s = p.cooking_class_sessioni
+    setFormCC({ data: s ? s.data : '', orario: s ? s.orario : '15:00', lingua: p.lingua || 'ITA', num_persone: String(p.num_persone || 2), note: p.note || '' })
+    setCcInModifica(p)
+    setShowFormCC(true)
+  }
+
+  function eliminaCC(p) {
     if (!confirm('Eliminare questa prenotazione cooking class?')) return
-    supabase.from('cooking_class_prenotazioni').delete().eq('id', id).then(function(result) {
-      if (!result.error) setPrenotazioniCC(function(prev) { return prev.filter(function(p) { return p.id !== id }) })
+    supabase.from('cooking_class_prenotazioni').delete().eq('id', p.id).then(function(result) {
+      if (!result.error) setPrenotazioniCC(function(prev) { return prev.filter(function(x) { return x.id !== p.id }) })
+    })
+  }
+
+  // ── PASTI ──────────────────────────────────────────────────
+  function apriModificaPasto(p) {
+    var noteOriginale = p.notes || ''
+    var tipo = noteOriginale.indexOf('Cooking Class') !== -1 ? 'cooking' : 'degustazione'
+    setFormPasto({
+      data: p.reservation_date || dataRiferimento,
+      turno: p.meal_type || 'dinner',
+      adulti: String(p.adults_count || gc.numero_persone || 2),
+      bambini: String(p.children_count || 0),
+      note: noteOriginale.replace(/^\[.*?\]\s*/, ''),
+      tipo: tipo
+    })
+    setPastoInModifica(p)
+    setShowFormPasto(true)
+  }
+
+  function salvaPasto() {
+    if (!formPasto.data) { alert('Inserisci la data del pasto.'); return }
+    setSavingPasto(true)
+    var adulti = parseInt(formPasto.adulti) || 0
+    var bambini = parseInt(formPasto.bambini) || 0
+    var totale = adulti + bambini
+    var tipoLabel = formPasto.tipo === 'cooking' ? '[Pasto Cooking Class]' : '[Pasto Degustazione]'
+    var noteFinale = tipoLabel + (formPasto.note.trim() ? ' ' + formPasto.note.trim() : '')
+
+    if (pastoInModifica) {
+      supabase.from('reservations').update({
+        reservation_date: formPasto.data,
+        meal_type: formPasto.turno,
+        guests_count: totale,
+        adults_count: adulti,
+        children_count: bambini,
+        notes: noteFinale
+      }).eq('id', pastoInModifica.id).select('id, reservation_date, meal_type, guests_count, adults_count, children_count, notes')
+        .then(function(result) {
+          setSavingPasto(false)
+          if (result.error) { alert('Errore: ' + result.error.message); return }
+          if (result.data && result.data.length > 0) {
+            setPastiCollegati(function(prev) { return prev.map(function(p) { return p.id === pastoInModifica.id ? result.data[0] : p }) })
+            setShowFormPasto(false); setPastoInModifica(null)
+          }
+        })
+    } else {
+      // Crea cliente automatico "Gift Card CODICE"
+      var nomeCliente = 'Gift Card ' + gc.codice
+      supabase.from('customers').select('id').eq('last_name', nomeCliente).limit(1)
+        .then(function(result) {
+          if (result.data && result.data.length > 0) return { data: result.data }
+          return supabase.from('customers').insert([{
+            first_name: gc.beneficiario_nome || gc.committente_nome || 'Beneficiario',
+            last_name: nomeCliente,
+            category: 'standard',
+            is_active: true,
+            source: 'gift_card',
+            notes: 'Cliente automatico per gift card ' + gc.codice
+          }]).select('id')
+        })
+        .then(function(result) {
+          var customerId = result.data[0].id
+          return supabase.from('reservations').insert([{
+            gift_card_id: gc.id,
+            customer_id: customerId,
+            reservation_date: formPasto.data,
+            meal_type: formPasto.turno,
+            guests_count: totale,
+            adults_count: adulti,
+            children_count: bambini,
+            status: 'confirmed',
+            source: 'gift_card',
+            notes: noteFinale
+          }]).select('id, reservation_date, meal_type, guests_count, adults_count, children_count, notes')
+        })
+        .then(function(result) {
+          setSavingPasto(false)
+          if (result.error) { alert('Errore: ' + result.error.message); return }
+          if (result.data && result.data.length > 0) {
+            setPastiCollegati(function(prev) { return prev.concat(result.data) })
+            setShowFormPasto(false)
+          }
+        })
+    }
+  }
+
+  function eliminaPasto(p) {
+    if (!confirm('Eliminare questa prenotazione pasto?')) return
+    supabase.from('reservations').delete().eq('id', p.id).then(function(result) {
+      if (!result.error) setPastiCollegati(function(prev) { return prev.filter(function(x) { return x.id !== p.id }) })
     })
   }
 
   var mealLabels = { lunch: 'Pranzo', dinner: 'Cena' }
   var linguaLabels = { ITA: '🇮🇹', ENG: '🇬🇧', ENTRAMBE: '🇮🇹/🇬🇧' }
 
-  // Calcolo completamento servizi
   var serviziPrevisti = []
   if (tipologia) {
     if (tipologia.pernottamento) serviziPrevisti.push('pernottamento')
@@ -455,15 +591,15 @@ function PannelloServizi(props) {
   serviziCompletati += Math.min(pastiCollegati.length, pastiNecessari)
   var totServizi = serviziPrevisti.length
 
-  function FormSemplice(fprops) {
+  function FormServizio(fprops) {
     return (
       <div className="mt-3 bg-gray-50 rounded-xl p-4 border border-gray-200 space-y-3">
         {fprops.children}
         <div className="flex gap-2 pt-1">
           <button onClick={fprops.onAnnulla} className="flex-1 py-2 border border-gray-300 rounded-lg text-xs font-medium text-gray-700 hover:bg-gray-100">Annulla</button>
-          <button onClick={fprops.onSalva} disabled={saving}
-            className={"flex-1 py-2 rounded-lg text-xs font-medium " + (saving ? 'bg-gray-300 text-gray-400' : 'bg-wine-700 text-white hover:bg-wine-800')}>
-            {saving ? 'Salvataggio...' : 'Salva'}
+          <button onClick={fprops.onSalva} disabled={fprops.saving}
+            className={"flex-1 py-2 rounded-lg text-xs font-medium " + (fprops.saving ? 'bg-gray-300 text-gray-400' : 'bg-wine-700 text-white hover:bg-wine-800')}>
+            {fprops.saving ? 'Salvataggio...' : 'Salva'}
           </button>
         </div>
       </div>
@@ -474,7 +610,6 @@ function PannelloServizi(props) {
     <div className="fixed inset-0 bg-black bg-opacity-60 flex items-end sm:items-center justify-center z-50 p-0 sm:p-4">
       <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-2xl shadow-2xl flex flex-col max-h-screen sm:max-h-[94vh]">
 
-        {/* Header */}
         <div className="flex items-start justify-between p-5 border-b border-gray-100 flex-shrink-0">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -493,22 +628,18 @@ function PannelloServizi(props) {
             {totServizi > 0 && (
               <div className="mt-2 flex items-center gap-2">
                 <div className="flex-1 bg-gray-200 rounded-full h-1.5">
-                  <div className="bg-wine-600 h-1.5 rounded-full transition-all"
-                    style={{ width: Math.round((serviziCompletati / totServizi) * 100) + '%' }} />
+                  <div className="bg-wine-600 h-1.5 rounded-full" style={{ width: Math.round((serviziCompletati / totServizi) * 100) + '%' }} />
                 </div>
                 <span className="text-xs text-gray-500">{serviziCompletati}/{totServizi} servizi</span>
               </div>
             )}
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 ml-3 flex-shrink-0"><X size={22} /></button>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 ml-3"><X size={22} /></button>
         </div>
 
         <div className="flex-1 overflow-y-auto p-5 space-y-4">
-          {loading ? (
-            <div className="text-center py-8 text-gray-400 text-sm">Caricamento servizi...</div>
-          ) : (
+          {loading ? <div className="text-center py-8 text-gray-400 text-sm">Caricamento...</div> : (
             <>
-
               {/* PERNOTTAMENTO */}
               {tipologia && tipologia.pernottamento && (
                 <div className="border border-gray-200 rounded-xl overflow-hidden">
@@ -518,11 +649,9 @@ function PannelloServizi(props) {
                       <Hotel size={18} className={gc.pernottamento_data_inizio ? 'text-green-600' : 'text-gray-300'} />
                       <div>
                         <p className="text-sm font-medium text-gray-900">Pernottamento ({tipologia.notti} notte/i)</p>
-                        {gc.pernottamento_data_inizio ? (
-                          <p className="text-xs text-gray-500">{formatData(gc.pernottamento_data_inizio)} → {formatData(gc.pernottamento_data_fine)}{gc.pernottamento_camera ? ' · Camera ' + gc.pernottamento_camera : ''}</p>
-                        ) : (
-                          <p className="text-xs text-amber-600">⏳ Da pianificare</p>
-                        )}
+                        {gc.pernottamento_data_inizio
+                          ? <p className="text-xs text-gray-500">{formatData(gc.pernottamento_data_inizio)} → {formatData(gc.pernottamento_data_fine)}{gc.pernottamento_camera ? ' · Camera ' + gc.pernottamento_camera : ''}</p>
+                          : <p className="text-xs text-amber-600">⏳ Da pianificare</p>}
                       </div>
                     </div>
                     {pernottamentoAperto ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
@@ -533,11 +662,11 @@ function PannelloServizi(props) {
                         <div>
                           <label className="block text-xs font-medium text-gray-600 mb-1">Check-in</label>
                           <input type="date" value={formPernottamento.pernottamento_data_inizio}
-                            onChange={function(e) { setFormPernottamento(function(p) { return Object.assign({}, p, { pernottamento_data_inizio: e.target.value }) }) }}
+                            onChange={function(e) { handleCheckInChange(e.target.value) }}
                             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
                         </div>
                         <div>
-                          <label className="block text-xs font-medium text-gray-600 mb-1">Check-out</label>
+                          <label className="block text-xs font-medium text-gray-600 mb-1">Check-out (calcolato)</label>
                           <input type="date" value={formPernottamento.pernottamento_data_fine}
                             onChange={function(e) { setFormPernottamento(function(p) { return Object.assign({}, p, { pernottamento_data_fine: e.target.value }) }) }}
                             className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
@@ -547,15 +676,13 @@ function PannelloServizi(props) {
                         <label className="block text-xs font-medium text-gray-600 mb-1">Camera</label>
                         <input type="text" value={formPernottamento.pernottamento_camera}
                           onChange={function(e) { setFormPernottamento(function(p) { return Object.assign({}, p, { pernottamento_camera: e.target.value }) }) }}
-                          placeholder="es. Camera 12, Suite Vista Vigneto..."
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                          placeholder="es. Camera 12" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-gray-600 mb-1">Note (es. upgrade categoria)</label>
+                        <label className="block text-xs font-medium text-gray-600 mb-1">Note (es. upgrade)</label>
                         <input type="text" value={formPernottamento.pernottamento_note}
                           onChange={function(e) { setFormPernottamento(function(p) { return Object.assign({}, p, { pernottamento_note: e.target.value }) }) }}
-                          placeholder="es. Upgrade a camera Deluxe con extra €30..."
-                          className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                          placeholder="es. Upgrade a Deluxe con extra €30" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
                       </div>
                       <button onClick={salvaPernottamento} disabled={savingPernottamento}
                         className={"w-full py-2 rounded-lg text-sm font-medium " + (savingPernottamento ? 'bg-gray-300 text-gray-400' : 'bg-wine-700 text-white hover:bg-wine-800')}>
@@ -577,69 +704,59 @@ function PannelloServizi(props) {
                         {tipologia.degustazione_vini_1 && <p className="text-xs text-gray-400">{tipologia.degustazione_vini_1}</p>}
                       </div>
                     </div>
-                    {!showFormWT && (
-                      <button onClick={function() { setShowFormWT(true) }}
+                    {prenotazioniWT.length === 0 && !showFormWT && (
+                      <button onClick={function() { setWtInModifica(null); setShowFormWT(true) }}
                         className="text-xs px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg border border-purple-200 hover:bg-purple-100 font-medium">
-                        + Aggiungi
+                        + Pianifica
                       </button>
                     )}
                   </div>
                   {prenotazioniWT.map(function(p) {
                     var s = p.wine_tour_sessioni
                     return (
-                      <div key={p.id} className="border-t border-gray-100 px-4 py-3 flex items-center justify-between bg-purple-50">
+                      <div key={p.id} className="border-t border-gray-100 px-4 py-3 bg-purple-50 flex items-center justify-between">
                         <div className="text-sm">
                           <span className="font-medium text-gray-800">{s ? formatData(s.data) : '—'}</span>
-                          <span className="text-gray-500 ml-2">{s ? s.orario : ''}</span>
+                          <span className="text-gray-500 ml-2">{s ? s.orario.substring(0,5) : ''}</span>
                           <span className="ml-2">{linguaLabels[p.lingua] || p.lingua}</span>
                           <span className="text-gray-400 ml-2">{p.num_persone} pers.</span>
                           {p.note && <span className="text-gray-400 ml-2 italic text-xs">{p.note}</span>}
                         </div>
-                        <button onClick={function() { eliminaPrenotazioneWT(p.id) }} className="text-gray-300 hover:text-red-500 p-1"><Trash2 size={14} /></button>
+                        <div className="flex gap-1">
+                          <button onClick={function() { apriModificaWT(p) }} className="text-gray-400 hover:text-purple-700 p-1"><PencilLine size={14} /></button>
+                          <button onClick={function() { eliminaWT(p) }} className="text-gray-300 hover:text-red-500 p-1"><Trash2 size={14} /></button>
+                        </div>
                       </div>
                     )
                   })}
                   {prenotazioniWT.length === 0 && !showFormWT && (
-                    <div className="border-t border-gray-100 px-4 pb-3">
-                      <p className="text-xs text-amber-600">⏳ Da pianificare</p>
-                    </div>
+                    <div className="border-t border-gray-100 px-4 pb-3"><p className="text-xs text-amber-600">⏳ Da pianificare</p></div>
                   )}
                   {showFormWT && (
                     <div className="border-t border-gray-100 p-4">
-                      <FormSemplice onAnnulla={function() { setShowFormWT(false) }} onSalva={creaSessioneWT}>
+                      <FormServizio onAnnulla={function() { setShowFormWT(false); setWtInModifica(null) }} onSalva={salvaWT} saving={savingWT}>
                         <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">Data</label>
+                          <div><label className="block text-xs font-medium text-gray-600 mb-1">Data</label>
                             <input type="date" value={formWT.data} onChange={function(e) { setFormWT(function(p) { return Object.assign({}, p, { data: e.target.value }) }) }}
-                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">Orario</label>
+                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" /></div>
+                          <div><label className="block text-xs font-medium text-gray-600 mb-1">Orario</label>
                             <input type="time" value={formWT.orario} onChange={function(e) { setFormWT(function(p) { return Object.assign({}, p, { orario: e.target.value }) }) }}
-                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
-                          </div>
+                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" /></div>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">Lingua</label>
+                          <div><label className="block text-xs font-medium text-gray-600 mb-1">Lingua</label>
                             <select value={formWT.lingua} onChange={function(e) { setFormWT(function(p) { return Object.assign({}, p, { lingua: e.target.value }) }) }}
                               className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-wine-500">
-                              <option value="ITA">🇮🇹 Italiano</option>
-                              <option value="ENG">🇬🇧 English</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">N° persone</label>
+                              <option value="ITA">🇮🇹 Italiano</option><option value="ENG">🇬🇧 English</option>
+                            </select></div>
+                          <div><label className="block text-xs font-medium text-gray-600 mb-1">N° persone</label>
                             <input type="number" min="1" value={formWT.num_persone} onChange={function(e) { setFormWT(function(p) { return Object.assign({}, p, { num_persone: e.target.value }) }) }}
-                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
-                          </div>
+                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" /></div>
                         </div>
-                        <div>
-                          <label className="block text-xs font-medium text-gray-600 mb-1">Note</label>
+                        <div><label className="block text-xs font-medium text-gray-600 mb-1">Note</label>
                           <input type="text" value={formWT.note} onChange={function(e) { setFormWT(function(p) { return Object.assign({}, p, { note: e.target.value }) }) }}
-                            placeholder="Note aggiuntive..." className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
-                        </div>
-                      </FormSemplice>
+                            placeholder="Note aggiuntive..." className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" /></div>
+                      </FormServizio>
                     </div>
                   )}
                 </div>
@@ -656,69 +773,59 @@ function PannelloServizi(props) {
                         <p className="text-xs text-gray-400">Inclusa visita all'orto</p>
                       </div>
                     </div>
-                    {!showFormCC && (
-                      <button onClick={function() { setShowFormCC(true) }}
+                    {prenotazioniCC.length === 0 && !showFormCC && (
+                      <button onClick={function() { setCcInModifica(null); setShowFormCC(true) }}
                         className="text-xs px-3 py-1.5 bg-orange-50 text-orange-700 rounded-lg border border-orange-200 hover:bg-orange-100 font-medium">
-                        + Aggiungi
+                        + Pianifica
                       </button>
                     )}
                   </div>
                   {prenotazioniCC.map(function(p) {
                     var s = p.cooking_class_sessioni
                     return (
-                      <div key={p.id} className="border-t border-gray-100 px-4 py-3 flex items-center justify-between bg-orange-50">
+                      <div key={p.id} className="border-t border-gray-100 px-4 py-3 bg-orange-50 flex items-center justify-between">
                         <div className="text-sm">
                           <span className="font-medium text-gray-800">{s ? formatData(s.data) : '—'}</span>
-                          <span className="text-gray-500 ml-2">{s ? s.orario : ''}</span>
+                          <span className="text-gray-500 ml-2">{s ? s.orario.substring(0,5) : ''}</span>
                           <span className="ml-2">{linguaLabels[p.lingua] || p.lingua}</span>
                           <span className="text-gray-400 ml-2">{p.num_persone} pers.</span>
                           {p.note && <span className="text-gray-400 ml-2 italic text-xs">{p.note}</span>}
                         </div>
-                        <button onClick={function() { eliminaPrenotazioneCC(p.id) }} className="text-gray-300 hover:text-red-500 p-1"><Trash2 size={14} /></button>
+                        <div className="flex gap-1">
+                          <button onClick={function() { apriModificaCC(p) }} className="text-gray-400 hover:text-orange-700 p-1"><PencilLine size={14} /></button>
+                          <button onClick={function() { eliminaCC(p) }} className="text-gray-300 hover:text-red-500 p-1"><Trash2 size={14} /></button>
+                        </div>
                       </div>
                     )
                   })}
                   {prenotazioniCC.length === 0 && !showFormCC && (
-                    <div className="border-t border-gray-100 px-4 pb-3">
-                      <p className="text-xs text-amber-600">⏳ Da pianificare</p>
-                    </div>
+                    <div className="border-t border-gray-100 px-4 pb-3"><p className="text-xs text-amber-600">⏳ Da pianificare</p></div>
                   )}
                   {showFormCC && (
                     <div className="border-t border-gray-100 p-4">
-                      <FormSemplice onAnnulla={function() { setShowFormCC(false) }} onSalva={creaSessioneCC}>
+                      <FormServizio onAnnulla={function() { setShowFormCC(false); setCcInModifica(null) }} onSalva={salvaCC} saving={savingCC}>
                         <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">Data</label>
+                          <div><label className="block text-xs font-medium text-gray-600 mb-1">Data</label>
                             <input type="date" value={formCC.data} onChange={function(e) { setFormCC(function(p) { return Object.assign({}, p, { data: e.target.value }) }) }}
-                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">Orario (pref. pomeriggio)</label>
+                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" /></div>
+                          <div><label className="block text-xs font-medium text-gray-600 mb-1">Orario (pref. pomeriggio)</label>
                             <input type="time" value={formCC.orario} onChange={function(e) { setFormCC(function(p) { return Object.assign({}, p, { orario: e.target.value }) }) }}
-                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
-                          </div>
+                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" /></div>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">Lingua</label>
+                          <div><label className="block text-xs font-medium text-gray-600 mb-1">Lingua</label>
                             <select value={formCC.lingua} onChange={function(e) { setFormCC(function(p) { return Object.assign({}, p, { lingua: e.target.value }) }) }}
                               className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-wine-500">
-                              <option value="ITA">🇮🇹 Italiano</option>
-                              <option value="ENG">🇬🇧 English</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">N° persone</label>
+                              <option value="ITA">🇮🇹 Italiano</option><option value="ENG">🇬🇧 English</option>
+                            </select></div>
+                          <div><label className="block text-xs font-medium text-gray-600 mb-1">N° persone</label>
                             <input type="number" min="1" value={formCC.num_persone} onChange={function(e) { setFormCC(function(p) { return Object.assign({}, p, { num_persone: e.target.value }) }) }}
-                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
-                          </div>
+                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" /></div>
                         </div>
-                        <div>
-                          <label className="block text-xs font-medium text-gray-600 mb-1">Note</label>
+                        <div><label className="block text-xs font-medium text-gray-600 mb-1">Note</label>
                           <input type="text" value={formCC.note} onChange={function(e) { setFormCC(function(p) { return Object.assign({}, p, { note: e.target.value }) }) }}
-                            placeholder="Note aggiuntive..." className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
-                        </div>
-                      </FormSemplice>
+                            placeholder="Note aggiuntive..." className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" /></div>
+                      </FormServizio>
                     </div>
                   )}
                 </div>
@@ -732,81 +839,83 @@ function PannelloServizi(props) {
                       <UtensilsCrossed size={18} className={pastiCollegati.length > 0 ? 'text-wine-600' : 'text-gray-300'} />
                       <div>
                         <p className="text-sm font-medium text-gray-900">Pasti inclusi</p>
-                        <p className="text-xs text-gray-400">
-                          {[tipologia.tipologia_pasto_1, tipologia.tipologia_pasto_2].filter(Boolean).join(' + ')}
-                        </p>
+                        <p className="text-xs text-gray-400">{[tipologia.tipologia_pasto_1, tipologia.tipologia_pasto_2].filter(Boolean).join(' + ')}</p>
                       </div>
                     </div>
                     {!showFormPasto && (
-                      <button onClick={function() { setShowFormPasto(true) }}
+                      <button onClick={function() { setPastoInModifica(null); setShowFormPasto(true) }}
                         className="text-xs px-3 py-1.5 bg-wine-50 text-wine-700 rounded-lg border border-wine-200 hover:bg-wine-100 font-medium">
                         + Aggiungi
                       </button>
                     )}
                   </div>
                   {pastiCollegati.map(function(p) {
+                    var noteVisibile = (p.notes || '').replace(/^\[.*?\]\s*/, '')
+                    var tipoLabel = (p.notes || '').indexOf('Cooking') !== -1 ? '👨‍🍳' : '🍽️'
                     return (
-                      <div key={p.id} className="border-t border-gray-100 px-4 py-3 bg-wine-50">
+                      <div key={p.id} className="border-t border-gray-100 px-4 py-3 bg-wine-50 flex items-center justify-between">
                         <div className="text-sm">
+                          <span className="mr-1">{tipoLabel}</span>
                           <span className="font-medium text-gray-800">{formatData(p.reservation_date)}</span>
                           <span className="text-gray-500 ml-2">{mealLabels[p.meal_type] || p.meal_type}</span>
-                          <span className="text-gray-400 ml-2">{p.guests_count} pers.</span>
-                          {p.notes && <p className="text-xs text-gray-500 italic mt-0.5">{p.notes}</p>}
+                          <span className="text-gray-400 ml-2">{p.adults_count} ad. + {p.children_count} ba.</span>
+                          {noteVisibile && <span className="text-gray-400 ml-2 italic text-xs">{noteVisibile}</span>}
+                        </div>
+                        <div className="flex gap-1">
+                          <button onClick={function() { apriModificaPasto(p) }} className="text-gray-400 hover:text-wine-700 p-1"><PencilLine size={14} /></button>
+                          <button onClick={function() { eliminaPasto(p) }} className="text-gray-300 hover:text-red-500 p-1"><Trash2 size={14} /></button>
                         </div>
                       </div>
                     )
                   })}
                   {pastiCollegati.length === 0 && !showFormPasto && (
-                    <div className="border-t border-gray-100 px-4 pb-3">
-                      <p className="text-xs text-amber-600">⏳ Da pianificare</p>
-                    </div>
+                    <div className="border-t border-gray-100 px-4 pb-3"><p className="text-xs text-amber-600">⏳ Da pianificare</p></div>
                   )}
                   {showFormPasto && (
                     <div className="border-t border-gray-100 p-4">
-                      <FormSemplice onAnnulla={function() { setShowFormPasto(false) }} onSalva={creaPasto}>
+                      <FormServizio onAnnulla={function() { setShowFormPasto(false); setPastoInModifica(null) }} onSalva={salvaPasto} saving={savingPasto}>
                         <div>
                           <label className="block text-xs font-medium text-gray-600 mb-1">Tipo pasto</label>
                           <select value={formPasto.tipo} onChange={function(e) { setFormPasto(function(p) { return Object.assign({}, p, { tipo: e.target.value }) }) }}
                             className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-wine-500">
-                            {tipologia.tipologia_pasto_1 && <option value="cooking">Pasto Cooking Class — {tipologia.tipologia_pasto_1}</option>}
-                            {tipologia.tipologia_pasto_2 && <option value="degustazione">Pasto Degustazione — {tipologia.tipologia_pasto_2}</option>}
+                            {tipologia.tipologia_pasto_1 && <option value="cooking">👨‍🍳 Pasto Cooking Class</option>}
+                            {tipologia.tipologia_pasto_2 && <option value="degustazione">🍽️ Pasto Degustazione</option>}
                           </select>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">Data</label>
+                          <div><label className="block text-xs font-medium text-gray-600 mb-1">Data</label>
                             <input type="date" value={formPasto.data} onChange={function(e) { setFormPasto(function(p) { return Object.assign({}, p, { data: e.target.value }) }) }}
-                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-medium text-gray-600 mb-1">Turno</label>
+                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" /></div>
+                          <div><label className="block text-xs font-medium text-gray-600 mb-1">Turno</label>
                             <select value={formPasto.turno} onChange={function(e) { setFormPasto(function(p) { return Object.assign({}, p, { turno: e.target.value }) }) }}
                               className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-wine-500">
-                              <option value="lunch">Pranzo</option>
-                              <option value="dinner">Cena</option>
-                            </select>
-                          </div>
+                              <option value="lunch">Pranzo</option><option value="dinner">Cena</option>
+                            </select></div>
                         </div>
-                        <div>
-                          <label className="block text-xs font-medium text-gray-600 mb-1">Note</label>
+                        <div className="grid grid-cols-2 gap-3">
+                          <div><label className="block text-xs font-medium text-gray-600 mb-1">Adulti</label>
+                            <input type="number" min="0" value={formPasto.adulti} onChange={function(e) { setFormPasto(function(p) { return Object.assign({}, p, { adulti: e.target.value }) }) }}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" /></div>
+                          <div><label className="block text-xs font-medium text-gray-600 mb-1">Bambini</label>
+                            <input type="number" min="0" value={formPasto.bambini} onChange={function(e) { setFormPasto(function(p) { return Object.assign({}, p, { bambini: e.target.value }) }) }}
+                              className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" /></div>
+                        </div>
+                        <div><label className="block text-xs font-medium text-gray-600 mb-1">Note</label>
                           <input type="text" value={formPasto.note} onChange={function(e) { setFormPasto(function(p) { return Object.assign({}, p, { note: e.target.value }) }) }}
-                            placeholder="Richieste particolari, allergeni..." className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
-                        </div>
-                      </FormSemplice>
+                            placeholder="Richieste particolari, allergeni..." className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" /></div>
+                      </FormServizio>
                     </div>
                   )}
                 </div>
               )}
 
-              {/* Se non ci sono servizi strutturati (Ad Hoc o Scoprendo) */}
               {(!tipologia || (!tipologia.pernottamento && !tipologia.wine_tour && !tipologia.cooking_class && !tipologia.tipologia_pasto_1)) && (
                 <div className="text-center py-6 text-gray-400 text-sm">
                   <Gift size={32} className="mx-auto mb-2 opacity-30" />
-                  <p>Questa tipologia non ha servizi strutturati.</p>
+                  <p>Nessun servizio strutturato per questa tipologia.</p>
                   <p className="text-xs mt-1">Usa le note per tracciare i servizi concordati.</p>
                 </div>
               )}
-
             </>
           )}
         </div>
@@ -829,26 +938,21 @@ function ModaleUtilizzo(props) {
   var [prenotazioniTrovate, setPrenotazioniTrovate] = useState([])
   var [prenotazioneSelezionata, setPrenotazioneSelezionata] = useState(null)
   var [saving, setSaving] = useState(false)
-  var [cercando, setCercando] = useState(false)
 
   function cercaPrenotazione(query) {
     setPrenotazioneSearch(query)
     if (query.length < 2) { setPrenotazioniTrovate([]); return }
-    setCercando(true)
     supabase.from('reservations')
       .select('id, reservation_date, meal_type, guests_count, customers(first_name, last_name)')
+      .not('customer_id', 'is', null)
       .order('reservation_date', { ascending: false }).limit(8)
-      .then(function(result) {
-        setCercando(false)
-        if (!result.error && result.data) setPrenotazioniTrovate(result.data)
-      })
+      .then(function(result) { if (!result.error && result.data) setPrenotazioniTrovate(result.data) })
   }
 
   function handleSalva() {
     setSaving(true)
     supabase.from('gift_card').update({
-      usata: true,
-      data_utilizzo: dataUtilizzo,
+      usata: true, data_utilizzo: dataUtilizzo,
       prenotazione_id: prenotazioneSelezionata ? prenotazioneSelezionata.id : null
     }).eq('id', gc.id).select().then(function(result) {
       setSaving(false)
@@ -905,7 +1009,6 @@ function ModaleUtilizzo(props) {
                     })}
                   </div>
                 )}
-                {cercando && <p className="text-xs text-gray-400 mt-1">Ricerca...</p>}
               </div>
             )}
           </div>
@@ -1006,7 +1109,7 @@ function ModaleTipologia(props) {
             <input type="text" value={form.nome} onChange={function(e) { hc('nome', e.target.value) }} autoFocus
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" /></div>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className="block text-sm font-medium text-gray-700 mb-1">Prezzo attuale € *</label>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Prezzo attuale €</label>
               <input type="number" step="0.01" min="0" value={form.prezzo} onChange={function(e) { hc('prezzo', e.target.value) }}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" /></div>
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Prezzo precedente €</label>
@@ -1033,8 +1136,10 @@ function ModaleTipologia(props) {
             <Toggle label="Visita Orto" campo="visita_orto" />
             <Toggle label="Cooking Class" campo="cooking_class" />
           </div>
-          {[['degustazione_vini_1','Degustazione vini 1','es. 3 vini in anfora'],['degustazione_vini_2','Degustazione vini 2','es. 4 vini i Cacciagalli'],
-            ['tipologia_pasto_1','Tipologia pasto 1','es. Tapas, Pranzo/Cena 4 portate'],['tipologia_pasto_2','Tipologia pasto 2','es. Pranzo/Cena 4 portate'],
+          {[['degustazione_vini_1','Degustazione vini 1','es. 3 vini in anfora'],
+            ['degustazione_vini_2','Degustazione vini 2','es. 4 vini i Cacciagalli'],
+            ['tipologia_pasto_1','Tipologia pasto 1','es. Tapas, Pranzo/Cena 4 portate'],
+            ['tipologia_pasto_2','Tipologia pasto 2','es. Pranzo/Cena 4 portate'],
             ['omaggio','Omaggio','es. Grembiule e tote bag I Cacciagalli']].map(function(f) {
             return (<div key={f[0]}><label className="block text-sm font-medium text-gray-700 mb-1">{f[1]}</label>
               <input type="text" value={form[f[0]]} onChange={function(e) { hc(f[0], e.target.value) }} placeholder={f[2]}
@@ -1117,7 +1222,6 @@ function TabArchivio(props) {
     if (filtroStato === 'valide' && (gc.usata || scaduta)) return false
     if (filtroStato === 'usate' && !gc.usata) return false
     if (filtroStato === 'scadute' && (!scaduta || gc.usata)) return false
-    // filtroStato === 'tutte' non filtra per stato
     if (filtroTipologia && gc.tipologia_id !== filtroTipologia) return false
     if (ricerca) {
       var r = ricerca.toLowerCase()
@@ -1218,8 +1322,7 @@ function TabArchivio(props) {
                       <p className="text-xs mt-1">
                         {gc.data_utilizzo
                           ? <span className="text-gray-400">Utilizzata il <span className="font-medium text-gray-600">{formatData(gc.data_utilizzo)}</span></span>
-                          : <span className="text-amber-600">⚠ Data utilizzo non inserita — clicca Modifica per aggiungerla</span>
-                        }
+                          : <span className="text-amber-600">⚠ Data utilizzo non inserita</span>}
                       </p>
                     )}
                     {gc.note && <p className="text-xs text-gray-400 italic mt-1">{gc.note}</p>}
@@ -1251,25 +1354,10 @@ function TabArchivio(props) {
         </div>
       )}
 
-      {showModale && (
-        <ModaleGiftCard tipologie={tipologie} gc={gcInModifica} onSave={handleSaveGc}
-          onClose={function() { setShowModale(false); setGcInModifica(null) }} />
-      )}
-      {gcPerUtilizzo && (
-        <ModaleUtilizzo gc={gcPerUtilizzo} onSave={handleSaveUtilizzo} onClose={function() { setGcPerUtilizzo(null) }} />
-      )}
-      {gcPerServizi && (
-        <PannelloServizi
-          gc={gcPerServizi}
-          tipologia={gcPerServizi.gift_card_tipologie}
-          onClose={function() { setGcPerServizi(null) }}
-          onAggiorna={handleAggiornaGc}
-        />
-      )}
-      {confermaElimina && (
-        <ModaleConferma testo={'Eliminare la gift card "' + confermaElimina.codice + '"?'}
-          onConferma={handleElimina} onAnnulla={function() { setConfermaElimina(null) }} />
-      )}
+      {showModale && <ModaleGiftCard tipologie={tipologie} gc={gcInModifica} onSave={handleSaveGc} onClose={function() { setShowModale(false); setGcInModifica(null) }} />}
+      {gcPerUtilizzo && <ModaleUtilizzo gc={gcPerUtilizzo} onSave={handleSaveUtilizzo} onClose={function() { setGcPerUtilizzo(null) }} />}
+      {gcPerServizi && <PannelloServizi gc={gcPerServizi} tipologia={gcPerServizi.gift_card_tipologie} onClose={function() { setGcPerServizi(null) }} onAggiorna={handleAggiornaGc} />}
+      {confermaElimina && <ModaleConferma testo={'Eliminare la gift card "' + confermaElimina.codice + '"?'} onConferma={handleElimina} onAnnulla={function() { setConfermaElimina(null) }} />}
     </div>
   )
 }
@@ -1285,10 +1373,9 @@ function TabTipologie(props) {
 
   function handleSave(tipSalvata, isModifica) { onUpdate(tipSalvata, isModifica); setShowModale(false); setTipologiaInModifica(null) }
   function handleElimina() {
-    var tip = confermaElimina
-    supabase.from('gift_card_tipologie').delete().eq('id', tip.id).then(function(result) {
+    supabase.from('gift_card_tipologie').delete().eq('id', confermaElimina.id).then(function(result) {
       setConfermaElimina(null)
-      if (!result.error) onUpdate(tip, false, true)
+      if (!result.error) onUpdate(confermaElimina, false, true)
       else alert('Errore: ' + result.error.message)
     })
   }
@@ -1330,8 +1417,7 @@ function TabTipologie(props) {
             {t.omaggio && <p className="text-xs text-gray-500 mt-1">Omaggio: {t.omaggio}</p>}
             {t.prezzo_precedente && (
               <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
-                <AlertTriangle size={11} />
-                Prezzo precedente: €{t.prezzo_precedente}{t.data_variazione_prezzo ? ' (variato il ' + formatData(t.data_variazione_prezzo) + ')' : ''}
+                <AlertTriangle size={11} />Prezzo precedente: €{t.prezzo_precedente}{t.data_variazione_prezzo ? ' (variato il ' + formatData(t.data_variazione_prezzo) + ')' : ''}
               </p>
             )}
             {t.note && <p className="text-xs text-gray-400 italic mt-1">{t.note}</p>}
@@ -1357,13 +1443,8 @@ function TabTipologie(props) {
           <div className="space-y-3">{legacy.map(function(t) { return <RigaTipologia key={t.id} t={t} /> })}</div>
         </div>
       )}
-      {showModale && (
-        <ModaleTipologia tipologia={tipologiaInModifica} onSave={handleSave} onClose={function() { setShowModale(false); setTipologiaInModifica(null) }} />
-      )}
-      {confermaElimina && (
-        <ModaleConferma testo={'Eliminare la tipologia "' + confermaElimina.nome + '"?'}
-          onConferma={handleElimina} onAnnulla={function() { setConfermaElimina(null) }} />
-      )}
+      {showModale && <ModaleTipologia tipologia={tipologiaInModifica} onSave={handleSave} onClose={function() { setShowModale(false); setTipologiaInModifica(null) }} />}
+      {confermaElimina && <ModaleConferma testo={'Eliminare la tipologia "' + confermaElimina.nome + '"?'} onConferma={handleElimina} onAnnulla={function() { setConfermaElimina(null) }} />}
     </div>
   )
 }
@@ -1396,9 +1477,7 @@ export default function GiftCardPage() {
     <div className="max-w-4xl mx-auto px-4 py-6">
       <div className="flex items-center justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            <Gift size={24} className="text-wine-700" />Gift Card
-          </h1>
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2"><Gift size={24} className="text-wine-700" />Gift Card</h1>
           <p className="text-sm text-gray-500 mt-0.5">Archivio e gestione buoni regalo</p>
         </div>
       </div>
@@ -1412,13 +1491,9 @@ export default function GiftCardPage() {
           )
         })}
       </div>
-      {loadingTipologie ? (
-        <div className="text-center py-12 text-gray-400 text-sm">Caricamento...</div>
-      ) : tabAttiva === 'archivio' ? (
-        <TabArchivio tipologie={tipologie} />
-      ) : (
-        <TabTipologie tipologie={tipologie} onUpdate={handleUpdateTipologia} />
-      )}
+      {loadingTipologie ? <div className="text-center py-12 text-gray-400 text-sm">Caricamento...</div>
+        : tabAttiva === 'archivio' ? <TabArchivio tipologie={tipologie} />
+        : <TabTipologie tipologie={tipologie} onUpdate={handleUpdateTipologia} />}
     </div>
   )
 }
