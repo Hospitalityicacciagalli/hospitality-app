@@ -17,10 +17,10 @@ import ProfilePage from './pages/ProfilePage';
 import CassaPage from './pages/CassaPage';
 import SalePage from './pages/SalePage';
 import GestioneSalePage from './pages/GestioneSalePage';
+import GiftCardPage from './pages/GiftCardPage';
 
 function ProtectedRoute({ children, roles }) {
   var { session, profile, loading } = useAuth();
-
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -28,21 +28,13 @@ function ProtectedRoute({ children, roles }) {
       </div>
     );
   }
-
-  if (!session) {
-    return <Navigate to="/login" replace />;
-  }
-
-  if (roles && profile && !roles.includes(profile.role)) {
-    return <Navigate to="/" replace />;
-  }
-
+  if (!session) return <Navigate to="/login" replace />;
+  if (roles && profile && !roles.includes(profile.role)) return <Navigate to="/" replace />;
   return children;
 }
 
 function AppRoutes() {
   var { session, loading } = useAuth();
-
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -50,7 +42,6 @@ function AppRoutes() {
       </div>
     );
   }
-
   if (!session) {
     return (
       <Routes>
@@ -59,126 +50,39 @@ function AppRoutes() {
       </Routes>
     );
   }
-
   return (
     <Layout>
       <Routes>
-
-        {/* Redirect radice */}
         <Route path="/" element={<Navigate to="/prenotazioni" replace />} />
         <Route path="/login" element={<Navigate to="/prenotazioni" replace />} />
 
-        {/* Clienti */}
-        <Route path="/clienti" element={
-          <ProtectedRoute>
-            <CustomerList />
-          </ProtectedRoute>
-        } />
-        <Route path="/clienti/nuovo" element={
-          <ProtectedRoute roles={['super_admin', 'direttore', 'reception', 'sala']}>
-            <CustomerForm />
-          </ProtectedRoute>
-        } />
-        <Route path="/clienti/:id" element={
-          <ProtectedRoute>
-            <CustomerDetail />
-          </ProtectedRoute>
-        } />
-        <Route path="/clienti/:id/modifica" element={
-          <ProtectedRoute roles={['super_admin', 'direttore', 'reception', 'sala']}>
-            <CustomerForm />
-          </ProtectedRoute>
-        } />
+        <Route path="/clienti" element={<ProtectedRoute><CustomerList /></ProtectedRoute>} />
+        <Route path="/clienti/nuovo" element={<ProtectedRoute roles={['super_admin','direttore','reception','sala']}><CustomerForm /></ProtectedRoute>} />
+        <Route path="/clienti/:id" element={<ProtectedRoute><CustomerDetail /></ProtectedRoute>} />
+        <Route path="/clienti/:id/modifica" element={<ProtectedRoute roles={['super_admin','direttore','reception','sala']}><CustomerForm /></ProtectedRoute>} />
 
-        {/* Prenotazioni */}
-        <Route path="/prenotazioni" element={
-          <ProtectedRoute>
-            <ReservationCalendar />
-          </ProtectedRoute>
-        } />
-        <Route path="/prenotazioni/giorno/:date" element={
-          <ProtectedRoute>
-            <ReservationDay />
-          </ProtectedRoute>
-        } />
-        <Route path="/prenotazioni/nuova" element={
-          <ProtectedRoute roles={['super_admin', 'direttore', 'reception', 'sala']}>
-            <ReservationForm />
-          </ProtectedRoute>
-        } />
-        <Route path="/prenotazioni/:id/modifica" element={
-          <ProtectedRoute roles={['super_admin', 'direttore', 'reception', 'sala']}>
-            <ReservationForm />
-          </ProtectedRoute>
-        } />
+        <Route path="/prenotazioni" element={<ProtectedRoute><ReservationCalendar /></ProtectedRoute>} />
+        <Route path="/prenotazioni/giorno/:date" element={<ProtectedRoute><ReservationDay /></ProtectedRoute>} />
+        <Route path="/prenotazioni/nuova" element={<ProtectedRoute roles={['super_admin','direttore','reception','sala']}><ReservationForm /></ProtectedRoute>} />
+        <Route path="/prenotazioni/:id/modifica" element={<ProtectedRoute roles={['super_admin','direttore','reception','sala']}><ReservationForm /></ProtectedRoute>} />
 
-        {/* Gestione sale e tavoli (tutti gli utenti operativi - via menu) */}
-        <Route path="/gestione-sale" element={
-          <ProtectedRoute roles={['super_admin', 'direttore']}>
-            <GestioneSalePage />
-          </ProtectedRoute>
-        } />
+        <Route path="/gestione-sale" element={<ProtectedRoute roles={['super_admin','direttore']}><GestioneSalePage /></ProtectedRoute>} />
+        <Route path="/sale" element={<ProtectedRoute roles={['super_admin','direttore']}><SalePage /></ProtectedRoute>} />
 
-        {/* Mappa sala grafica (solo admin - non nel menu) */}
-        <Route path="/sale" element={
-          <ProtectedRoute roles={['super_admin', 'direttore']}>
-            <SalePage />
-          </ProtectedRoute>
-        } />
+        <Route path="/gift-card" element={<ProtectedRoute roles={['super_admin','direttore','reception']}><GiftCardPage /></ProtectedRoute>} />
 
-        {/* Staff */}
-        <Route path="/staff" element={
-          <ProtectedRoute roles={['super_admin', 'direttore', 'reception']}>
-            <StaffList />
-          </ProtectedRoute>
-        } />
-        <Route path="/staff/nuovo" element={
-          <ProtectedRoute roles={['super_admin', 'direttore']}>
-            <StaffForm />
-          </ProtectedRoute>
-        } />
-        <Route path="/staff/:id" element={
-          <ProtectedRoute roles={['super_admin', 'direttore', 'reception']}>
-            <StaffDetail />
-          </ProtectedRoute>
-        } />
-        <Route path="/staff/:id/modifica" element={
-          <ProtectedRoute roles={['super_admin', 'direttore']}>
-            <StaffForm />
-          </ProtectedRoute>
-        } />
+        <Route path="/staff" element={<ProtectedRoute roles={['super_admin','direttore','reception']}><StaffList /></ProtectedRoute>} />
+        <Route path="/staff/nuovo" element={<ProtectedRoute roles={['super_admin','direttore']}><StaffForm /></ProtectedRoute>} />
+        <Route path="/staff/:id" element={<ProtectedRoute roles={['super_admin','direttore','reception']}><StaffDetail /></ProtectedRoute>} />
+        <Route path="/staff/:id/modifica" element={<ProtectedRoute roles={['super_admin','direttore']}><StaffForm /></ProtectedRoute>} />
 
-        {/* Cassa */}
-        <Route path="/cassa" element={
-          <ProtectedRoute roles={['super_admin', 'proprieta', 'direttore', 'reception', 'sala']}>
-            <CassaPage />
-          </ProtectedRoute>
-        } />
+        <Route path="/cassa" element={<ProtectedRoute roles={['super_admin','proprieta','direttore','reception','sala']}><CassaPage /></ProtectedRoute>} />
 
-        {/* Impostazioni */}
-        <Route path="/impostazioni" element={
-          <ProtectedRoute roles={['super_admin', 'direttore']}>
-            <SettingsPage />
-          </ProtectedRoute>
-        } />
+        <Route path="/impostazioni" element={<ProtectedRoute roles={['super_admin','direttore']}><SettingsPage /></ProtectedRoute>} />
+        <Route path="/utenti" element={<ProtectedRoute roles={['super_admin']}><UserManagement /></ProtectedRoute>} />
+        <Route path="/profilo" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
 
-        {/* Gestione utenti - solo Super Admin */}
-        <Route path="/utenti" element={
-          <ProtectedRoute roles={['super_admin']}>
-            <UserManagement />
-          </ProtectedRoute>
-        } />
-
-        {/* Profilo personale - tutti gli utenti autenticati */}
-        <Route path="/profilo" element={
-          <ProtectedRoute>
-            <ProfilePage />
-          </ProtectedRoute>
-        } />
-
-        {/* Fallback */}
         <Route path="*" element={<Navigate to="/prenotazioni" replace />} />
-
       </Routes>
     </Layout>
   );
