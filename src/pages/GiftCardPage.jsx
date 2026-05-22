@@ -60,6 +60,7 @@ function ModaleGiftCard(props) {
     messaggio: isModifica ? (gcEsistente.messaggio || '') : '',
     data_acquisto: isModifica ? (gcEsistente.data_acquisto || '') : oggi,
     scadenza: isModifica ? (gcEsistente.scadenza || '') : '',
+    data_utilizzo: isModifica ? (gcEsistente.data_utilizzo || '') : '',
     numero_scontrino: isModifica ? (gcEsistente.numero_scontrino || '') : '',
     prezzo_pagato: isModifica ? String(gcEsistente.prezzo_pagato || '') : '',
     numero_persone: isModifica ? String(gcEsistente.numero_persone || '1') : '1',
@@ -107,6 +108,7 @@ function ModaleGiftCard(props) {
       messaggio: form.messaggio.trim() || null,
       data_acquisto: form.data_acquisto || null,
       scadenza: form.scadenza || null,
+      data_utilizzo: form.data_utilizzo || null,
       numero_scontrino: form.numero_scontrino.trim() || null,
       prezzo_pagato: parseFloat(form.prezzo_pagato) || null,
       numero_persone: parseInt(form.numero_persone, 10) || 1,
@@ -213,6 +215,13 @@ function ModaleGiftCard(props) {
               <input type="number" step="0.01" min="0" value={form.prezzo_pagato} onChange={function(e) { handleChange('prezzo_pagato', e.target.value) }}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
             </div>
+          </div>
+          <div>
+            <label className={"block text-sm font-medium mb-1 " + (form.data_utilizzo ? 'text-gray-500' : 'text-gray-700')}>
+              Data utilizzo {form.data_utilizzo ? '✓' : '(lascia vuoto se non ancora utilizzata)'}
+            </label>
+            <input type="date" value={form.data_utilizzo} onChange={function(e) { handleChange('data_utilizzo', e.target.value) }}
+              className={"w-full border rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 " + (form.data_utilizzo ? 'border-green-300 bg-green-50' : 'border-gray-300')} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -1091,6 +1100,7 @@ function TabArchivio(props) {
     if (filtroStato === 'valide' && (gc.usata || scaduta)) return false
     if (filtroStato === 'usate' && !gc.usata) return false
     if (filtroStato === 'scadute' && (!scaduta || gc.usata)) return false
+    // filtroStato === 'tutte' non filtra per stato
     if (filtroTipologia && gc.tipologia_id !== filtroTipologia) return false
     if (ricerca) {
       var r = ricerca.toLowerCase()
@@ -1106,18 +1116,23 @@ function TabArchivio(props) {
   var countValide = giftCard.filter(function(gc) { return !gc.usata && !(gc.scadenza && new Date(gc.scadenza) < oggi) }).length
   var countUsate = giftCard.filter(function(gc) { return gc.usata }).length
   var countScadute = giftCard.filter(function(gc) { return !gc.usata && gc.scadenza && new Date(gc.scadenza) < oggi }).length
+  var countTutte = giftCard.length
 
   return (
     <div>
-      <div className="grid grid-cols-3 gap-3 mb-5">
+      <div className="grid grid-cols-4 gap-3 mb-5">
         {[{ key: 'valide', label: 'Valide', count: countValide, color: 'green' },
           { key: 'usate', label: 'Utilizzate', count: countUsate, color: 'gray' },
-          { key: 'scadute', label: 'Scadute', count: countScadute, color: 'red' }].map(function(s) {
+          { key: 'scadute', label: 'Scadute', count: countScadute, color: 'red' },
+          { key: 'tutte', label: 'Tutte', count: countTutte, color: 'blue' }].map(function(s) {
           var isAttivo = filtroStato === s.key
           return (
             <button key={s.key} onClick={function() { setFiltroStato(s.key) }}
               className={"rounded-xl border p-3 text-center transition-all " + (isAttivo
-                ? (s.color === 'green' ? 'bg-green-600 border-green-600 text-white' : s.color === 'red' ? 'bg-red-600 border-red-600 text-white' : 'bg-gray-600 border-gray-600 text-white')
+                ? (s.color === 'green' ? 'bg-green-600 border-green-600 text-white'
+                  : s.color === 'red' ? 'bg-red-600 border-red-600 text-white'
+                  : s.color === 'blue' ? 'bg-wine-700 border-wine-700 text-white'
+                  : 'bg-gray-600 border-gray-600 text-white')
                 : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50')}>
               <p className="text-2xl font-bold">{s.count}</p>
               <p className="text-xs font-medium mt-0.5">{s.label}</p>
@@ -1182,7 +1197,14 @@ function TabArchivio(props) {
                         {tip.cooking_class && <span className="px-1.5 py-0.5 bg-orange-50 text-orange-700 rounded text-xs">👨‍🍳 Cooking</span>}
                       </div>
                     )}
-                    {gc.usata && gc.data_utilizzo && <p className="text-xs text-gray-400 mt-1">Utilizzata il {formatData(gc.data_utilizzo)}</p>}
+                    {gc.usata && (
+                      <p className="text-xs mt-1">
+                        {gc.data_utilizzo
+                          ? <span className="text-gray-400">Utilizzata il <span className="font-medium text-gray-600">{formatData(gc.data_utilizzo)}</span></span>
+                          : <span className="text-amber-600">⚠ Data utilizzo non inserita — clicca Modifica per aggiungerla</span>
+                        }
+                      </p>
+                    )}
                     {gc.note && <p className="text-xs text-gray-400 italic mt-1">{gc.note}</p>}
                   </div>
                   <div className="flex flex-col gap-1 flex-shrink-0">
