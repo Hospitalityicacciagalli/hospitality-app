@@ -32,6 +32,7 @@ export default function Layout({ children }) {
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
+
         <div className="text-wine-400 text-xs font-semibold uppercase tracking-wider px-3 mb-2">Gestione</div>
 
         <NavLink to="/prenotazioni" className={function(p) { return navClass(p.isActive); }} onClick={function() { setMobileOpen(false); }}>
@@ -60,6 +61,20 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
+        {hasRole(['super_admin','direttore','reception','sala']) && (
+          <>
+            <div className="text-wine-400 text-xs font-semibold uppercase tracking-wider px-3 mt-4 mb-2">Esperienze</div>
+
+            <NavLink to="/wine-tour" className={function(p) { return navClass(p.isActive); }} onClick={function() { setMobileOpen(false); }}>
+              <span className="text-base">🍷</span>Wine Tour
+            </NavLink>
+
+            <NavLink to="/cooking-class" className={function(p) { return navClass(p.isActive); }} onClick={function() { setMobileOpen(false); }}>
+              <span className="text-base">👨‍🍳</span>Cooking Class
+            </NavLink>
+          </>
+        )}
+
         {hasRole(['super_admin','direttore']) && (
           <>
             <div className="text-wine-400 text-xs font-semibold uppercase tracking-wider px-3 mt-4 mb-2">Amministrazione</div>
@@ -79,6 +94,7 @@ export default function Layout({ children }) {
             <span className="text-base">🔐</span>Utenti App
           </NavLink>
         )}
+
       </nav>
 
       <div className="px-3 py-3 border-t border-wine-800">

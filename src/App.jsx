@@ -18,6 +18,8 @@ import CassaPage from './pages/CassaPage';
 import SalePage from './pages/SalePage';
 import GestioneSalePage from './pages/GestioneSalePage';
 import GiftCardPage from './pages/GiftCardPage';
+import WineTourPage from './pages/WineTourPage';
+import CookingClassPage from './pages/CookingClassPage';
 
 function ProtectedRoute({ children, roles }) {
   var { session, profile, loading } = useAuth();
@@ -70,6 +72,8 @@ function AppRoutes() {
         <Route path="/sale" element={<ProtectedRoute roles={['super_admin','direttore']}><SalePage /></ProtectedRoute>} />
 
         <Route path="/gift-card" element={<ProtectedRoute roles={['super_admin','direttore','reception']}><GiftCardPage /></ProtectedRoute>} />
+        <Route path="/wine-tour" element={<ProtectedRoute roles={['super_admin','direttore','reception','sala']}><WineTourPage /></ProtectedRoute>} />
+        <Route path="/cooking-class" element={<ProtectedRoute roles={['super_admin','direttore','reception','sala']}><CookingClassPage /></ProtectedRoute>} />
 
         <Route path="/staff" element={<ProtectedRoute roles={['super_admin','direttore','reception']}><StaffList /></ProtectedRoute>} />
         <Route path="/staff/nuovo" element={<ProtectedRoute roles={['super_admin','direttore']}><StaffForm /></ProtectedRoute>} />
@@ -77,7 +81,6 @@ function AppRoutes() {
         <Route path="/staff/:id/modifica" element={<ProtectedRoute roles={['super_admin','direttore']}><StaffForm /></ProtectedRoute>} />
 
         <Route path="/cassa" element={<ProtectedRoute roles={['super_admin','proprieta','direttore','reception','sala']}><CassaPage /></ProtectedRoute>} />
-
         <Route path="/impostazioni" element={<ProtectedRoute roles={['super_admin','direttore']}><SettingsPage /></ProtectedRoute>} />
         <Route path="/utenti" element={<ProtectedRoute roles={['super_admin']}><UserManagement /></ProtectedRoute>} />
         <Route path="/profilo" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
