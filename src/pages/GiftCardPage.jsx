@@ -535,7 +535,7 @@ function PannelloServizi(props) {
             last_name: nomeCliente,
             category: 'standard',
             is_active: true,
-            source: 'gift_card',
+            source: 'manual',
             notes: 'Cliente automatico per gift card ' + gc.codice
           }]).select('id')
           if (nuovoCliente.error) throw new Error(nuovoCliente.error.message)
@@ -550,7 +550,7 @@ function PannelloServizi(props) {
           adults_count: adulti,
           children_count: bambini,
           status: 'confirmed',
-          source: 'gift_card',
+          source: 'manual',
           notes: noteFinale
         }]).select('id, reservation_date, meal_type, guests_count, adults_count, children_count, notes')
         if (ins.error) throw new Error(ins.error.message)
