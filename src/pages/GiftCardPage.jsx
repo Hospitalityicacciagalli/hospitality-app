@@ -497,7 +497,7 @@ function PannelloServizi(props) {
     setShowFormPasto(true)
   }
 
-  function salvaPasto() {
+  async function salvaPasto() {
     if (!formPasto.data) { alert('Inserisci la data del pasto.'); return }
     setSavingPasto(true)
     var adulti = parseInt(formPasto.adulti) || 0
@@ -506,30 +506,31 @@ function PannelloServizi(props) {
     var tipoLabel = formPasto.tipo === 'cooking' ? '[Pasto Cooking Class]' : '[Pasto Degustazione]'
     var noteFinale = tipoLabel + (formPasto.note.trim() ? ' ' + formPasto.note.trim() : '')
 
-    if (pastoInModifica) {
-      supabase.from('reservations').update({
-        reservation_date: formPasto.data,
-        meal_type: formPasto.turno,
-        guests_count: totale,
-        adults_count: adulti,
-        children_count: bambini,
-        notes: noteFinale
-      }).eq('id', pastoInModifica.id).select('id, reservation_date, meal_type, guests_count, adults_count, children_count, notes')
-        .then(function(result) {
-          setSavingPasto(false)
-          if (result.error) { alert('Errore: ' + result.error.message); return }
-          if (result.data && result.data.length > 0) {
-            setPastiCollegati(function(prev) { return prev.map(function(p) { return p.id === pastoInModifica.id ? result.data[0] : p }) })
-            setShowFormPasto(false); setPastoInModifica(null)
-          }
-        })
-    } else {
-      // Crea cliente automatico "Gift Card CODICE"
-      var nomeCliente = 'Gift Card ' + gc.codice
-      supabase.from('customers').select('id').eq('last_name', nomeCliente).limit(1)
-        .then(function(result) {
-          if (result.data && result.data.length > 0) return { data: result.data }
-          return supabase.from('customers').insert([{
+    try {
+      if (pastoInModifica) {
+        var upd = await supabase.from('reservations').update({
+          reservation_date: formPasto.data,
+          meal_type: formPasto.turno,
+          guests_count: totale,
+          adults_count: adulti,
+          children_count: bambini,
+          notes: noteFinale
+        }).eq('id', pastoInModifica.id).select('id, reservation_date, meal_type, guests_count, adults_count, children_count, notes')
+        if (upd.error) throw new Error(upd.error.message)
+        if (upd.data && upd.data.length > 0) {
+          setPastiCollegati(function(prev) { return prev.map(function(p) { return p.id === pastoInModifica.id ? upd.data[0] : p }) })
+        }
+        setShowFormPasto(false)
+        setPastoInModifica(null)
+      } else {
+        // Trova o crea cliente automatico
+        var nomeCliente = 'Gift Card ' + gc.codice
+        var cercaCliente = await supabase.from('customers').select('id').eq('last_name', nomeCliente).limit(1)
+        var customerId
+        if (cercaCliente.data && cercaCliente.data.length > 0) {
+          customerId = cercaCliente.data[0].id
+        } else {
+          var nuovoCliente = await supabase.from('customers').insert([{
             first_name: gc.beneficiario_nome || gc.committente_nome || 'Beneficiario',
             last_name: nomeCliente,
             category: 'standard',
@@ -537,31 +538,40 @@ function PannelloServizi(props) {
             source: 'gift_card',
             notes: 'Cliente automatico per gift card ' + gc.codice
           }]).select('id')
-        })
-        .then(function(result) {
-          var customerId = result.data[0].id
-          return supabase.from('reservations').insert([{
-            gift_card_id: gc.id,
-            customer_id: customerId,
-            reservation_date: formPasto.data,
-            meal_type: formPasto.turno,
-            guests_count: totale,
-            adults_count: adulti,
-            children_count: bambini,
-            status: 'confirmed',
-            source: 'gift_card',
-            notes: noteFinale
-          }]).select('id, reservation_date, meal_type, guests_count, adults_count, children_count, notes')
-        })
-        .then(function(result) {
-          setSavingPasto(false)
-          if (result.error) { alert('Errore: ' + result.error.message); return }
-          if (result.data && result.data.length > 0) {
-            setPastiCollegati(function(prev) { return prev.concat(result.data) })
-            setShowFormPasto(false)
-          }
-        })
+          if (nuovoCliente.error) throw new Error(nuovoCliente.error.message)
+          customerId = nuovoCliente.data[0].id
+        }
+        var ins = await supabase.from('reservations').insert([{
+          gift_card_id: gc.id,
+          customer_id: customerId,
+          reservation_date: formPasto.data,
+          meal_type: formPasto.turno,
+          guests_count: totale,
+          adults_count: adulti,
+          children_count: bambini,
+          status: 'confirmed',
+          source: 'gift_card',
+          notes: noteFinale
+        }]).select('id, reservation_date, meal_type, guests_count, adults_count, children_count, notes')
+        if (ins.error) throw new Error(ins.error.message)
+        if (ins.data && ins.data.length > 0) {
+          setPastiCollegati(function(prev) { return prev.concat(ins.data) })
+        }
+        // Resetta il form ma tienilo aperto se ci sono ancora pasti da inserire
+        var pastiNecessariTot = (tipologia && tipologia.tipologia_pasto_1 ? 1 : 0) + (tipologia && tipologia.tipologia_pasto_2 ? 1 : 0)
+        var pastiGiaInseriti = pastiCollegati.length + 1
+        if (pastiGiaInseriti >= pastiNecessariTot) {
+          setShowFormPasto(false)
+        } else {
+          // Resetta solo il tipo per il secondo pasto, tenendo la data
+          var altroTipo = formPasto.tipo === 'cooking' ? 'degustazione' : 'cooking'
+          setFormPasto(function(prev) { return Object.assign({}, prev, { tipo: altroTipo, note: '' }) })
+        }
+      }
+    } catch(err) {
+      alert('Errore: ' + err.message)
     }
+    setSavingPasto(false)
   }
 
   function eliminaPasto(p) {
