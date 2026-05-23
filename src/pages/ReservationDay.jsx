@@ -637,6 +637,9 @@ function StampaMenu(props) {
           if (allergeClienti.length > 0) {
             html += '<div class="avviso">\u26a0 Allergeni cliente: ' + allergeClienti.map(function(a) { return '<span class="badge">' + a + '</span>' }).join('') + '</div>'
           }
+          if (res.notes) {
+            html += '<div class="note">\ud83d\udcdd ' + res.notes + '</div>'
+          }
           if (tavRighe.length > 0) {
             html += '<table style="margin-top:8px;"><tr><th>Tavolo</th><th>Sala</th><th>Ospiti</th><th>Bambini</th><th>Allergeni tavolo</th><th>Note</th></tr>'
             tavRighe.forEach(function(r) {
