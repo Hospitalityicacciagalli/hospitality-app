@@ -836,7 +836,7 @@ function ReservationDay() {
   function loadReservations() {
     setLoading(true)
     supabase.from('reservations')
-      .select('*, customers(id, first_name, last_name, phone, email, category), gift_card(id, codice, tipologia_id)')
+      .select('*, customers(id, first_name, last_name, phone, email, category), gift_card!reservations_gift_card_id_fkey(id, codice, tipologia_id)')
       .eq('reservation_date', dateStr).eq('meal_type', selectedMeal)
       .order('requested_time', { ascending: true, nullsFirst: false })
       .then(function(result) {
