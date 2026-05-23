@@ -545,7 +545,17 @@ function PannelloServizi(props) {
   // ── PASTI ──────────────────────────────────────────────────
   function apriModificaPasto(p) {
     var noteOriginale = p.notes || ''
-    var tipo = noteOriginale.indexOf('Cooking Class') !== -1 ? 'cooking' : 'degustazione'
+    // Estrae il nome del pasto tra parentesi quadre e lo confronta con i pasti della tipologia
+    var match = noteOriginale.match(/^\[(.*?)\]/)
+    var nomePastoNota = match ? match[1] : ''
+    var tipo = 'degustazione'
+    if (tipologia && tipologia.tipologia_pasto_1 && nomePastoNota === tipologia.tipologia_pasto_1) {
+      tipo = 'cooking'
+    } else if (tipologia && tipologia.tipologia_pasto_2 && nomePastoNota === tipologia.tipologia_pasto_2) {
+      tipo = 'degustazione'
+    } else if (noteOriginale.indexOf('Cooking') !== -1) {
+      tipo = 'cooking'
+    }
     setFormPasto({
       data: p.reservation_date || dataRiferimento,
       turno: p.meal_type || 'dinner',
@@ -564,7 +574,8 @@ function PannelloServizi(props) {
     var adulti = parseInt(formPasto.adulti) || 0
     var bambini = parseInt(formPasto.bambini) || 0
     var totale = adulti + bambini
-    var tipoLabel = formPasto.tipo === 'cooking' ? '[Pasto Cooking Class]' : '[Pasto Degustazione]'
+    var nomePasto = formPasto.tipo === 'cooking' ? (tipologia && tipologia.tipologia_pasto_1 ? tipologia.tipologia_pasto_1 : 'Pasto') : (tipologia && tipologia.tipologia_pasto_2 ? tipologia.tipologia_pasto_2 : 'Pasto')
+    var tipoLabel = '[' + nomePasto + ']'
     var noteFinale = tipoLabel + (formPasto.note.trim() ? ' ' + formPasto.note.trim() : '')
 
     try {
@@ -922,15 +933,17 @@ function PannelloServizi(props) {
                     )}
                   </div>
                   {pastiCollegati.map(function(p) {
+                    var matchNome = (p.notes || '').match(/^\[(.*?)\]/)
+                    var nomePastoVis = matchNome ? matchNome[1] : 'Pasto'
                     var noteVisibile = (p.notes || '').replace(/^\[.*?\]\s*/, '')
-                    var tipoLabel = (p.notes || '').indexOf('Cooking') !== -1 ? '👨‍🍳' : '🍽️'
                     return (
                       <div key={p.id} className="border-t border-gray-100 px-4 py-3 bg-wine-50 flex items-center justify-between">
                         <div className="text-sm">
-                          <span className="mr-1">{tipoLabel}</span>
+                          <span className="mr-1">🍽️</span>
                           <span className="font-medium text-gray-800">{formatData(p.reservation_date)}</span>
                           <span className="text-gray-500 ml-2">{mealLabels[p.meal_type] || p.meal_type}</span>
                           <span className="text-gray-400 ml-2">{p.adults_count} ad. + {p.children_count} ba.</span>
+                          <span className="text-wine-600 ml-2 text-xs">{nomePastoVis}</span>
                           {noteVisibile && <span className="text-gray-400 ml-2 italic text-xs">{noteVisibile}</span>}
                         </div>
                         <div className="flex gap-1">
@@ -950,8 +963,8 @@ function PannelloServizi(props) {
                           <label className="block text-xs font-medium text-gray-600 mb-1">Tipo pasto</label>
                           <select value={formPasto.tipo} onChange={function(e) { setFormPasto(function(p) { return Object.assign({}, p, { tipo: e.target.value }) }) }}
                             className="w-full border border-gray-300 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-wine-500">
-                            {tipologia.tipologia_pasto_1 && <option value="cooking">👨‍🍳 Pasto Cooking Class</option>}
-                            {tipologia.tipologia_pasto_2 && <option value="degustazione">🍽️ Pasto Degustazione</option>}
+                            {tipologia.tipologia_pasto_1 && <option value="cooking">🍽️ {tipologia.tipologia_pasto_1}</option>}
+                            {tipologia.tipologia_pasto_2 && <option value="degustazione">🍽️ {tipologia.tipologia_pasto_2}</option>}
                           </select>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
