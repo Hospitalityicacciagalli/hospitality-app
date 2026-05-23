@@ -773,18 +773,31 @@ function ReservationDay() {
   function loadReservations() {
     setLoading(true)
     supabase.from('reservations')
-      .select('*, customers(id, first_name, last_name, phone, email, category), gift_card(id, codice, gift_card_tipologie(nome))')
+      .select('*, customers(id, first_name, last_name, phone, email, category), gift_card(id, codice)')
       .eq('reservation_date', dateStr).eq('meal_type', selectedMeal)
       .order('requested_time', { ascending: true, nullsFirst: false })
       .then(function(result) {
-        if (result.error) { setReservations([]) } else { setReservations(result.data || []) }
+        if (result.error) {
+          // Fallback: se la join con gift_card fallisce, carico senza
+          return supabase.from('reservations')
+            .select('*, customers(id, first_name, last_name, phone, email, category)')
+            .eq('reservation_date', dateStr).eq('meal_type', selectedMeal)
+            .order('requested_time', { ascending: true, nullsFirst: false })
+            .then(function(fallback) {
+              setReservations(fallback.error ? [] : (fallback.data || []))
+            })
+        } else {
+          setReservations(result.data || [])
+        }
+      })
+      .then(function() {
         return supabase.from('reservations')
           .select('guests_count, adults_count, children_count')
           .eq('reservation_date', dateStr).eq('meal_type', selectedMeal)
           .not('status', 'in', '("cancelled")')
       })
       .then(function(result) {
-        if (!result.error && result.data) {
+        if (result && !result.error && result.data) {
           var total = 0; var adults = 0; var children = 0
           result.data.forEach(function(r) { total += r.guests_count; adults += r.adults_count; children += r.children_count })
           setSummary({ total: total, adults: adults, children: children, count: result.data.length })
@@ -950,7 +963,6 @@ function ReservationDay() {
                       {res.gift_card && (
                         <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
                           🎁 {res.gift_card.codice}
-                          {res.gift_card.gift_card_tipologie && <span className="opacity-70">· {res.gift_card.gift_card_tipologie.nome}</span>}
                         </span>
                       )}
                     </div>
