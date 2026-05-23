@@ -26,6 +26,55 @@ function nomeGiornoBreve(dayIndex) {
   return ['Dom','Lun','Mar','Mer','Gio','Ven','Sab'][dayIndex]
 }
 
+// Costruisce lista servizi di una tipologia gift card
+function serviziTipologia(t) {
+  if (!t) return []
+  var s = []
+  if (t.pernottamento) s.push('🏨 Pernottamento ' + (t.notti ? t.notti + ' notte/i' : ''))
+  if (t.calice_benvenuto) s.push('🥂 Calice di benvenuto')
+  if (t.wine_tour) s.push('🍷 Wine Tour')
+  if (t.visita_orto) s.push('🌱 Visita all\'orto')
+  if (t.cooking_class) s.push('👨‍🍳 Cooking Class')
+  if (t.degustazione_vini_1) s.push('🍇 ' + t.degustazione_vini_1)
+  if (t.degustazione_vini_2) s.push('🍇 ' + t.degustazione_vini_2)
+  if (t.tipologia_pasto_1) s.push('🍽️ ' + t.tipologia_pasto_1)
+  if (t.tipologia_pasto_2) s.push('🍽️ ' + t.tipologia_pasto_2)
+  if (t.omaggio) s.push('🎁 ' + t.omaggio)
+  return s
+}
+
+// Badge gift card cliccabile con popover servizi
+function BadgeGiftCard(props) {
+  var codice = props.codice
+  var tipologia = props.tipologia
+  var [aperto, setAperto] = useState(false)
+  var servizi = serviziTipologia(tipologia)
+  return (
+    <span className="relative inline-block">
+      <button type="button" onClick={function(e) { e.stopPropagation(); setAperto(!aperto) }}
+        className="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded text-xs font-mono hover:bg-purple-100 cursor-pointer">
+        🎁 {codice}{tipologia ? ' · ' + tipologia.nome + ' ⓘ' : ''}
+      </button>
+      {aperto && tipologia && (
+        <>
+          <span className="fixed inset-0 z-40" onClick={function(e) { e.stopPropagation(); setAperto(false) }} />
+          <div className="absolute left-0 top-full mt-1 z-50 w-60 bg-white border border-gray-200 rounded-xl shadow-lg p-3 text-left" onClick={function(e) { e.stopPropagation() }}>
+            <p className="text-xs font-bold text-gray-900 mb-1">{tipologia.nome}</p>
+            <p className="text-xs text-gray-400 mb-2">€{tipologia.prezzo}{tipologia.prezzo_per_persona ? ' a persona' : ' per coppia'}</p>
+            {servizi.length > 0 ? (
+              <ul className="space-y-1">
+                {servizi.map(function(srv, i) { return <li key={i} className="text-xs text-gray-700">{srv}</li> })}
+              </ul>
+            ) : (
+              <p className="text-xs text-gray-400 italic">Nessun servizio strutturato</p>
+            )}
+          </div>
+        </>
+      )}
+    </span>
+  )
+}
+
 // ── MODALE CONFERMA ───────────────────────────────────────────
 function ModaleConferma(props) {
   return (
@@ -296,12 +345,24 @@ function DettaglioSessione(props) {
   var [prenotazioneInModifica, setPrenotazioneInModifica] = useState(null)
   var [confermaElimina, setConfermaElimina] = useState(null)
 
-  useEffect(function() { loadPrenotazioni() }, [sessione.id])
+  useEffect(function() { loadPrenotazioni(); loadTipologieGift() }, [sessione.id])
+
+  var [tipologieGift, setTipologieGift] = useState({})
+
+  function loadTipologieGift() {
+    supabase.from('gift_card_tipologie').select('*').then(function(result) {
+      if (!result.error && result.data) {
+        var mappa = {}
+        result.data.forEach(function(t) { mappa[t.id] = t })
+        setTipologieGift(mappa)
+      }
+    })
+  }
 
   function loadPrenotazioni() {
     setLoading(true)
     supabase.from('wine_tour_prenotazioni')
-      .select('*, gift_card(codice, committente_nome)')
+      .select('*, gift_card(codice, committente_nome, tipologia_id)')
       .eq('sessione_id', sessione.id)
       .order('created_at', { ascending: true })
       .then(function(result) {
@@ -362,7 +423,7 @@ function DettaglioSessione(props) {
                         <span className="font-medium text-gray-900 text-sm">{p.nome_gruppo}</span>
                         {p.lingua === 'ENG' && <span className="text-xs">🇬🇧</span>}
                         {p.gift_card && (
-                          <span className="px-1.5 py-0.5 bg-purple-50 text-purple-700 rounded text-xs font-mono">🎁 {p.gift_card.codice}</span>
+                          <BadgeGiftCard codice={p.gift_card.codice} tipologia={p.gift_card.tipologia_id ? tipologieGift[p.gift_card.tipologia_id] : null} />
                         )}
                       </div>
                       <div className="flex items-center gap-3 text-xs text-gray-500 mt-0.5">

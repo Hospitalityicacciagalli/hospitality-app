@@ -17,6 +17,56 @@ function turnoDb(turno) {
   return turno === 'lunch' ? 'pranzo' : 'cena'
 }
 
+// Costruisce lista servizi di una tipologia gift card
+function serviziTipologia(t) {
+  if (!t) return []
+  var s = []
+  if (t.pernottamento) s.push('🏨 Pernottamento ' + (t.notti ? t.notti + ' notte/i' : ''))
+  if (t.calice_benvenuto) s.push('🥂 Calice di benvenuto')
+  if (t.wine_tour) s.push('🍷 Wine Tour')
+  if (t.visita_orto) s.push('🌱 Visita all\'orto')
+  if (t.cooking_class) s.push('👨‍🍳 Cooking Class')
+  if (t.degustazione_vini_1) s.push('🍇 ' + t.degustazione_vini_1)
+  if (t.degustazione_vini_2) s.push('🍇 ' + t.degustazione_vini_2)
+  if (t.tipologia_pasto_1) s.push('🍽️ ' + t.tipologia_pasto_1)
+  if (t.tipologia_pasto_2) s.push('🍽️ ' + t.tipologia_pasto_2)
+  if (t.omaggio) s.push('🎁 ' + t.omaggio)
+  return s
+}
+
+// Badge gift card cliccabile con popover servizi
+function BadgeGiftCard(props) {
+  var codice = props.codice
+  var tipologia = props.tipologia
+  var [aperto, setAperto] = useState(false)
+  var servizi = serviziTipologia(tipologia)
+  return (
+    <span className="relative inline-block">
+      <button type="button" onClick={function(e) { e.stopPropagation(); setAperto(!aperto) }}
+        className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 hover:bg-purple-200 cursor-pointer">
+        🎁 {codice}
+        {tipologia && <span className="opacity-80">· {tipologia.nome} ⓘ</span>}
+      </button>
+      {aperto && tipologia && (
+        <>
+          <span className="fixed inset-0 z-40" onClick={function(e) { e.stopPropagation(); setAperto(false) }} />
+          <div className="absolute left-0 top-full mt-1 z-50 w-60 bg-white border border-gray-200 rounded-xl shadow-lg p-3 text-left" onClick={function(e) { e.stopPropagation() }}>
+            <p className="text-xs font-bold text-gray-900 mb-1">{tipologia.nome}</p>
+            <p className="text-xs text-gray-400 mb-2">€{tipologia.prezzo}{tipologia.prezzo_per_persona ? ' a persona' : ' per coppia'}</p>
+            {servizi.length > 0 ? (
+              <ul className="space-y-1">
+                {servizi.map(function(srv, i) { return <li key={i} className="text-xs text-gray-700">{srv}</li> })}
+              </ul>
+            ) : (
+              <p className="text-xs text-gray-400 italic">Nessun servizio strutturato</p>
+            )}
+          </div>
+        </>
+      )}
+    </span>
+  )
+}
+
 // ── FORM EVENTO ──────────────────────────────────────────────
 function FormEvento(props) {
   var onSave = props.onSave
@@ -730,14 +780,27 @@ function ReservationDay() {
   var [pannelloTavoli, setPannelloTavoli] = useState(null)
   var [tavoliAssegnati, setTavoliAssegnati] = useState({})
   var [sale, setSale] = useState([])
+  var [tipologieGift, setTipologieGift] = useState({})
 
   useEffect(function() {
     loadSettings()
     loadEventi()
     loadSale()
+    loadTipologieGift()
   }, [])
 
   useEffect(function() { loadReservations() }, [dateStr, selectedMeal])
+
+  function loadTipologieGift() {
+    supabase.from('gift_card_tipologie').select('*')
+      .then(function(result) {
+        if (!result.error && result.data) {
+          var mappa = {}
+          result.data.forEach(function(t) { mappa[t.id] = t })
+          setTipologieGift(mappa)
+        }
+      })
+  }
 
   function loadSale() {
     supabase.from('sale').select('*').eq('attiva', true).order('ordine', { ascending: true })
@@ -773,7 +836,7 @@ function ReservationDay() {
   function loadReservations() {
     setLoading(true)
     supabase.from('reservations')
-      .select('*, customers(id, first_name, last_name, phone, email, category), gift_card(id, codice)')
+      .select('*, customers(id, first_name, last_name, phone, email, category), gift_card(id, codice, tipologia_id)')
       .eq('reservation_date', dateStr).eq('meal_type', selectedMeal)
       .order('requested_time', { ascending: true, nullsFirst: false })
       .then(function(result) {
@@ -961,9 +1024,7 @@ function ReservationDay() {
                         </span>
                       )}
                       {res.gift_card && (
-                        <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800">
-                          🎁 {res.gift_card.codice}
-                        </span>
+                        <BadgeGiftCard codice={res.gift_card.codice} tipologia={res.gift_card.tipologia_id ? tipologieGift[res.gift_card.tipologia_id] : null} />
                       )}
                     </div>
                     <div className="flex items-center gap-4 mt-2 text-sm text-gray-500 flex-wrap">

@@ -40,6 +40,57 @@ function aggiungiGiorni(dateStr, giorni) {
   return d.toISOString().split('T')[0]
 }
 
+// Costruisce la lista leggibile dei servizi di una tipologia
+function serviziTipologia(t) {
+  if (!t) return []
+  var s = []
+  if (t.pernottamento) s.push('🏨 Pernottamento ' + (t.notti ? t.notti + ' notte/i' : ''))
+  if (t.calice_benvenuto) s.push('🥂 Calice di benvenuto')
+  if (t.wine_tour) s.push('🍷 Wine Tour')
+  if (t.visita_orto) s.push('🌱 Visita all\'orto')
+  if (t.cooking_class) s.push('👨‍🍳 Cooking Class')
+  if (t.degustazione_vini_1) s.push('🍇 ' + t.degustazione_vini_1)
+  if (t.degustazione_vini_2) s.push('🍇 ' + t.degustazione_vini_2)
+  if (t.tipologia_pasto_1) s.push('🍽️ ' + t.tipologia_pasto_1)
+  if (t.tipologia_pasto_2) s.push('🍽️ ' + t.tipologia_pasto_2)
+  if (t.omaggio) s.push('🎁 ' + t.omaggio)
+  return s
+}
+
+// Badge cliccabile col nome tipologia che apre popover dei servizi
+function BadgeTipologia(props) {
+  var t = props.tipologia
+  var [aperto, setAperto] = useState(false)
+  if (!t) return null
+  var servizi = serviziTipologia(t)
+  return (
+    <span className="relative inline-block">
+      <button type="button" onClick={function(e) { e.stopPropagation(); setAperto(!aperto) }}
+        className="px-2 py-0.5 rounded-full text-xs bg-wine-50 text-wine-700 font-medium hover:bg-wine-100 cursor-pointer">
+        {t.nome} ⓘ
+      </button>
+      {aperto && (
+        <>
+          <span className="fixed inset-0 z-40" onClick={function(e) { e.stopPropagation(); setAperto(false) }} />
+          <div className="absolute left-0 top-full mt-1 z-50 w-60 bg-white border border-gray-200 rounded-xl shadow-lg p-3 text-left" onClick={function(e) { e.stopPropagation() }}>
+            <p className="text-xs font-bold text-gray-900 mb-1">{t.nome}</p>
+            <p className="text-xs text-gray-400 mb-2">€{t.prezzo}{t.prezzo_per_persona ? ' a persona' : ' per coppia'}</p>
+            {servizi.length > 0 ? (
+              <ul className="space-y-1">
+                {servizi.map(function(srv, i) {
+                  return <li key={i} className="text-xs text-gray-700">{srv}</li>
+                })}
+              </ul>
+            ) : (
+              <p className="text-xs text-gray-400 italic">Nessun servizio strutturato</p>
+            )}
+          </div>
+        </>
+      )}
+    </span>
+  )
+}
+
 // ── MODALE CONFERMA ───────────────────────────────────────────
 function ModaleConferma(props) {
   return (
@@ -169,11 +220,21 @@ function ModaleGiftCard(props) {
               })}
             </select>
             {tipologiaSelezionata && (
-              <div className="mt-2 flex flex-wrap gap-2">
-                <span className="px-2 py-0.5 bg-wine-50 text-wine-700 rounded text-xs">€{tipologiaSelezionata.prezzo}{tipologiaSelezionata.prezzo_per_persona ? '/p' : ' coppia'}</span>
-                {tipologiaSelezionata.pernottamento && <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded text-xs">{tipologiaSelezionata.notti} notte/i</span>}
-                {tipologiaSelezionata.wine_tour && <span className="px-2 py-0.5 bg-purple-50 text-purple-700 rounded text-xs">Wine Tour</span>}
-                {tipologiaSelezionata.cooking_class && <span className="px-2 py-0.5 bg-orange-50 text-orange-700 rounded text-xs">Cooking Class</span>}
+              <div className="mt-2 bg-wine-50 rounded-lg p-3">
+                <div className="flex flex-wrap gap-2 mb-2">
+                  <span className="px-2 py-0.5 bg-white text-wine-700 rounded text-xs font-medium">€{tipologiaSelezionata.prezzo}{tipologiaSelezionata.prezzo_per_persona ? '/p' : ' coppia'}</span>
+                  <span className="px-2 py-0.5 bg-white text-gray-600 rounded text-xs">{tipologiaSelezionata.persone_min === tipologiaSelezionata.persone_max ? tipologiaSelezionata.persone_min + ' persone' : tipologiaSelezionata.persone_min + '-' + tipologiaSelezionata.persone_max + ' persone'}</span>
+                </div>
+                <p className="text-xs font-semibold text-wine-800 mb-1">Servizi inclusi:</p>
+                {serviziTipologia(tipologiaSelezionata).length > 0 ? (
+                  <ul className="space-y-0.5">
+                    {serviziTipologia(tipologiaSelezionata).map(function(srv, i) {
+                      return <li key={i} className="text-xs text-gray-700">{srv}</li>
+                    })}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-gray-400 italic">Nessun servizio strutturato</p>
+                )}
               </div>
             )}
           </div>
@@ -1308,7 +1369,7 @@ function TabArchivio(props) {
                         <span className="text-xs text-gray-400">+ {gc.codici_collegati.join(', ')}</span>
                       )}
                       <span className={"px-2 py-0.5 rounded-full text-xs font-medium " + stato.cls}>{stato.label}</span>
-                      {tip && <span className="px-2 py-0.5 rounded-full text-xs bg-wine-50 text-wine-700 font-medium">{tip.nome}</span>}
+                      {tip && <BadgeTipologia tipologia={tip} />}
                       {gc.lingua && gc.lingua !== 'ITA' && badgeLingua(gc.lingua)}
                     </div>
                     <div className="flex items-center gap-3 text-xs text-gray-500 mt-1 flex-wrap">
