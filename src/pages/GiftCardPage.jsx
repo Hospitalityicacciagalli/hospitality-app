@@ -564,7 +564,8 @@ function PannelloServizi(props) {
     var adulti = parseInt(formPasto.adulti) || 0
     var bambini = parseInt(formPasto.bambini) || 0
     var totale = adulti + bambini
-    var tipoLabel = formPasto.tipo === 'cooking' ? '[Pasto Cooking Class]' : '[Pasto Degustazione]'
+    var nomeTip = tipologia ? tipologia.nome : 'Gift Card'
+    var tipoLabel = formPasto.tipo === 'cooking' ? '[Pasto Cooking Class - ' + nomeTip + ']' : '[Pasto Degustazione - ' + nomeTip + ']'
     var noteFinale = tipoLabel + (formPasto.note.trim() ? ' ' + formPasto.note.trim() : '')
 
     try {
