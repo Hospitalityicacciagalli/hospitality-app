@@ -564,8 +564,7 @@ function PannelloServizi(props) {
     var adulti = parseInt(formPasto.adulti) || 0
     var bambini = parseInt(formPasto.bambini) || 0
     var totale = adulti + bambini
-    var nomeTip = tipologia ? tipologia.nome : 'Gift Card'
-    var tipoLabel = formPasto.tipo === 'cooking' ? '[Pasto Cooking Class - ' + nomeTip + ']' : '[Pasto Degustazione - ' + nomeTip + ']'
+    var tipoLabel = formPasto.tipo === 'cooking' ? '[Pasto Cooking Class]' : '[Pasto Degustazione]'
     var noteFinale = tipoLabel + (formPasto.note.trim() ? ' ' + formPasto.note.trim() : '')
 
     try {
@@ -586,7 +585,8 @@ function PannelloServizi(props) {
         setPastoInModifica(null)
       } else {
         // Trova o crea cliente automatico
-        var nomeCliente = 'Gift Card ' + gc.codice
+        var nomeTipologia = tipologia ? tipologia.nome : 'Gift Card'
+        var nomeCliente = nomeTipologia + ' ' + gc.codice
         var cercaCliente = await supabase.from('customers').select('id').eq('last_name', nomeCliente).limit(1)
         var customerId
         if (cercaCliente.data && cercaCliente.data.length > 0) {
