@@ -1,9 +1,9 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/AuthContext";
 import {
   Calendar, ChevronLeft, ChevronRight, Plus, X, Clock,
-  Users, AlertTriangle, Trash2, UserCheck, Pencil
+  Users, ChevronDown, ChevronUp
 } from "lucide-react";
 
 // Timeline visibile: dalle 6:00 alle 24:00
@@ -12,9 +12,8 @@ var TL_END = 24;
 var TL_SPAN = TL_END - TL_START;
 
 var DAY_NAMES = ["Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato", "Domenica"];
-var DAY_SHORT = ["Lun", "Mar", "Mer", "Gio", "Ven", "Sab", "Dom"];
 
-// ---- Helper date (lavoriamo con stringhe YYYY-MM-DD per evitare problemi di fuso) ----
+// ---- Helper date (stringhe YYYY-MM-DD per evitare problemi di fuso) ----
 
 function pad(n) { return n < 10 ? "0" + n : "" + n; }
 
@@ -33,10 +32,9 @@ function addDays(iso, n) {
   return toISO(d);
 }
 
-// Lunedì della settimana che contiene la data data
 function mondayOf(iso) {
   var d = parseISO(iso);
-  var day = d.getDay(); // 0=dom, 1=lun, ...
+  var day = d.getDay();
   var diff = (day === 0) ? -6 : (1 - day);
   d.setDate(d.getDate() + diff);
   return toISO(d);
@@ -47,11 +45,18 @@ function formatDayLabel(iso) {
   return d.getDate() + "/" + pad(d.getMonth() + 1);
 }
 
-// "12:00:00" o "12:00" -> ore decimali (12.0). "15:30" -> 15.5
+// "12:00:00" / "12:00" -> ore decimali. "15:30" -> 15.5
 function timeToHours(t) {
   if (!t) return null;
   var p = t.split(":");
   return parseInt(p[0], 10) + (parseInt(p[1], 10) || 0) / 60;
+}
+
+// Orario di FINE: 00:00 viene interpretato come 24 (fine giornata).
+function endHours(t) {
+  var h = timeToHours(t);
+  if (h === 0) return 24;
+  return h;
 }
 
 function timeShort(t) {
@@ -59,7 +64,12 @@ function timeShort(t) {
   return t.substring(0, 5);
 }
 
-// Posizione % sulla timeline per una ora decimale
+// Etichetta orario di fine per la barra: 00:00 -> "24:00"
+function endLabel(t) {
+  if (timeToHours(t) === 0) return "24:00";
+  return timeShort(t);
+}
+
 function pct(h) {
   var clamped = Math.max(TL_START, Math.min(TL_END, h));
   return ((clamped - TL_START) / TL_SPAN) * 100;
@@ -77,6 +87,13 @@ export default function ShiftsPage() {
   var [shifts, setShifts] = useState([]);
   var [leaves, setLeaves] = useState([]);
   var [loading, setLoading] = useState(true);
+
+  // Specchietto: aperto/chiuso + giorno in primo piano
+  var [panelOpen, setPanelOpen] = useState(true);
+  var [focusDay, setFocusDay] = useState(mondayOf(toISO(new Date())));
+
+  // Riferimenti alle card-giorno per rilevare quale è in primo piano
+  var dayRefs = useRef({});
 
   // Modale assegnazione
   var [showAssign, setShowAssign] = useState(false);
@@ -107,6 +124,8 @@ export default function ShiftsPage() {
       loadShifts(selectedDept, weekStart);
       loadLeaves(weekStart);
     }
+    // quando cambia settimana, il focus torna al lunedì
+    setFocusDay(weekStart);
   }, [selectedDept, weekStart]);
 
   function loadDepartments() {
@@ -159,8 +178,7 @@ export default function ShiftsPage() {
 
   function loadShifts(deptId, ws) {
     var weekEnd = addDays(ws, 6);
-    // Carichiamo anche il giorno prima del lunedì (per la colonna "ieri")
-    var rangeStart = addDays(ws, -1);
+    var rangeStart = addDays(ws, -1); // include il giorno prima del lunedì per "ieri"
     supabase
       .from("staff_shifts")
       .select("*")
@@ -179,40 +197,67 @@ export default function ShiftsPage() {
       .select("*")
       .eq("status", "approvata")
       .lte("start_date", weekEnd)
-      .gte("end_date", ws)
+      .gte("end_date", addDays(ws, -1))
       .then(function(result) {
         if (!result.error) setLeaves(result.data || []);
       });
   }
+
+  // ---- Rilevamento del giorno in primo piano durante lo scroll ----
+
+  useEffect(function() {
+    function onScroll() {
+      var bestDay = null;
+      var bestDist = Infinity;
+      // punto di riferimento: poco sotto la barra sticky
+      var anchorY = 200;
+      Object.keys(dayRefs.current).forEach(function(iso) {
+        var el = dayRefs.current[iso];
+        if (!el) return;
+        var rect = el.getBoundingClientRect();
+        // distanza del bordo superiore della card dalla ancora
+        var dist = Math.abs(rect.top - anchorY);
+        // la card è considerata solo se è almeno in parte visibile
+        if (rect.bottom > 120 && dist < bestDist) {
+          bestDist = dist;
+          bestDay = iso;
+        }
+      });
+      if (bestDay) {
+        setFocusDay(function(prev) { return prev === bestDay ? prev : bestDay; });
+      }
+    }
+    window.addEventListener("scroll", onScroll, true);
+    onScroll();
+    return function() { window.removeEventListener("scroll", onScroll, true); };
+  }, [weekStart, selectedDept, shifts]);
 
   // ---- Dati derivati ----
 
   var weekDays = [];
   for (var i = 0; i < 7; i++) weekDays.push(addDays(weekStart, i));
 
-  function staffName(id) {
-    var s = staff.find(function(x) { return x.id === id; });
-    return s ? (s.first_name + " " + s.last_name) : "—";
-  }
-
   function templateName(id) {
     var t = templates.find(function(x) { return x.id === id; });
     return t ? t.name : null;
   }
 
-  // turni di un certo giorno
+  function staffName(id) {
+    var s = staff.find(function(x) { return x.id === id; });
+    return s ? (s.first_name + " " + s.last_name) : "—";
+  }
+
   function shiftsOfDay(iso) {
     return shifts.filter(function(s) { return s.shift_date === iso; });
   }
 
-  // un dipendente è in ferie in questa data?
   function isOnLeave(staffId, iso) {
     return leaves.some(function(l) {
       return l.staff_id === staffId && l.start_date <= iso && l.end_date >= iso;
     });
   }
 
-  // turno "di ieri" di un dipendente (giorno di calendario precedente)
+  // turno del giorno di calendario precedente rispetto a "iso"
   function yesterdayShift(staffId, iso) {
     var y = addDays(iso, -1);
     var found = shifts.find(function(s) { return s.staff_id === staffId && s.shift_date === y; });
@@ -221,17 +266,15 @@ export default function ShiftsPage() {
       return null;
     }
     var tn = templateName(found.template_id);
-    return tn ? tn : (timeShort(found.start_time) + "–" + timeShort(found.end_time));
+    return tn ? tn : (timeShort(found.start_time) + "–" + endLabel(found.end_time));
   }
 
-  // quanti turni ha un dipendente nella settimana visualizzata
   function weekShiftCount(staffId) {
     return shifts.filter(function(s) {
       return s.staff_id === staffId && s.shift_date >= weekStart && s.shift_date <= addDays(weekStart, 6);
     }).length;
   }
 
-  // ha almeno un giorno senza turni nella settimana? (riposo dedotto)
   function hasRestDay(staffId) {
     var worked = {};
     shifts.forEach(function(s) {
@@ -244,10 +287,8 @@ export default function ShiftsPage() {
     return count < 7;
   }
 
-  // copertura: per ogni mezza ora quante persone sono in turno
   function coverageBars(iso) {
     var dayShifts = shiftsOfDay(iso);
-    var bars = [];
     var step = 0.5;
     var maxc = 1;
     var marks = [];
@@ -255,22 +296,20 @@ export default function ShiftsPage() {
       var c = 0;
       dayShifts.forEach(function(s) {
         var a = timeToHours(s.start_time);
-        var b = timeToHours(s.end_time);
+        var b = endHours(s.end_time);
         if (a != null && b != null && h >= a && h < b) c++;
       });
       if (c > maxc) maxc = c;
       marks.push({ h: h, c: c });
     }
-    marks.forEach(function(m) {
-      bars.push({
+    return marks.map(function(m) {
+      return {
         left: pct(m.h),
         width: (100 / (TL_SPAN * 2)) - 0.2,
         height: (m.c / maxc) * 100,
-        count: m.c,
         gap: m.c === 0
-      });
+      };
     });
-    return { bars: bars, max: maxc };
   }
 
   // ---- Azioni ----
@@ -299,7 +338,6 @@ export default function ShiftsPage() {
     if (!assignStaffId) { alert("Seleziona un dipendente."); return; }
     if (!assignStart || !assignEnd) { alert("Imposta orario di inizio e fine."); return; }
 
-    // Avviso ferie (non blocca)
     if (isOnLeave(assignStaffId, assignDate)) {
       var proceed = confirm(staffName(assignStaffId) + " risulta in ferie in questo giorno. Vuoi assegnare comunque il turno?");
       if (!proceed) return;
@@ -340,7 +378,6 @@ export default function ShiftsPage() {
       });
   }
 
-  // dipendenti fissi (non extra) del reparto, per lo specchietto
   var fixedStaff = staff.filter(function(s) { return !s.is_extra; });
   var extraStaff = staff.filter(function(s) { return s.is_extra; });
 
@@ -355,6 +392,8 @@ export default function ShiftsPage() {
   }
 
   var currentDept = departments.find(function(d) { return d.id === selectedDept; });
+  var focusIdx = weekDays.indexOf(focusDay);
+  var focusName = focusIdx >= 0 ? DAY_NAMES[focusIdx] : "";
 
   return (
     <div className="max-w-5xl mx-auto pb-10">
@@ -372,7 +411,6 @@ export default function ShiftsPage() {
 
       {/* Barra controlli */}
       <div className="bg-white rounded-xl border border-gray-200 p-4 mb-4 flex flex-wrap items-center gap-3">
-        {/* Navigazione settimana */}
         <div className="flex items-center gap-2">
           <button
             onClick={function() { setWeekStart(addDays(weekStart, -7)); }}
@@ -401,7 +439,6 @@ export default function ShiftsPage() {
 
         <div className="flex-1" />
 
-        {/* Selettore reparto */}
         <div className="flex items-center gap-2">
           <span className="text-sm text-gray-500">Reparto</span>
           <select
@@ -422,47 +459,60 @@ export default function ShiftsPage() {
         </div>
       )}
 
-      {/* Specchietto dipendenti fissi del reparto */}
+      {/* SPECCHIETTO STICKY E COLLASSABILE */}
       {currentDept && fixedStaff.length > 0 && (
-        <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-4">
-          <div className="px-4 py-3 border-b border-gray-100 flex items-center gap-2">
-            <Users size={16} className="text-wine-600" />
-            <span className="text-sm font-medium text-gray-800">Dipendenti fissi — {currentDept.name}</span>
-            <span className="text-xs text-gray-400">(carico settimanale)</span>
-          </div>
-          <div className="px-4 py-2 hidden sm:grid grid-cols-12 gap-2 text-xs text-gray-400 border-b border-gray-100">
-            <span className="col-span-4">Dipendente</span>
-            <span className="col-span-4">Ieri</span>
-            <span className="col-span-2 text-center">Turni sett.</span>
-            <span className="col-span-2 text-center">Riposo</span>
-          </div>
-          <div>
-            {fixedStaff.map(function(s) {
-              var y = yesterdayShift(s.id, weekStart);
-              var cnt = weekShiftCount(s.id);
-              var rest = hasRestDay(s.id);
-              var cntColor = cnt >= 6 ? "bg-amber-100 text-amber-700" : "bg-teal-50 text-teal-700";
-              return (
-                <div key={s.id} className="px-4 py-2.5 grid grid-cols-12 gap-2 items-center text-sm border-b border-gray-50 last:border-0">
-                  <span className="col-span-6 sm:col-span-4 font-medium text-gray-800 truncate">
-                    {s.last_name} {s.first_name}
-                  </span>
-                  <span className="col-span-6 sm:col-span-4 text-gray-500 text-xs truncate">
-                    {y === "ferie"
-                      ? <span className="text-gray-400">ferie</span>
-                      : (y ? y : <span className="text-gray-300">— riposo</span>)}
-                  </span>
-                  <span className="col-span-6 sm:col-span-2 text-center">
-                    <span className={"inline-block px-2 py-0.5 rounded-full text-xs font-medium " + cntColor}>{cnt}</span>
-                  </span>
-                  <span className="col-span-6 sm:col-span-2 text-center text-xs">
-                    {rest
-                      ? <span className="text-teal-600">sì</span>
-                      : <span className="text-red-500">no</span>}
-                  </span>
+        <div className="sticky top-2 z-20 mb-4">
+          <div className="bg-white rounded-xl border border-wine-200 shadow-sm overflow-hidden">
+            {/* Intestazione cliccabile */}
+            <button
+              onClick={function() { setPanelOpen(!panelOpen); }}
+              className="w-full px-4 py-2.5 flex items-center gap-2 hover:bg-gray-50 transition-colors"
+            >
+              <Users size={16} className="text-wine-600" />
+              <span className="text-sm font-medium text-gray-800">Dipendenti fissi — {currentDept.name}</span>
+              <span className="text-xs text-wine-600 font-medium">· riferito a {focusName} {focusIdx >= 0 ? formatDayLabel(focusDay) : ""}</span>
+              <div className="flex-1" />
+              {panelOpen ? <ChevronUp size={16} className="text-gray-400" /> : <ChevronDown size={16} className="text-gray-400" />}
+            </button>
+
+            {panelOpen && (
+              <div className="border-t border-gray-100">
+                <div className="px-4 py-2 hidden sm:grid grid-cols-12 gap-2 text-xs text-gray-400 border-b border-gray-100">
+                  <span className="col-span-4">Dipendente</span>
+                  <span className="col-span-4">Ieri ({focusIdx >= 0 ? formatDayLabel(addDays(focusDay, -1)) : ""})</span>
+                  <span className="col-span-2 text-center">Turni sett.</span>
+                  <span className="col-span-2 text-center">Riposo</span>
                 </div>
-              );
-            })}
+                <div className="max-h-52 overflow-y-auto">
+                  {fixedStaff.map(function(s) {
+                    var y = yesterdayShift(s.id, focusDay);
+                    var cnt = weekShiftCount(s.id);
+                    var rest = hasRestDay(s.id);
+                    var cntColor = cnt >= 6 ? "bg-amber-100 text-amber-700" : "bg-teal-50 text-teal-700";
+                    return (
+                      <div key={s.id} className="px-4 py-2 grid grid-cols-12 gap-2 items-center text-sm border-b border-gray-50 last:border-0">
+                        <span className="col-span-6 sm:col-span-4 font-medium text-gray-800 truncate">
+                          {s.last_name} {s.first_name}
+                        </span>
+                        <span className="col-span-6 sm:col-span-4 text-gray-500 text-xs truncate">
+                          {y === "ferie"
+                            ? <span className="text-gray-400">ferie</span>
+                            : (y ? y : <span className="text-gray-300">— riposo</span>)}
+                        </span>
+                        <span className="col-span-6 sm:col-span-2 text-center">
+                          <span className={"inline-block px-2 py-0.5 rounded-full text-xs font-medium " + cntColor}>{cnt}</span>
+                        </span>
+                        <span className="col-span-6 sm:col-span-2 text-center text-xs">
+                          {rest
+                            ? <span className="text-teal-600">sì</span>
+                            : <span className="text-red-500">no</span>}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -474,10 +524,14 @@ export default function ShiftsPage() {
             var dayShifts = shiftsOfDay(iso);
             var cov = coverageBars(iso);
             var isToday = iso === toISO(new Date());
+            var isFocus = iso === focusDay;
 
             return (
-              <div key={iso} className={"bg-white rounded-xl border p-4 " + (isToday ? "border-wine-300" : "border-gray-200")}>
-                {/* Intestazione giorno */}
+              <div
+                key={iso}
+                ref={function(el) { dayRefs.current[iso] = el; }}
+                className={"bg-white rounded-xl border p-4 transition-colors " + (isFocus ? "border-wine-400" : (isToday ? "border-wine-300" : "border-gray-200"))}
+              >
                 <div className="flex items-center gap-2 mb-3">
                   <span className="text-sm font-semibold text-gray-800">{DAY_NAMES[idx]} {formatDayLabel(iso)}</span>
                   {isToday && <span className="text-xs bg-wine-100 text-wine-700 px-2 py-0.5 rounded-full">oggi</span>}
@@ -493,7 +547,7 @@ export default function ShiftsPage() {
                   )}
                 </div>
 
-                {/* Righe di scala oraria */}
+                {/* Scala oraria */}
                 <div className="relative h-4 mb-1" style={{ marginLeft: "120px" }}>
                   {[6, 9, 12, 15, 18, 21, 24].map(function(h) {
                     return (
@@ -512,7 +566,7 @@ export default function ShiftsPage() {
                       var isExtra = s && s.is_extra;
                       var onLeave = isOnLeave(sh.staff_id, iso);
                       var a = timeToHours(sh.start_time);
-                      var b = timeToHours(sh.end_time);
+                      var b = endHours(sh.end_time);
                       var left = pct(a);
                       var width = pct(b) - pct(a);
                       var barColor = isExtra ? "#f59e0b" : (currentDept.color || "#7c3aed");
@@ -531,11 +585,11 @@ export default function ShiftsPage() {
                               </div>
                             ) : (
                               <div
-                                className="absolute h-6 rounded flex items-center px-2 gap-1 group"
+                                className="absolute h-6 rounded flex items-center px-2 gap-1"
                                 style={{ left: left + "%", width: width + "%", backgroundColor: barColor }}
                               >
                                 <span className="text-xs text-white font-medium truncate">
-                                  {timeShort(sh.start_time)}–{timeShort(sh.end_time)}
+                                  {timeShort(sh.start_time)}–{endLabel(sh.end_time)}
                                 </span>
                                 {canManage && (
                                   <button
@@ -559,7 +613,7 @@ export default function ShiftsPage() {
                 <div className="flex items-end gap-2 mt-3">
                   <span className="text-xs text-gray-300 text-right" style={{ width: "112px", flexShrink: 0 }}>copertura</span>
                   <div className="relative flex-1 h-10 border-b border-gray-200">
-                    {cov.bars.map(function(bar, bi) {
+                    {cov.map(function(bar, bi) {
                       return (
                         <div
                           key={bi}
@@ -610,7 +664,6 @@ export default function ShiftsPage() {
             </div>
             <div className="p-5 space-y-4">
 
-              {/* Scelta fisso / extra */}
               <div className="flex gap-2">
                 <button
                   onClick={function() { setAssignExtra(false); setAssignStaffId(""); }}
@@ -626,7 +679,6 @@ export default function ShiftsPage() {
                 </button>
               </div>
 
-              {/* Dipendente */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Dipendente</label>
                 <select
@@ -646,7 +698,6 @@ export default function ShiftsPage() {
                 )}
               </div>
 
-              {/* Turno tipo */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Turno tipo (scorciatoia)</label>
                 <select
@@ -656,7 +707,7 @@ export default function ShiftsPage() {
                 >
                   <option value="">— Orario manuale —</option>
                   {templates.map(function(t) {
-                    return <option key={t.id} value={t.id}>{t.name} ({timeShort(t.start_time)}–{timeShort(t.end_time)})</option>;
+                    return <option key={t.id} value={t.id}>{t.name} ({timeShort(t.start_time)}–{endLabel(t.end_time)})</option>;
                   })}
                 </select>
                 {templates.length === 0 && (
@@ -664,7 +715,6 @@ export default function ShiftsPage() {
                 )}
               </div>
 
-              {/* Orari */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1"><Clock size={12} /> Inizio</label>
@@ -683,10 +733,10 @@ export default function ShiftsPage() {
                     onChange={function(e) { setAssignEnd(e.target.value); }}
                     className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-300"
                   />
+                  <p className="text-xs text-gray-400 mt-1">Fine 00:00 = fine giornata (24:00)</p>
                 </div>
               </div>
 
-              {/* Note */}
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Note (opzionale)</label>
                 <input
