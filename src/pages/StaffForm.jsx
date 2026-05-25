@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/AuthContext";
-import { ArrowLeft, Save, UserPlus, Calendar, Briefcase, Phone, MapPin, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Save, UserPlus, Calendar, Briefcase, Phone, MapPin, Plus, Trash2, UserCheck } from "lucide-react";
 
 var DAY_NAMES = ["Domenica", "Lunedi", "Martedi", "Mercoledi", "Giovedi", "Venerdi", "Sabato"];
 
@@ -16,14 +16,15 @@ var EMPTY_FORM = {
   city:              "",
   birth_date:        "",
   birth_place:       "",
-  department_value:  "",
+  department_id:     "",
   job_title_value:   "",
   contract_type:     "",
   hire_date:         "",
   contract_end_date: "",
   weekly_hours:      40,
   notes:             "",
-  is_active:         true
+  is_active:         true,
+  is_extra:          false
 };
 
 export default function StaffForm() {
@@ -49,6 +50,7 @@ export default function StaffForm() {
 
   useEffect(function() {
     loadConfigOptions();
+    loadDepartments();
     if (isEdit) loadStaffMember();
   }, []);
 
@@ -63,13 +65,21 @@ export default function StaffForm() {
         var data = result.data || [];
         var meals     = data.filter(function(o) { return o.category === "meal_type"; });
         var contracts = data.filter(function(o) { return o.category === "contract_type"; });
-        var depts     = data.filter(function(o) { return o.category === "staff_department"; });
         var jobs      = data.filter(function(o) { return o.category === "job_title"; });
         setMealTypes(meals);
         setContractTypes(contracts);
-        setDepartments(depts);
         setJobTitles(jobs);
         if (meals.length > 0) setNewMeal(meals[0].value);
+      });
+  }
+
+  function loadDepartments() {
+    supabase
+      .from("staff_departments")
+      .select("*")
+      .order("sort_order")
+      .then(function(result) {
+        if (!result.error) setDepartments(result.data || []);
       });
   }
 
@@ -97,14 +107,15 @@ export default function StaffForm() {
           city:              d.city || "",
           birth_date:        d.birth_date || "",
           birth_place:       d.birth_place || "",
-          department_value:  d.department_value || "",
+          department_id:     d.department_id ? d.department_id.toString() : "",
           job_title_value:   d.job_title_value || "",
           contract_type:     d.contract_type || "",
           hire_date:         d.hire_date || "",
           contract_end_date: d.contract_end_date || "",
           weekly_hours:      d.weekly_hours || 40,
           notes:             d.notes || "",
-          is_active:         d.is_active !== false
+          is_active:         d.is_active !== false,
+          is_extra:          d.is_extra === true
         });
         loadAvailability(d.id);
         setLoading(false);
@@ -197,14 +208,15 @@ export default function StaffForm() {
       city:              form.city.trim() || null,
       birth_date:        form.birth_date || null,
       birth_place:       form.birth_place.trim() || null,
-      department_value:  form.department_value || null,
+      department_id:     form.department_id ? parseInt(form.department_id, 10) : null,
       job_title_value:   form.job_title_value || null,
       contract_type:     form.contract_type || null,
       hire_date:         form.hire_date || null,
       contract_end_date: form.contract_end_date || null,
       weekly_hours:      form.weekly_hours ? parseInt(form.weekly_hours, 10) : 40,
       notes:             form.notes.trim() || null,
-      is_active:         form.is_active
+      is_active:         form.is_active,
+      is_extra:          form.is_extra
     };
 
     var query = isEdit
@@ -351,12 +363,12 @@ export default function StaffForm() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Reparto</label>
-              <select value={form.department_value}
-                onChange={function(e) { handleChange("department_value", e.target.value); }}
+              <select value={form.department_id}
+                onChange={function(e) { handleChange("department_id", e.target.value); }}
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-300">
                 <option value="">— Seleziona reparto —</option>
                 {departments.map(function(d) {
-                  return <option key={d.id} value={d.value}>{d.label}</option>;
+                  return <option key={d.id} value={d.id.toString()}>{d.name}</option>;
                 })}
               </select>
             </div>
@@ -371,6 +383,22 @@ export default function StaffForm() {
                 })}
               </select>
             </div>
+          </div>
+
+          {/* Flag personale extra */}
+          <div className="mt-4 flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+            <input type="checkbox" id="is_extra" checked={form.is_extra}
+              onChange={function(e) { handleChange("is_extra", e.target.checked); }}
+              className="w-4 h-4 accent-amber-600 mt-0.5" />
+            <label htmlFor="is_extra" className="text-sm">
+              <span className="font-medium text-amber-800 flex items-center gap-1">
+                <UserCheck size={14} />
+                Personale extra / avventizio
+              </span>
+              <span className="text-amber-700 text-xs">
+                Attivalo per chi viene chiamato occasionalmente. Resta comunque in archivio per tenerne lo storico.
+              </span>
+            </label>
           </div>
         </div>
 

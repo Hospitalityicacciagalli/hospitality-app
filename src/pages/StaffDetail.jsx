@@ -5,7 +5,7 @@ import { useAuth } from "../lib/AuthContext";
 import {
   ArrowLeft, Edit, Phone, Mail, MapPin, Calendar,
   Briefcase, Clock, CheckCircle, XCircle, AlertTriangle,
-  Plus, ChevronDown, ChevronUp, User
+  Plus, ChevronDown, ChevronUp, User, UserCheck
 } from "lucide-react";
 
 var DAY_NAMES = ["Dom", "Lun", "Mar", "Mer", "Gio", "Ven", "Sab"];
@@ -231,13 +231,19 @@ export default function StaffDetail() {
               {member.first_name} {member.last_name}
             </h1>
             <div className="flex items-center gap-2 flex-wrap">
-              {member.job_title && <span className="text-sm text-gray-500">{member.job_title}</span>}
+              {member.job_title_value && <span className="text-sm text-gray-500">{member.job_title_value}</span>}
               {member.staff_departments && (
                 <span
                   className="text-xs px-2 py-0.5 rounded-full text-white"
                   style={{ backgroundColor: member.staff_departments.color }}
                 >
                   {member.staff_departments.name}
+                </span>
+              )}
+              {member.is_extra && (
+                <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+                  <UserCheck size={11} />
+                  Extra
                 </span>
               )}
               {!member.is_active && (
@@ -327,7 +333,17 @@ export default function StaffDetail() {
           </div>
           <dl className="space-y-2 text-sm">
             <div className="flex justify-between">
-              <dt className="text-gray-500">Tipo</dt>
+              <dt className="text-gray-500">Tipo personale</dt>
+              <dd className="font-medium text-gray-800">
+                {member.is_extra ? (
+                  <span className="inline-flex items-center gap-1 text-amber-700">
+                    <UserCheck size={13} /> Extra / avventizio
+                  </span>
+                ) : "Strutturato"}
+              </dd>
+            </div>
+            <div className="flex justify-between">
+              <dt className="text-gray-500">Tipo contratto</dt>
               <dd className="font-medium text-gray-800">{CONTRACT_LABELS[member.contract_type] || member.contract_type || "—"}</dd>
             </div>
             <div className="flex justify-between">

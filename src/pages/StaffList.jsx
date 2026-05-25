@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/AuthContext";
-import { Users, Plus, Search, ChevronRight, AlertTriangle, Phone, Mail } from "lucide-react";
+import { Users, Plus, Search, ChevronRight, AlertTriangle, Phone, Mail, UserCheck } from "lucide-react";
 
 var CONTRACT_LABELS = {
   indeterminato: "Indeterminato",
@@ -37,6 +37,7 @@ export default function StaffList() {
   var [search, setSearch] = useState("");
   var [filterDept, setFilterDept] = useState("all");
   var [filterActive, setFilterActive] = useState("active");
+  var [filterType, setFilterType] = useState("all");
 
   var canManage = hasRole(["super_admin", "direttore"]);
 
@@ -49,7 +50,7 @@ export default function StaffList() {
     supabase
       .from("staff_departments")
       .select("*")
-      .order("name")
+      .order("sort_order")
       .then(function(result) {
         if (!result.error) setDepartments(result.data || []);
       });
@@ -75,7 +76,7 @@ export default function StaffList() {
     var matchSearch =
       search === "" ||
       (s.first_name + " " + s.last_name).toLowerCase().indexOf(search.toLowerCase()) !== -1 ||
-      (s.job_title && s.job_title.toLowerCase().indexOf(search.toLowerCase()) !== -1);
+      (s.job_title_value && s.job_title_value.toLowerCase().indexOf(search.toLowerCase()) !== -1);
 
     var matchDept =
       filterDept === "all" ||
@@ -86,7 +87,12 @@ export default function StaffList() {
       (filterActive === "active" && s.is_active) ||
       (filterActive === "inactive" && !s.is_active);
 
-    return matchSearch && matchDept && matchActive;
+    var matchType =
+      filterType === "all" ||
+      (filterType === "strutturati" && !s.is_extra) ||
+      (filterType === "extra" && s.is_extra);
+
+    return matchSearch && matchDept && matchActive && matchType;
   });
 
   var expiringCount = staff.filter(function(s) {
@@ -163,6 +169,17 @@ export default function StaffList() {
           })}
         </select>
 
+        {/* Filtro tipo (strutturati / extra) */}
+        <select
+          value={filterType}
+          onChange={function(e) { setFilterType(e.target.value); }}
+          className="px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-300"
+        >
+          <option value="all">Tutti i tipi</option>
+          <option value="strutturati">Solo strutturati</option>
+          <option value="extra">Solo extra</option>
+        </select>
+
         {/* Filtro stato */}
         <select
           value={filterActive}
@@ -218,6 +235,12 @@ export default function StaffList() {
                       <span className="font-semibold text-gray-900">
                         {member.last_name} {member.first_name}
                       </span>
+                      {member.is_extra && (
+                        <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full flex items-center gap-1">
+                          <UserCheck size={10} />
+                          Extra
+                        </span>
+                      )}
                       {!member.is_active && (
                         <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Non attivo</span>
                       )}
@@ -234,8 +257,8 @@ export default function StaffList() {
                       )}
                     </div>
                     <div className="flex items-center gap-3 mt-0.5 flex-wrap">
-                      {member.job_title && (
-                        <span className="text-sm text-gray-500">{member.job_title}</span>
+                      {member.job_title_value && (
+                        <span className="text-sm text-gray-500">{member.job_title_value}</span>
                       )}
                       {member.staff_departments && (
                         <span
