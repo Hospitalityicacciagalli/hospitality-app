@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/AuthContext";
-import { Settings, Plus, Pencil, Check, X, Circle, GripVertical, Building2, Clock, Users } from "lucide-react";
+import { Settings, Plus, Pencil, Check, X, Building2, Clock, Trash2 } from "lucide-react";
 
 var CATEGORIES = [
   {
@@ -141,7 +141,6 @@ function CategorySection(props) {
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      {/* Intestazione sezione */}
       <div className="px-5 py-4 border-b border-gray-100">
         <div className="flex items-center justify-between">
           <div>
@@ -159,7 +158,6 @@ function CategorySection(props) {
           )}
         </div>
 
-        {/* Form aggiunta */}
         {adding && (
           <div className="mt-3 bg-gray-50 rounded-lg p-3">
             <input
@@ -190,7 +188,6 @@ function CategorySection(props) {
         )}
       </div>
 
-      {/* Elenco voci attive */}
       <div className="px-5 py-3 space-y-1">
         {activeItems.length === 0 && (
           <p className="text-sm text-gray-400 py-2">Nessuna voce configurata</p>
@@ -260,7 +257,6 @@ function CategorySection(props) {
         })}
       </div>
 
-      {/* Voci disattivate (collassate) */}
       {inactiveItems.length > 0 && (
         <div className="border-t border-gray-100 px-5 py-3">
           <p className="text-xs text-gray-400 mb-2">Disattivate ({inactiveItems.length})</p>
@@ -288,10 +284,255 @@ function CategorySection(props) {
   );
 }
 
-// ============================================================
-// SEZIONE REPARTI DEL PERSONALE — lavora su staff_departments
-// (fasce orarie default + minimo personale + visibilità nei turni)
-// ============================================================
+function ShiftTemplates(props) {
+  var departmentId = props.departmentId;
+
+  var [templates, setTemplates] = useState([]);
+  var [loading, setLoading] = useState(true);
+
+  var [adding, setAdding] = useState(false);
+  var [newName, setNewName] = useState("");
+  var [newStart, setNewStart] = useState("");
+  var [newEnd, setNewEnd] = useState("");
+  var [saving, setSaving] = useState(false);
+
+  var [editingId, setEditingId] = useState(null);
+  var [editName, setEditName] = useState("");
+  var [editStart, setEditStart] = useState("");
+  var [editEnd, setEditEnd] = useState("");
+
+  useEffect(function() {
+    loadTemplates();
+  }, []);
+
+  function timeForInput(t) {
+    if (!t) return "";
+    return t.substring(0, 5);
+  }
+
+  function loadTemplates() {
+    setLoading(true);
+    supabase
+      .from("shift_templates")
+      .select("*")
+      .eq("department_id", departmentId)
+      .order("sort_order")
+      .then(function(result) {
+        if (!result.error) setTemplates(result.data || []);
+        setLoading(false);
+      });
+  }
+
+  function addTemplate() {
+    if (!newName.trim() || !newStart || !newEnd) {
+      alert("Inserisci nome, orario inizio e orario fine.");
+      return;
+    }
+    setSaving(true);
+    var maxOrder = templates.reduce(function(max, t) { return Math.max(max, t.sort_order || 0); }, 0);
+    supabase
+      .from("shift_templates")
+      .insert({
+        department_id: departmentId,
+        name:          newName.trim(),
+        start_time:    newStart,
+        end_time:      newEnd,
+        sort_order:    maxOrder + 1,
+        is_active:     true
+      })
+      .then(function(result) {
+        setSaving(false);
+        if (result.error) {
+          alert("Errore: " + result.error.message);
+          return;
+        }
+        setNewName("");
+        setNewStart("");
+        setNewEnd("");
+        setAdding(false);
+        loadTemplates();
+      });
+  }
+
+  function startEdit(t) {
+    setEditingId(t.id);
+    setEditName(t.name || "");
+    setEditStart(timeForInput(t.start_time));
+    setEditEnd(timeForInput(t.end_time));
+  }
+
+  function saveEdit(t) {
+    if (!editName.trim() || !editStart || !editEnd) {
+      alert("Inserisci nome, orario inizio e orario fine.");
+      return;
+    }
+    supabase
+      .from("shift_templates")
+      .update({ name: editName.trim(), start_time: editStart, end_time: editEnd })
+      .eq("id", t.id)
+      .then(function(result) {
+        if (result.error) {
+          alert("Errore: " + result.error.message);
+          return;
+        }
+        setEditingId(null);
+        loadTemplates();
+      });
+  }
+
+  function deleteTemplate(t) {
+    if (!confirm("Eliminare il turno tipo \"" + t.name + "\"?")) return;
+    supabase
+      .from("shift_templates")
+      .delete()
+      .eq("id", t.id)
+      .then(function(result) {
+        if (result.error) {
+          alert("Errore: " + result.error.message);
+          return;
+        }
+        loadTemplates();
+      });
+  }
+
+  return (
+    <div className="mt-4 border-t border-gray-100 pt-3">
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-medium text-gray-600 flex items-center gap-1">
+          <Clock size={12} /> Turni tipo
+        </span>
+        {!adding && (
+          <button
+            onClick={function() { setAdding(true); }}
+            className="text-xs text-wine-600 hover:text-wine-800 flex items-center gap-1"
+          >
+            <Plus size={12} /> Aggiungi turno tipo
+          </button>
+        )}
+      </div>
+
+      {loading && <p className="text-xs text-gray-400">Caricamento...</p>}
+
+      {!loading && templates.length === 0 && !adding && (
+        <p className="text-xs text-gray-400">Nessun turno tipo. Aggiungine uno per usarlo come scorciatoia nella pianificazione.</p>
+      )}
+
+      <div className="space-y-1">
+        {templates.map(function(t) {
+          var isEditing = editingId === t.id;
+          if (isEditing) {
+            return (
+              <div key={t.id} className="bg-white border border-gray-200 rounded-lg p-2">
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={function(e) { setEditName(e.target.value); }}
+                  placeholder="Nome (es. Mattina)"
+                  className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-wine-300"
+                />
+                <div className="flex items-center gap-2">
+                  <input
+                    type="time"
+                    value={editStart}
+                    onChange={function(e) { setEditStart(e.target.value); }}
+                    className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-300"
+                  />
+                  <span className="text-gray-400 text-sm">&rarr;</span>
+                  <input
+                    type="time"
+                    value={editEnd}
+                    onChange={function(e) { setEditEnd(e.target.value); }}
+                    className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-300"
+                  />
+                  <button
+                    onClick={function() { saveEdit(t); }}
+                    className="p-1.5 hover:bg-green-100 rounded text-gray-400 hover:text-green-600 transition-colors"
+                    title="Salva"
+                  >
+                    <Check size={14} />
+                  </button>
+                  <button
+                    onClick={function() { setEditingId(null); }}
+                    className="p-1.5 hover:bg-gray-100 rounded text-gray-400 hover:text-gray-600 transition-colors"
+                    title="Annulla"
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              </div>
+            );
+          }
+          return (
+            <div key={t.id} className="flex items-center gap-2 bg-gray-50 rounded-lg px-3 py-1.5">
+              <span className="text-sm font-medium text-gray-700">{t.name}</span>
+              <span className="text-xs text-gray-500">
+                {timeForInput(t.start_time)}&ndash;{timeForInput(t.end_time)}
+              </span>
+              <div className="flex-1" />
+              <button
+                onClick={function() { startEdit(t); }}
+                className="p-1 hover:bg-wine-100 rounded text-gray-400 hover:text-wine-600 transition-colors"
+                title="Modifica"
+              >
+                <Pencil size={13} />
+              </button>
+              <button
+                onClick={function() { deleteTemplate(t); }}
+                className="p-1 hover:bg-red-100 rounded text-gray-400 hover:text-red-600 transition-colors"
+                title="Elimina"
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      {adding && (
+        <div className="mt-2 bg-white border border-gray-200 rounded-lg p-2">
+          <input
+            type="text"
+            value={newName}
+            onChange={function(e) { setNewName(e.target.value); }}
+            placeholder="Nome (es. Mattina, Pomeriggio, Cross)"
+            autoFocus
+            className="w-full border border-gray-200 rounded-lg px-2 py-1.5 text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-wine-300"
+          />
+          <div className="flex items-center gap-2">
+            <input
+              type="time"
+              value={newStart}
+              onChange={function(e) { setNewStart(e.target.value); }}
+              className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-300"
+            />
+            <span className="text-gray-400 text-sm">&rarr;</span>
+            <input
+              type="time"
+              value={newEnd}
+              onChange={function(e) { setNewEnd(e.target.value); }}
+              className="flex-1 border border-gray-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-wine-300"
+            />
+          </div>
+          <div className="flex gap-2 mt-2">
+            <button
+              onClick={function() { setAdding(false); setNewName(""); setNewStart(""); setNewEnd(""); }}
+              className="flex-1 border border-gray-200 text-gray-600 py-1 rounded-lg text-xs hover:bg-gray-50 transition-colors"
+            >
+              Annulla
+            </button>
+            <button
+              onClick={addTemplate}
+              disabled={saving}
+              className="flex-1 bg-wine-700 text-white py-1 rounded-lg text-xs hover:bg-wine-800 transition-colors disabled:opacity-50"
+            >
+              {saving ? "Salvataggio..." : "Salva turno tipo"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 function DepartmentSection() {
   var [departments, setDepartments] = useState([]);
@@ -303,9 +544,9 @@ function DepartmentSection() {
   var [saving, setSaving] = useState(false);
 
   var [editingId, setEditingId] = useState(null);
-  var [editForm, setEditForm] = useState({
-    name: "", color: "", show_in_shifts: true, default_start: "", default_end: "", min_staff: 1
-  });
+  var [editName, setEditName] = useState("");
+  var [editColor, setEditColor] = useState("");
+  var [editShowInShifts, setEditShowInShifts] = useState(true);
 
   useEffect(function() {
     loadDepartments();
@@ -326,12 +567,6 @@ function DepartmentSection() {
         setDepartments(result.data || []);
         setLoading(false);
       });
-  }
-
-  // Converte un valore time del DB (es. "12:00:00") nel formato input "12:00"
-  function timeForInput(t) {
-    if (!t) return "";
-    return t.substring(0, 5);
   }
 
   function addDepartment() {
@@ -363,38 +598,16 @@ function DepartmentSection() {
 
   function startEdit(dept) {
     setEditingId(dept.id);
-    setEditForm({
-      name:           dept.name || "",
-      color:          dept.color || DEFAULT_COLORS[0],
-      show_in_shifts: dept.show_in_shifts !== false,
-      default_start:  timeForInput(dept.default_start),
-      default_end:    timeForInput(dept.default_end),
-      min_staff:      dept.min_staff != null ? dept.min_staff : 1
-    });
-  }
-
-  function editChange(field, value) {
-    setEditForm(function(prev) {
-      var next = {};
-      for (var k in prev) next[k] = prev[k];
-      next[field] = value;
-      return next;
-    });
+    setEditName(dept.name || "");
+    setEditColor(dept.color || DEFAULT_COLORS[0]);
+    setEditShowInShifts(dept.show_in_shifts !== false);
   }
 
   function saveEdit(dept) {
-    if (!editForm.name.trim()) return;
-    var payload = {
-      name:           editForm.name.trim(),
-      color:          editForm.color,
-      show_in_shifts: editForm.show_in_shifts,
-      default_start:  editForm.default_start || null,
-      default_end:    editForm.default_end || null,
-      min_staff:      editForm.min_staff !== "" ? parseInt(editForm.min_staff, 10) : 0
-    };
+    if (!editName.trim()) return;
     supabase
       .from("staff_departments")
-      .update(payload)
+      .update({ name: editName.trim(), color: editColor, show_in_shifts: editShowInShifts })
       .eq("id", dept.id)
       .then(function(result) {
         if (result.error) {
@@ -425,14 +638,13 @@ function DepartmentSection() {
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-      {/* Intestazione sezione */}
       <div className="px-5 py-4 border-b border-gray-100">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Building2 size={18} className="text-wine-600" />
             <div>
               <h2 className="font-semibold text-gray-800">Reparti del personale</h2>
-              <p className="text-xs text-gray-500 mt-0.5">Reparti, fasce orarie di default e minimo personale per la gestione turni</p>
+              <p className="text-xs text-gray-500 mt-0.5">Reparti e relativi turni tipo per la gestione dei turni</p>
             </div>
           </div>
           {!adding && (
@@ -446,7 +658,6 @@ function DepartmentSection() {
           )}
         </div>
 
-        {/* Form aggiunta reparto */}
         {adding && (
           <div className="mt-3 bg-gray-50 rounded-lg p-3">
             <input
@@ -458,7 +669,7 @@ function DepartmentSection() {
               className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-300"
             />
             <ColorPicker value={newColor} onChange={setNewColor} />
-            <p className="text-xs text-gray-400 mt-2">Dopo averlo creato, imposta orari e minimo personale con la matita.</p>
+            <p className="text-xs text-gray-400 mt-2">Dopo averlo creato, aggiungi i turni tipo con la matita.</p>
             <div className="flex gap-2 mt-3">
               <button
                 onClick={function() { setAdding(false); setNewName(""); }}
@@ -478,8 +689,7 @@ function DepartmentSection() {
         )}
       </div>
 
-      {/* Elenco reparti attivi */}
-      <div className="px-5 py-3 space-y-2">
+      <div className="px-5 py-3 space-y-3">
         {loading && <p className="text-sm text-gray-400 py-2">Caricamento reparti...</p>}
         {!loading && activeDepts.length === 0 && (
           <p className="text-sm text-gray-400 py-2">Nessun reparto configurato</p>
@@ -487,134 +697,81 @@ function DepartmentSection() {
         {activeDepts.map(function(dept) {
           var isEditing = editingId === dept.id;
 
-          if (isEditing) {
-            return (
-              <div key={dept.id} className="bg-gray-50 rounded-lg p-4">
-                {/* Nome + colore */}
-                <label className="block text-xs font-medium text-gray-700 mb-1">Nome reparto</label>
-                <input
-                  type="text"
-                  value={editForm.name}
-                  onChange={function(e) { editChange("name", e.target.value); }}
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-300"
-                />
-                <ColorPicker value={editForm.color} onChange={function(c) { editChange("color", c); }} />
-
-                {/* Visibilità nelle viste turni */}
-                <div className="mt-4 flex items-center gap-3">
-                  <input
-                    type="checkbox"
-                    id={"sis_" + dept.id}
-                    checked={editForm.show_in_shifts}
-                    onChange={function(e) { editChange("show_in_shifts", e.target.checked); }}
-                    className="w-4 h-4 accent-wine-700"
-                  />
-                  <label htmlFor={"sis_" + dept.id} className="text-sm text-gray-700">
-                    Mostra nelle viste turni
-                  </label>
-                </div>
-
-                {/* Orari default + minimo */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1 flex items-center gap-1">
-                      <Clock size={12} /> Inizio default
-                    </label>
-                    <input
-                      type="time"
-                      value={editForm.default_start}
-                      onChange={function(e) { editChange("default_start", e.target.value); }}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-300"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1 flex items-center gap-1">
-                      <Clock size={12} /> Fine default
-                    </label>
-                    <input
-                      type="time"
-                      value={editForm.default_end}
-                      onChange={function(e) { editChange("default_end", e.target.value); }}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-300"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-700 mb-1 flex items-center gap-1">
-                      <Users size={12} /> Minimo personale
-                    </label>
-                    <input
-                      type="number"
-                      value={editForm.min_staff}
-                      onChange={function(e) { editChange("min_staff", e.target.value); }}
-                      min={0}
-                      max={20}
-                      className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-300"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex gap-2 mt-4">
-                  <button
-                    onClick={function() { setEditingId(null); }}
-                    className="flex-1 border border-gray-200 text-gray-600 py-1.5 rounded-lg text-sm hover:bg-gray-50 transition-colors"
-                  >
-                    Annulla
-                  </button>
-                  <button
-                    onClick={function() { saveEdit(dept); }}
-                    disabled={!editForm.name.trim()}
-                    className="flex-1 bg-wine-700 text-white py-1.5 rounded-lg text-sm hover:bg-wine-800 transition-colors disabled:opacity-50"
-                  >
-                    Salva
-                  </button>
-                </div>
-              </div>
-            );
-          }
-
           return (
-            <div key={dept.id} className="flex items-center gap-3 py-2 px-3 rounded-lg border border-gray-100">
-              <div
-                className="w-3 h-3 rounded-full flex-shrink-0"
-                style={{ backgroundColor: dept.color || "#9ca3af" }}
-              />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-medium text-gray-800">{dept.name}</span>
-                  {dept.show_in_shifts === false && (
-                    <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Fuori dai turni</span>
-                  )}
+            <div key={dept.id} className="border border-gray-100 rounded-lg p-3">
+              {isEditing ? (
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Nome reparto</label>
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={function(e) { setEditName(e.target.value); }}
+                    className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-300"
+                  />
+                  <ColorPicker value={editColor} onChange={setEditColor} />
+                  <div className="mt-3 flex items-center gap-3">
+                    <input
+                      type="checkbox"
+                      id={"sis_" + dept.id}
+                      checked={editShowInShifts}
+                      onChange={function(e) { setEditShowInShifts(e.target.checked); }}
+                      className="w-4 h-4 accent-wine-700"
+                    />
+                    <label htmlFor={"sis_" + dept.id} className="text-sm text-gray-700">
+                      Mostra nelle viste turni
+                    </label>
+                  </div>
+                  <div className="flex gap-2 mt-3">
+                    <button
+                      onClick={function() { setEditingId(null); }}
+                      className="flex-1 border border-gray-200 text-gray-600 py-1.5 rounded-lg text-sm hover:bg-gray-50 transition-colors"
+                    >
+                      Annulla
+                    </button>
+                    <button
+                      onClick={function() { saveEdit(dept); }}
+                      disabled={!editName.trim()}
+                      className="flex-1 bg-wine-700 text-white py-1.5 rounded-lg text-sm hover:bg-wine-800 transition-colors disabled:opacity-50"
+                    >
+                      Salva
+                    </button>
+                  </div>
                 </div>
-                <div className="text-xs text-gray-400 mt-0.5">
-                  {dept.default_start && dept.default_end
-                    ? "Default " + timeForInput(dept.default_start) + "–" + timeForInput(dept.default_end)
-                    : "Orari non impostati"}
-                  <span className="mx-2">·</span>
-                  Min. {dept.min_staff != null ? dept.min_staff : 0} pers.
+              ) : (
+                <div className="flex items-center gap-3">
+                  <div
+                    className="w-3 h-3 rounded-full flex-shrink-0"
+                    style={{ backgroundColor: dept.color || "#9ca3af" }}
+                  />
+                  <div className="flex items-center gap-2 flex-wrap flex-1 min-w-0">
+                    <span className="text-sm font-medium text-gray-800">{dept.name}</span>
+                    {dept.show_in_shifts === false && (
+                      <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Fuori dai turni</span>
+                    )}
+                  </div>
+                  <button
+                    onClick={function() { startEdit(dept); }}
+                    className="p-1.5 hover:bg-wine-100 rounded text-gray-400 hover:text-wine-600 transition-colors"
+                    title="Modifica"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                  <button
+                    onClick={function() { toggleActive(dept); }}
+                    className="p-1.5 hover:bg-red-100 rounded text-gray-400 hover:text-red-500 transition-colors"
+                    title="Disattiva"
+                  >
+                    <X size={14} />
+                  </button>
                 </div>
-              </div>
-              <div className="flex items-center gap-1 flex-shrink-0">
-                <button
-                  onClick={function() { startEdit(dept); }}
-                  className="p-1.5 hover:bg-wine-100 rounded text-gray-400 hover:text-wine-600 transition-colors"
-                  title="Modifica"
-                >
-                  <Pencil size={14} />
-                </button>
-                <button
-                  onClick={function() { toggleActive(dept); }}
-                  className="p-1.5 hover:bg-red-100 rounded text-gray-400 hover:text-red-500 transition-colors"
-                  title="Disattiva"
-                >
-                  <X size={14} />
-                </button>
-              </div>
+              )}
+
+              {!isEditing && <ShiftTemplates departmentId={dept.id} />}
             </div>
           );
         })}
       </div>
 
-      {/* Reparti disattivati */}
       {inactiveDepts.length > 0 && (
         <div className="border-t border-gray-100 px-5 py-3">
           <p className="text-xs text-gray-400 mb-2">Disattivati ({inactiveDepts.length})</p>
@@ -677,7 +834,7 @@ export default function SettingsPage() {
     return (
       <div className="text-center py-16 text-gray-400">
         <Settings size={48} className="mx-auto mb-3 opacity-30" />
-        <p>Solo il Super Admin può accedere alle impostazioni.</p>
+        <p>Solo il Super Admin pu&ograve; accedere alle impostazioni.</p>
       </div>
     );
   }
@@ -693,7 +850,6 @@ export default function SettingsPage() {
   return (
     <div className="max-w-3xl mx-auto">
 
-      {/* Header */}
       <div className="flex items-center gap-3 mb-6">
         <div className="bg-wine-100 p-2 rounded-lg">
           <Settings className="text-wine-700" size={24} />
@@ -704,12 +860,10 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* Istruzione */}
       <div className="mb-6 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800">
-        Le modifiche sono immediate. Disattivare una voce non elimina i dati esistenti che la usano — la voce non sarà più selezionabile per i nuovi inserimenti.
+        Le modifiche sono immediate. Disattivare una voce non elimina i dati esistenti che la usano &mdash; la voce non sar&agrave; pi&ugrave; selezionabile per i nuovi inserimenti.
       </div>
 
-      {/* Sezioni config_options */}
       <div className="space-y-6">
         {CATEGORIES.map(function(cat) {
           return (
@@ -722,7 +876,6 @@ export default function SettingsPage() {
           );
         })}
 
-        {/* Sezione Reparti del personale (staff_departments) */}
         <DepartmentSection />
       </div>
 
