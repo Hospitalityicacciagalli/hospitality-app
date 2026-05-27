@@ -1,27 +1,81 @@
-@ -50,14 +50,12 @@ function ReservationForm() {
+import { useState, useEffect } from 'react'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { ArrowLeft, Save, Search, AlertTriangle, UserPlus, Check, Users, ChevronRight } from 'lucide-react'
+import { supabase } from '../lib/supabase'
+
+function pad(n) {
+  return n < 10 ? '0' + n : '' + n
+}
+
+function formatDateISO(date) {
+  var y = date.getFullYear()
+  var m = String(date.getMonth() + 1).padStart(2, '0')
+  var d = String(date.getDate()).padStart(2, '0')
+  return y + '-' + m + '-' + d
+}
+
+var HOURS = []
+for (var h = 7; h <= 23; h++) { HOURS.push(h) }
+var MINUTES = ['00', '15', '30', '45']
+
+var MEAL_TYPES = [
+  { value: 'lunch', label: 'Pranzo' },
+  { value: 'dinner', label: 'Cena' }
+]
+
+var categoryColors = {
+  standard: 'bg-gray-100 text-gray-700',
+  vip: 'bg-amber-100 text-amber-800',
+  press: 'bg-purple-100 text-purple-800',
+  business: 'bg-blue-100 text-blue-800',
+  hotel_guest: 'bg-green-100 text-green-800'
+}
+
+var categoryLabels = {
+  standard: 'Standard',
+  vip: 'VIP',
+  press: 'Stampa',
+  business: 'Business',
+  hotel_guest: 'Ospite Hotel'
+}
+
+function ReservationForm() {
+  var params = useParams()
+  var id = params.id
+  var searchParamsResult = useSearchParams()
+  var searchParams = searchParamsResult[0]
+  var navigate = useNavigate()
+  var isEditing = Boolean(id)
+
   var [loading, setLoading] = useState(false)
   var [saving, setSaving] = useState(false)
 
-  // Ricerca cliente
   var [customerSearch, setCustomerSearch] = useState('')
   var [searchResults, setSearchResults] = useState([])
   var [selectedCustomer, setSelectedCustomer] = useState(null)
   var [customerAllergens, setCustomerAllergens] = useState([])
   var [showSearch, setShowSearch] = useState(true)
 
-  // Lista completa clienti
   var [showListaClienti, setShowListaClienti] = useState(false)
   var [listaClienti, setListaClienti] = useState([])
   var [loadingLista, setLoadingLista] = useState(false)
-@ -67,7 +65,6 @@ function ReservationForm() {
+  var [filtroLista, setFiltroLista] = useState('')
+
+  var [availability, setAvailability] = useState(null)
   var [selectedHour, setSelectedHour] = useState('')
   var [selectedMinute, setSelectedMinute] = useState('00')
 
-  // Form rapido cliente
   var [showQuickCustomer, setShowQuickCustomer] = useState(false)
   var [quickForm, setQuickForm] = useState({ first_name: '', last_name: '', phone: '', email: '', category: 'standard', notes: '' })
   var [quickLoading, setQuickLoading] = useState(false)
-@ -82,12 +79,14 @@ function ReservationForm() {
+  var [quickError, setQuickError] = useState(null)
+
+  var initialDate = searchParams.get('date') || formatDateISO(new Date())
+  var initialMeal = searchParams.get('meal') || 'dinner'
+
+  var [formData, setFormData] = useState({
+    reservation_date: initialDate,
+    meal_type: initialMeal,
     adults_count: 2,
     children_count: 0,
     table_info: '',
@@ -32,19 +86,41 @@
   })
 
   var totalGuests = formData.adults_count + formData.children_count
-  var hasAllergiePrenotazione = formData.allergie_prenotazione && formData.allergie_prenotazione.trim().length > 0
+  var hasAllergiePrenotazione = Boolean(formData.allergie_prenotazione && formData.allergie_prenotazione.trim().length > 0)
 
   useEffect(function() {
     if (isEditing) loadReservation()
-@ -97,7 +96,6 @@ function ReservationForm() {
+  }, [id])
+
+  useEffect(function() {
     if (formData.reservation_date && formData.meal_type) checkAvailability()
   }, [formData.reservation_date, formData.meal_type, totalGuests])
 
-  // Rileva turno dall'orario
   useEffect(function() {
     if (selectedHour !== '') {
       var h = parseInt(selectedHour)
-@ -126,6 +124,7 @@ function ReservationForm() {
+      var detected = h >= 11 && h <= 15 ? 'lunch' : (h >= 19 && h <= 23 ? 'dinner' : null)
+      if (detected) {
+        setFormData(function(prev) {
+          var u = {}; for (var k in prev) { u[k] = prev[k] }
+          u.meal_type = detected
+          return u
+        })
+      }
+    }
+  }, [selectedHour])
+
+  function loadReservation() {
+    setLoading(true)
+    supabase.from('reservations')
+      .select('*, customers(id, first_name, last_name, phone, email, category)')
+      .eq('id', id).single()
+      .then(function(result) {
+        if (result.error) { alert('Prenotazione non trovata.'); navigate('/prenotazioni'); return }
+        var res = result.data
+        setFormData({
+          reservation_date: res.reservation_date,
+          meal_type: res.meal_type === 'lunch' || res.meal_type === 'dinner' ? res.meal_type : 'dinner',
           adults_count: res.adults_count || res.guests_count,
           children_count: res.children_count || 0,
           table_info: res.table_info || '',
@@ -52,42 +128,168 @@
           notes: res.notes || '',
           special_requests: res.special_requests || '',
           source: res.source || 'manual'
-@ -246,7 +245,7 @@ function ReservationForm() {
+        })
+        if (res.requested_time) {
+          var timeParts = res.requested_time.split(':')
+          setSelectedHour(timeParts[0])
+          var mins = parseInt(timeParts[1])
+          var closest = '00'
+          if (mins >= 8 && mins < 23) closest = '15'
+          else if (mins >= 23 && mins < 38) closest = '30'
+          else if (mins >= 38 && mins < 53) closest = '45'
+          setSelectedMinute(closest)
+        }
+        setSelectedCustomer(res.customers)
+        setShowSearch(false)
+        loadCustomerAllergens(res.customers.id)
+        setLoading(false)
+      })
+  }
+
+  function searchCustomers(query) {
+    setCustomerSearch(query)
+    if (query.length < 2) { setSearchResults([]); return }
+    supabase.from('customers')
+      .select('id, first_name, last_name, phone, email, category')
+      .eq('is_active', true)
+      .or('last_name.ilike.%' + query + '%,first_name.ilike.%' + query + '%,phone.ilike.%' + query + '%,email.ilike.%' + query + '%')
+      .order('last_name').limit(10)
+      .then(function(result) {
+        if (!result.error) setSearchResults(result.data || [])
+      })
+  }
+
+  function apriListaClienti() {
+    setShowListaClienti(true)
+    setFiltroLista('')
+    if (listaClienti.length > 0) return
+    setLoadingLista(true)
+    supabase.from('customers')
+      .select('id, first_name, last_name, phone, email, category')
+      .eq('is_active', true)
+      .order('last_name', { ascending: true })
+      .then(function(result) {
+        setLoadingLista(false)
+        if (!result.error) setListaClienti(result.data || [])
+      })
+  }
+
+  function selectCustomer(customer) {
+    setSelectedCustomer(customer)
+    setShowSearch(false)
+    setShowListaClienti(false)
+    setSearchResults([])
+    setCustomerSearch('')
+    loadCustomerAllergens(customer.id)
+  }
+
+  function loadCustomerAllergens(customerId) {
+    supabase.from('customer_allergens')
+      .select('severity, allergens(id, name, icon)')
+      .eq('customer_id', customerId)
+      .then(function(result) {
+        if (!result.error) setCustomerAllergens(result.data || [])
+      })
+  }
+
+  function checkAvailability() {
+    supabase.rpc('check_availability', {
+      p_date: formData.reservation_date,
+      p_meal_type: formData.meal_type,
+      p_guests: totalGuests
+    }).then(function(result) {
+      if (!result.error && result.data && result.data.length > 0) setAvailability(result.data[0])
+    })
+  }
+
+  function handleInputChange(e) {
+    var name = e.target.name
+    var value = e.target.value
+    if (name === 'adults_count' || name === 'children_count') {
+      value = parseInt(value) || 0
+      if (value < 0) value = 0
+    }
+    setFormData(function(prev) {
+      var u = {}; for (var k in prev) { u[k] = prev[k] }
+      u[name] = value
+      return u
+    })
+  }
+
+  function openQuickCustomer() {
+    setQuickForm({ first_name: '', last_name: '', phone: '', email: '', category: 'standard', notes: '' })
+    setQuickError(null)
+    setShowQuickCustomer(true)
+  }
+
+  function handleQuickCustomerSubmit(e) {
+    e.preventDefault()
+    setQuickError(null)
+    if (!quickForm.first_name.trim() || !quickForm.last_name.trim()) { setQuickError('Nome e Cognome sono obbligatori.'); return }
+    setQuickLoading(true)
+    supabase.from('customers').insert({
+      first_name: quickForm.first_name.trim(),
+      last_name: quickForm.last_name.trim(),
+      phone: quickForm.phone.trim() || null,
+      email: quickForm.email.trim() || null,
+      category: quickForm.category,
+      notes: quickForm.notes.trim() || null,
+      is_active: true,
+      source: 'manual'
+    }).select().single()
+      .then(function(result) {
+        setQuickLoading(false)
+        if (result.error) {
+          setQuickError(result.error.code === '23505' ? 'Esiste gia un cliente con questo telefono o email.' : 'Errore: ' + result.error.message)
+          return
         }
         selectCustomer(result.data)
         setShowQuickCustomer(false)
-        setListaClienti([]) // forza ricarica lista la prossima volta
         setListaClienti([])
       })
   }
 
-@ -262,6 +261,8 @@ function ReservationForm() {
+  function handleSubmit(e) {
+    e.preventDefault()
+    if (!selectedCustomer) { alert('Seleziona un cliente per la prenotazione.'); return }
+    if (!formData.reservation_date) { alert('Seleziona una data.'); return }
+    if (formData.adults_count < 1) { alert('Il numero di adulti deve essere almeno 1.'); return }
+    if (availability && !availability.is_available) {
+      if (!window.confirm('Attenzione: i coperti disponibili (' + availability.remaining_covers + ') non sono sufficienti per ' + totalGuests + ' ospiti. Vuoi procedere comunque?')) return
+    }
+    setSaving(true)
     var requestedTime = null
     if (selectedHour !== '') requestedTime = pad(parseInt(selectedHour)) + ':' + selectedMinute + ':00'
 
-    var haAllergeni = customerAllergens.length > 0 || hasAllergiePrenotazione
+    var haAllergeni = Boolean(customerAllergens.length > 0 || hasAllergiePrenotazione)
 
     var reservationData = {
       customer_id: selectedCustomer.id,
       reservation_date: formData.reservation_date,
-@ -271,10 +272,11 @@ function ReservationForm() {
+      meal_type: formData.meal_type,
+      requested_time: requestedTime,
+      guests_count: totalGuests,
       adults_count: formData.adults_count,
       children_count: formData.children_count,
       table_info: formData.table_info || null,
-      allergie_prenotazione: formData.allergie_prenotazione.trim() || null,
+      allergie_prenotazione: (formData.allergie_prenotazione || '').trim() || null,
       notes: formData.notes || null,
       special_requests: formData.special_requests || null,
       source: formData.source,
-      has_allergen_alerts: customerAllergens.length > 0
       has_allergen_alerts: haAllergeni
     }
 
     var promise = isEditing
-@ -288,13 +290,14 @@ function ReservationForm() {
+      ? supabase.from('reservations').update(reservationData).eq('id', id)
+      : supabase.from('reservations').insert(reservationData)
+
+    promise.then(function(result) {
+      setSaving(false)
+      if (result.error) { alert('Errore nel salvataggio. Riprova.'); return }
+      navigate('/prenotazioni/giorno/' + formData.reservation_date)
     })
   }
 
-  // Filtra lista clienti
   var clientiFiltrati = listaClienti.filter(function(c) {
     if (!filtroLista) return true
     var f = filtroLista.toLowerCase()
@@ -99,49 +301,221 @@
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-@ -303,8 +306,6 @@ function ReservationForm() {
+        <div className="text-gray-500 text-lg">Caricamento...</div>
+      </div>
     )
   }
-
-  var mealLabel = formData.meal_type === 'lunch' ? 'Pranzo' : 'Cena'
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
       <div className="flex items-center gap-4 mb-6">
-@ -353,7 +354,7 @@ function ReservationForm() {
+        <button onClick={function() { navigate(-1) }} className="p-2 rounded-lg hover:bg-gray-100 transition-colors">
+          <ArrowLeft size={24} />
+        </button>
+        <h1 className="text-2xl font-bold text-gray-900">
+          {isEditing ? 'Modifica Prenotazione' : 'Nuova Prenotazione'}
+        </h1>
+      </div>
+
+      <form onSubmit={handleSubmit} className="space-y-6">
+
+        {/* Selezione cliente */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Cliente</h2>
+
+          {selectedCustomer && !showSearch ? (
+            <div>
+              <div className="flex items-center justify-between p-4 bg-wine-50 rounded-lg border border-wine-200">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-wine-200 text-wine-800 flex items-center justify-center font-bold text-sm">
+                    {selectedCustomer.first_name[0]}{selectedCustomer.last_name[0]}
+                  </div>
+                  <div>
+                    <p className="font-semibold text-gray-900">{selectedCustomer.first_name} {selectedCustomer.last_name}</p>
+                    <p className="text-sm text-gray-500">{selectedCustomer.phone || selectedCustomer.email || 'Nessun contatto'}</p>
+                    {selectedCustomer.category && selectedCustomer.category !== 'standard' && (
+                      <span className={"px-2 py-0.5 rounded-full text-xs font-medium mt-0.5 inline-block " + categoryColors[selectedCustomer.category]}>
+                        {categoryLabels[selectedCustomer.category]}
+                      </span>
+                    )}
+                  </div>
+                  <Check size={20} className="text-green-600 ml-2" />
+                </div>
+                {!isEditing && (
+                  <button type="button"
+                    onClick={function() { setShowSearch(true); setSelectedCustomer(null); setCustomerAllergens([]) }}
+                    className="text-sm text-wine-600 hover:text-wine-800 font-medium">
+                    Cambia
+                  </button>
+                )}
+              </div>
+
+              {customerAllergens.length > 0 && (
                 <div className="mt-3 p-3 bg-red-50 rounded-lg border border-red-200">
                   <div className="flex items-center gap-2 mb-2">
                     <AlertTriangle size={16} className="text-red-600" />
-                    <span className="text-sm font-medium text-red-800">Attenzione: allergeni segnalati</span>
                     <span className="text-sm font-medium text-red-800">Allergeni registrati sul profilo cliente</span>
                   </div>
                   <div className="flex flex-wrap gap-1">
                     {customerAllergens.map(function(ca, idx) {
-@ -365,7 +366,6 @@ function ReservationForm() {
+                      return <span key={idx} className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded">{ca.allergens.icon} {ca.allergens.name}</span>
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           ) : (
             <div>
-              {/* Ricerca */}
               <div className="relative mb-3">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
                 <input
-@ -378,7 +378,6 @@ function ReservationForm() {
+                  type="text"
+                  placeholder="Cerca per nome, telefono o email..."
+                  value={customerSearch}
+                  onChange={function(e) { searchCustomers(e.target.value) }}
+                  className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base"
+                  autoFocus
                 />
               </div>
 
-              {/* Risultati ricerca */}
               {searchResults.length > 0 && (
                 <div className="mb-3 border border-gray-200 rounded-lg overflow-hidden">
                   {searchResults.map(function(customer) {
-@ -403,7 +402,6 @@ function ReservationForm() {
+                    return (
+                      <button key={customer.id} type="button" onClick={function() { selectCustomer(customer) }}
+                        className="w-full text-left px-4 py-3 hover:bg-gray-50 border-b border-gray-100 last:border-0 flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-wine-100 text-wine-700 flex items-center justify-center text-sm font-bold flex-shrink-0">
+                          {customer.first_name[0]}{customer.last_name[0]}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-gray-900">{customer.last_name} {customer.first_name}</p>
+                          <p className="text-sm text-gray-500 truncate">{customer.phone || customer.email || ''}</p>
+                        </div>
+                        {customer.category && customer.category !== 'standard' && (
+                          <span className={"px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 " + categoryColors[customer.category]}>
+                            {categoryLabels[customer.category]}
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
                 </div>
               )}
 
-              {/* Pulsanti azioni */}
               <div className="flex gap-2 flex-wrap">
                 <button type="button" onClick={apriListaClienti}
                   className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 font-medium">
-@ -521,6 +519,30 @@ function ReservationForm() {
+                  <Users size={16} />
+                  Lista clienti
+                </button>
+                <button type="button" onClick={openQuickCustomer}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-wine-300 text-sm text-wine-700 hover:bg-wine-50 font-medium">
+                  <UserPlus size={16} />
+                  Nuovo cliente
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Dettagli prenotazione */}
+        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Dettagli Prenotazione</h2>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Data *</label>
+              <input type="date" name="reservation_date" value={formData.reservation_date}
+                onChange={handleInputChange} required
+                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base" />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Turno *
+                {selectedHour !== '' && <span className="text-xs text-wine-600 ml-1">(rilevato dall'orario)</span>}
+              </label>
+              <div className="flex gap-2">
+                {MEAL_TYPES.map(function(mt) {
+                  var isSelected = formData.meal_type === mt.value
+                  return (
+                    <button key={mt.value} type="button"
+                      onClick={function() {
+                        setFormData(function(prev) {
+                          var u = {}; for (var k in prev) { u[k] = prev[k] }
+                          u.meal_type = mt.value
+                          return u
+                        })
+                      }}
+                      className={'flex-1 px-4 py-3 rounded-lg text-sm font-medium border transition-colors ' + (isSelected ? 'bg-wine-700 border-wine-700 text-white' : 'bg-white border-gray-300 text-gray-700 hover:border-wine-400')}>
+                      {mt.label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Orario di arrivo</label>
+              <div className="flex items-center gap-2">
+                <select value={selectedHour} onChange={function(e) { setSelectedHour(e.target.value) }}
+                  className="flex-1 px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 bg-white text-base">
+                  <option value="">Ore</option>
+                  {HOURS.map(function(h) { return <option key={h} value={h}>{pad(h)}</option> })}
+                </select>
+                <span className="text-xl font-bold text-gray-400">:</span>
+                <select value={selectedMinute} onChange={function(e) { setSelectedMinute(e.target.value) }}
+                  className="flex-1 px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 bg-white text-base"
+                  disabled={selectedHour === ''}>
+                  {MINUTES.map(function(m) { return <option key={m} value={m}>{m}</option> })}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Fonte</label>
+              <select name="source" value={formData.source} onChange={handleInputChange}
+                className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 bg-white text-base">
+                <option value="manual">Inserimento manuale</option>
+                <option value="phone">Telefono</option>
+                <option value="email">Email</option>
+                <option value="website">Sito web</option>
+                <option value="hotel_in_cloud">Hotel in Cloud</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Ospiti */}
+          <div className="mt-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+            <h3 className="text-sm font-semibold text-gray-700 mb-3">Numero ospiti</h3>
+            <div className="grid grid-cols-3 gap-4 items-end">
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Adulti *</label>
+                <input type="number" name="adults_count" value={formData.adults_count}
+                  onChange={handleInputChange} min="1" max="200" required
+                  className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base text-center" />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-600 mb-1">Bambini</label>
+                <input type="number" name="children_count" value={formData.children_count}
+                  onChange={handleInputChange} min="0" max="200"
+                  className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base text-center" />
+              </div>
+              <div className="text-center">
+                <label className="block text-sm text-gray-600 mb-1">Totale</label>
+                <div className="px-4 py-3 bg-wine-100 text-wine-800 rounded-lg font-bold text-lg">{totalGuests}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* Disponibilita */}
+          {availability && (
+            <div className={"mt-4 p-3 rounded-lg border " + (availability.is_available ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200")}>
+              <p className={"text-sm font-medium " + (availability.is_available ? "text-green-800" : "text-red-800")}>
+                {availability.is_available
+                  ? mealLabel + ": " + availability.remaining_covers + " coperti ancora disponibili su " + availability.max_covers
+                  : "Attenzione: solo " + availability.remaining_covers + " coperti disponibili su " + availability.max_covers + " per " + totalGuests + " ospiti richiesti"}
+              </p>
             </div>
           )}
 
@@ -172,7 +546,7 @@
           <div className="mt-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">Note</label>
             <textarea name="notes" value={formData.notes} onChange={handleInputChange} rows={2}
-@ -528,6 +550,7 @@ function ReservationForm() {
+              className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base"
               placeholder="Note interne sulla prenotazione, preferenze posto, richieste particolari..." />
           </div>
 
@@ -180,30 +554,153 @@
           <div className="mt-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">Richieste speciali</label>
             <textarea name="special_requests" value={formData.special_requests} onChange={handleInputChange} rows={2}
-@ -561,14 +584,11 @@ function ReservationForm() {
+              className="w-full px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base"
+              placeholder="es. compleanno, menu vegano, seggiolone..." />
+          </div>
+        </div>
+
+        {/* Pulsanti */}
+        <div className="flex flex-col sm:flex-row gap-3 pb-8">
+          <button type="submit" disabled={saving || !selectedCustomer}
+            className="flex-1 flex items-center justify-center gap-2 bg-wine-700 text-white px-6 py-4 rounded-xl hover:bg-wine-800 transition-colors font-medium shadow-sm disabled:opacity-50 disabled:cursor-not-allowed text-base">
+            <Save size={20} />
+            <span>{saving ? 'Salvataggio...' : (isEditing ? 'Salva Modifiche' : 'Conferma Prenotazione')}</span>
+          </button>
+          <button type="button" onClick={function() { navigate(-1) }}
+            className="px-6 py-4 border border-gray-300 rounded-xl hover:bg-gray-50 transition-colors font-medium text-gray-700 text-base">
+            Annulla
+          </button>
+        </div>
+
+      </form>
+
+      {/* Modale lista clienti */}
+      {showListaClienti && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-lg shadow-2xl flex flex-col max-h-screen sm:max-h-[85vh]">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 flex-shrink-0">
+              <h2 className="text-lg font-semibold text-gray-900">Seleziona cliente</h2>
+              <button type="button" onClick={function() { setShowListaClienti(false) }}
                 className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
             </div>
             <div className="px-4 py-3 border-b border-gray-100 flex-shrink-0">
-              <input
-                type="text"
-                placeholder="Filtra per nome o telefono..."
               <input type="text" placeholder="Filtra per nome o telefono..."
                 value={filtroLista}
                 onChange={function(e) { setFiltroLista(e.target.value) }}
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
-                autoFocus
-              />
                 autoFocus />
             </div>
             <div className="flex-1 overflow-y-auto">
               {loadingLista ? (
-@ -622,7 +642,8 @@ function ReservationForm() {
+                <div className="flex items-center justify-center h-32">
+                  <p className="text-gray-400 text-sm">Caricamento...</p>
+                </div>
+              ) : clientiFiltrati.length === 0 ? (
+                <div className="text-center py-8 text-gray-400 text-sm">Nessun cliente trovato</div>
+              ) : (
+                clientiFiltrati.map(function(customer) {
+                  return (
+                    <button key={customer.id} type="button" onClick={function() { selectCustomer(customer) }}
+                      className="w-full text-left px-5 py-3.5 hover:bg-gray-50 border-b border-gray-100 last:border-0 flex items-center gap-3">
+                      <div className="w-9 h-9 rounded-full bg-wine-100 text-wine-700 flex items-center justify-center text-sm font-bold flex-shrink-0">
+                        {customer.first_name[0]}{customer.last_name[0]}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-gray-900">{customer.last_name} {customer.first_name}</p>
+                        <p className="text-xs text-gray-500 truncate">{customer.phone || customer.email || ''}</p>
+                      </div>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {customer.category && customer.category !== 'standard' && (
+                          <span className={"px-2 py-0.5 rounded-full text-xs font-medium " + categoryColors[customer.category]}>
+                            {categoryLabels[customer.category]}
+                          </span>
+                        )}
+                        <ChevronRight size={16} className="text-gray-300" />
+                      </div>
+                    </button>
+                  )
+                })
+              )}
+            </div>
+            <div className="p-4 border-t border-gray-100 flex-shrink-0">
+              <button type="button" onClick={function() { setShowListaClienti(false); openQuickCustomer() }}
+                className="w-full flex items-center justify-center gap-2 py-2.5 border border-wine-300 text-wine-700 rounded-lg text-sm font-medium hover:bg-wine-50">
+                <UserPlus size={16} />
+                Registra nuovo cliente
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modale cliente rapido */}
+      {showQuickCustomer && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+              <div>
                 <h2 className="text-lg font-semibold text-gray-900">Nuovo cliente</h2>
                 <p className="text-xs text-gray-400 mt-0.5">Il cliente verra creato e selezionato automaticamente</p>
               </div>
-              <button type="button" onClick={function() { setShowQuickCustomer(false) }} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
               <button type="button" onClick={function() { setShowQuickCustomer(false) }}
                 className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
             </div>
             <form onSubmit={handleQuickCustomerSubmit} className="p-6 space-y-4">
               {quickError && <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{quickError}</div>}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Nome *</label>
+                  <input type="text" value={quickForm.first_name}
+                    onChange={function(e) { var v = e.target.value; setQuickForm(function(p) { var u = Object.assign({}, p); u.first_name = v; return u }) }}
+                    required autoFocus className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Cognome *</label>
+                  <input type="text" value={quickForm.last_name}
+                    onChange={function(e) { var v = e.target.value; setQuickForm(function(p) { var u = Object.assign({}, p); u.last_name = v; return u }) }}
+                    required className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Telefono</label>
+                <input type="tel" value={quickForm.phone} placeholder="+39..."
+                  onChange={function(e) { var v = e.target.value; setQuickForm(function(p) { var u = Object.assign({}, p); u.phone = v; return u }) }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Categoria</label>
+                <select value={quickForm.category}
+                  onChange={function(e) { var v = e.target.value; setQuickForm(function(p) { var u = Object.assign({}, p); u.category = v; return u }) }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500">
+                  <option value="standard">Standard</option>
+                  <option value="vip">VIP</option>
+                  <option value="press">Stampa</option>
+                  <option value="business">Business</option>
+                  <option value="hotel_guest">Ospite Hotel</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Note</label>
+                <textarea value={quickForm.notes} rows={2} placeholder="Informazioni utili..."
+                  onChange={function(e) { var v = e.target.value; setQuickForm(function(p) { var u = Object.assign({}, p); u.notes = v; return u }) }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 resize-none" />
+              </div>
+              <p className="text-xs text-gray-400">Allergeni e dati completi si aggiungono in seguito da Anagrafica Clienti.</p>
+              <div className="flex gap-3 pt-1">
+                <button type="button" onClick={function() { setShowQuickCustomer(false) }}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">Annulla</button>
+                <button type="submit" disabled={quickLoading}
+                  className="flex-1 bg-wine-700 hover:bg-wine-800 disabled:bg-wine-300 text-white px-4 py-2 rounded-lg text-sm font-medium">
+                  {quickLoading ? 'Creazione...' : 'Crea e seleziona'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+    </div>
+  )
+}
+
+export default ReservationForm
