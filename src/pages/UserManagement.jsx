@@ -1,15 +1,30 @@
 import { useState, useEffect } from 'react';
-import { useAuth } from '../lib/AuthContext';
+import { useAuth, FEATURES, defaultPermissionsForRole } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase';
 
 var EDGE_FUNCTION_URL = 'https://ddarqzyymrgqmdwiyzde.supabase.co/functions/v1/admin-user-management';
 
+// Opzioni di livello per i selettori della matrice.
+var LEVEL_OPTIONS_STANDARD = [
+  { value: 'none',  label: 'Nessuno' },
+  { value: 'read',  label: 'Solo lettura' },
+  { value: 'write', label: 'Lettura e scrittura' }
+];
+var LEVEL_OPTIONS_CASSA = [
+  { value: 'none',  label: 'Nessuno' },
+  { value: 'light', label: 'Cassa light' },
+  { value: 'full',  label: 'Cassa completa' }
+];
+
 export default function UserManagement() {
-  var { profile, hasRole } = useAuth();
+  var { profile, canView } = useAuth();
 
   var [users, setUsers] = useState([]);
   var [loading, setLoading] = useState(true);
   var [error, setError] = useState(null);
+
+  // Profili-tipo salvabili
+  var [profiles, setProfiles] = useState([]);
 
   // Modale nuovo utente
   var [showNewUserModal, setShowNewUserModal] = useState(false);
@@ -34,8 +49,16 @@ export default function UserManagement() {
   var [banMessage, setBanMessage] = useState(null);
   var [banError, setBanError] = useState(null);
 
-  // Stato email utenti (caricato da auth separatamente)
-  var [userEmails, setUserEmails] = useState({});
+  // Modale permessi
+  var [showPermModal, setShowPermModal] = useState(false);
+  var [permTarget, setPermTarget] = useState(null);
+  var [permMatrix, setPermMatrix] = useState({});
+  var [permLoading, setPermLoading] = useState(false);
+  var [permError, setPermError] = useState(null);
+  var [permSuccess, setPermSuccess] = useState(null);
+  var [selectedProfileId, setSelectedProfileId] = useState('');
+  var [newProfileName, setNewProfileName] = useState('');
+  var [saveProfileLoading, setSaveProfileLoading] = useState(false);
 
   var roleOptions = [
     { value: 'super_admin', label: 'Super Admin' },
@@ -68,7 +91,7 @@ export default function UserManagement() {
     setError(null);
     supabase
       .from('user_profiles')
-      .select('id, first_name, last_name, display_name, role, is_active')
+      .select('id, first_name, last_name, display_name, role, is_active, permissions')
       .order('last_name', { ascending: true })
       .then(function(result) {
         setLoading(false);
@@ -80,8 +103,22 @@ export default function UserManagement() {
       });
   }
 
+  function loadProfiles() {
+    supabase
+      .from('permission_profiles')
+      .select('id, name, is_default, permissions')
+      .order('is_default', { ascending: false })
+      .order('name', { ascending: true })
+      .then(function(result) {
+        if (!result.error) {
+          setProfiles(result.data || []);
+        }
+      });
+  }
+
   useEffect(function() {
     loadUsers();
+    loadProfiles();
   }, []);
 
   // Chiama la Edge Function con il token di autenticazione
@@ -201,11 +238,122 @@ export default function UserManagement() {
     );
   }
 
-  if (!hasRole(['super_admin'])) {
+  // --- PERMESSI ---
+  function openPermModal(user) {
+    setPermTarget(user);
+    setPermError(null);
+    setPermSuccess(null);
+    setSelectedProfileId('');
+    setNewProfileName('');
+
+    // Parte dai permessi attuali; se mancano, dai default del ruolo.
+    var base;
+    if (user.permissions && typeof user.permissions === 'object') {
+      base = user.permissions;
+    } else {
+      base = defaultPermissionsForRole(user.role);
+    }
+    // Copia normalizzata su tutte le funzioni note.
+    var matrix = {};
+    FEATURES.forEach(function(f) {
+      matrix[f.key] = base[f.key] || 'none';
+    });
+    setPermMatrix(matrix);
+    setShowPermModal(true);
+  }
+
+  function setFeatureLevel(featureKey, level) {
+    setPermMatrix(function(prev) {
+      var next = {};
+      for (var k in prev) { next[k] = prev[k]; }
+      next[featureKey] = level;
+      return next;
+    });
+  }
+
+  function selectAllPermissions() {
+    var matrix = {};
+    FEATURES.forEach(function(f) {
+      matrix[f.key] = f.type === 'cassa' ? 'full' : 'write';
+    });
+    setPermMatrix(matrix);
+  }
+
+  function clearAllPermissions() {
+    var matrix = {};
+    FEATURES.forEach(function(f) {
+      matrix[f.key] = 'none';
+    });
+    setPermMatrix(matrix);
+  }
+
+  function applyProfile(profileId) {
+    setSelectedProfileId(profileId);
+    if (!profileId) return;
+    var found = profiles.find(function(p) { return p.id === profileId; });
+    if (!found) return;
+    var src = found.permissions || {};
+    var matrix = {};
+    FEATURES.forEach(function(f) {
+      matrix[f.key] = src[f.key] || 'none';
+    });
+    setPermMatrix(matrix);
+  }
+
+  function handleSavePermissions() {
+    setPermError(null);
+    setPermSuccess(null);
+    setPermLoading(true);
+    supabase
+      .from('user_profiles')
+      .update({ permissions: permMatrix })
+      .eq('id', permTarget.id)
+      .then(function(result) {
+        setPermLoading(false);
+        if (result.error) {
+          setPermError('Errore salvataggio permessi: ' + result.error.message);
+        } else {
+          setPermSuccess('Permessi salvati.');
+          loadUsers();
+        }
+      });
+  }
+
+  function handleSaveAsProfile() {
+    setPermError(null);
+    setPermSuccess(null);
+    var nome = (newProfileName || '').trim();
+    if (!nome) {
+      setPermError('Inserisci un nome per il nuovo profilo.');
+      return;
+    }
+    setSaveProfileLoading(true);
+    supabase
+      .from('permission_profiles')
+      .insert({ name: nome, permissions: permMatrix })
+      .then(function(result) {
+        setSaveProfileLoading(false);
+        if (result.error) {
+          setPermError('Errore salvataggio profilo: ' + result.error.message);
+        } else {
+          setPermSuccess('Profilo "' + nome + '" creato.');
+          setNewProfileName('');
+          loadProfiles();
+        }
+      });
+  }
+
+  function levelLabel(featureType, level) {
+    var opts = featureType === 'cassa' ? LEVEL_OPTIONS_CASSA : LEVEL_OPTIONS_STANDARD;
+    var found = opts.find(function(o) { return o.value === level; });
+    return found ? found.label : level;
+  }
+
+  if (!canView('utenti')) {
     return (
       <div className="p-6">
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800 text-sm">
-          Accesso negato. Questa pagina è riservata al Super Admin.
+          Accesso negato. Questa pagina è riservata agli amministratori.
         </div>
       </div>
     );
@@ -217,7 +365,7 @@ export default function UserManagement() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Gestione Utenti App</h1>
-          <p className="text-gray-500 mt-1 text-sm">Crea, blocca e gestisci gli accessi al sistema</p>
+          <p className="text-gray-500 mt-1 text-sm">Crea, blocca, gestisci accessi e permessi</p>
         </div>
         <button
           onClick={function() { setShowNewUserModal(true); setNewUserError(null); setNewUserSuccess(null); }}
@@ -268,7 +416,13 @@ export default function UserManagement() {
                     </td>
                     <td className="px-4 py-3">
                       {!isSelf && (
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-2 flex-wrap">
+                          <button
+                            onClick={function() { openPermModal(user); }}
+                            className="text-xs px-2 py-1 rounded border border-wine-300 text-wine-700 hover:bg-wine-50 transition-colors"
+                          >
+                            Permessi
+                          </button>
                           <button
                             onClick={function() { openResetModal(user); }}
                             className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
@@ -298,6 +452,125 @@ export default function UserManagement() {
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* MODALE PERMESSI */}
+      {showPermModal && permTarget && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900">
+                Permessi di {permTarget.display_name || (permTarget.first_name + ' ' + permTarget.last_name)}
+              </h2>
+              <button onClick={function() { setShowPermModal(false); }} className="text-gray-400 hover:text-gray-600 text-xl font-light">x</button>
+            </div>
+
+            <div className="p-6 overflow-y-auto">
+              {permError && (
+                <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{permError}</div>
+              )}
+              {permSuccess && (
+                <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">{'✓ ' + permSuccess}</div>
+              )}
+
+              {/* Applica un profilo-tipo */}
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-gray-700 mb-1">Applica un profilo-tipo</label>
+                <select
+                  value={selectedProfileId}
+                  onChange={function(e) { applyProfile(e.target.value); }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
+                >
+                  <option value="">— Scegli un profilo —</option>
+                  {profiles.map(function(p) {
+                    return <option key={p.id} value={p.id}>{p.name}{p.is_default ? ' (default)' : ''}</option>;
+                  })}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">Applicare un profilo riempie la matrice qui sotto; puoi comunque modificarla voce per voce prima di salvare.</p>
+              </div>
+
+              {/* Scorciatoie */}
+              <div className="flex gap-2 mb-4">
+                <button
+                  type="button"
+                  onClick={selectAllPermissions}
+                  className="text-xs px-3 py-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                >
+                  Seleziona tutto
+                </button>
+                <button
+                  type="button"
+                  onClick={clearAllPermissions}
+                  className="text-xs px-3 py-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50"
+                >
+                  Azzera tutto
+                </button>
+              </div>
+
+              {/* Matrice funzioni */}
+              <div className="space-y-2">
+                {FEATURES.map(function(f) {
+                  var opts = f.type === 'cassa' ? LEVEL_OPTIONS_CASSA : LEVEL_OPTIONS_STANDARD;
+                  return (
+                    <div key={f.key} className="flex items-center justify-between gap-3 py-1.5 border-b border-gray-100">
+                      <span className="text-sm text-gray-800">{f.label}</span>
+                      <select
+                        value={permMatrix[f.key] || 'none'}
+                        onChange={function(e) { setFeatureLevel(f.key, e.target.value); }}
+                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 min-w-[170px]"
+                      >
+                        {opts.map(function(o) {
+                          return <option key={o.value} value={o.value}>{o.label}</option>;
+                        })}
+                      </select>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Salva come nuovo profilo */}
+              <div className="mt-5 pt-4 border-t border-gray-200">
+                <label className="block text-xs font-medium text-gray-700 mb-1">Salva questa configurazione come nuovo profilo-tipo</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newProfileName}
+                    onChange={function(e) { setNewProfileName(e.target.value); }}
+                    placeholder="Nome profilo (es. Reception)"
+                    className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSaveAsProfile}
+                    disabled={saveProfileLoading}
+                    className="px-3 py-2 border border-wine-300 text-wine-700 rounded-lg text-sm hover:bg-wine-50 disabled:opacity-50"
+                  >
+                    {saveProfileLoading ? 'Salvataggio...' : 'Crea profilo'}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer azioni */}
+            <div className="flex gap-3 px-6 py-4 border-t border-gray-200">
+              <button
+                type="button"
+                onClick={function() { setShowPermModal(false); }}
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
+              >
+                Chiudi
+              </button>
+              <button
+                type="button"
+                onClick={handleSavePermissions}
+                disabled={permLoading}
+                className="flex-1 bg-wine-700 hover:bg-wine-800 disabled:bg-wine-300 text-white px-4 py-2 rounded-lg text-sm font-medium"
+              >
+                {permLoading ? 'Salvataggio...' : 'Salva permessi'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -372,6 +645,7 @@ export default function UserManagement() {
                     return <option key={r.value} value={r.value}>{r.label}</option>;
                   })}
                 </select>
+                <p className="text-xs text-gray-400 mt-1">Il nuovo utente parte dai permessi predefiniti del ruolo; potrai personalizzarli con il pulsante "Permessi".</p>
               </div>
               <div className="flex gap-3 pt-2">
                 {!newUserSuccess ? (

@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 
 export default function Layout({ children }) {
-  var { profile, signOut, hasRole } = useAuth();
+  var { profile, signOut, canView } = useAuth();
   var navigate = useNavigate();
   var [mobileOpen, setMobileOpen] = useState(false);
 
@@ -33,6 +33,9 @@ export default function Layout({ children }) {
     return navLinkBase + (isActive ? navLinkActive : navLinkInactive);
   }
 
+  // La sezione Amministrazione contiene solo Impostazioni.
+  var showAdminSection = canView('impostazioni');
+
   var sidebarContent = (
     <div className="flex flex-col h-full">
 
@@ -47,25 +50,29 @@ export default function Layout({ children }) {
 
         <div className="text-wine-400 text-xs font-semibold uppercase tracking-wider px-3 mb-2">Gestione</div>
 
-        <NavLink
-          to="/prenotazioni"
-          className={function(p) { return navClass(p.isActive); }}
-          onClick={function() { setMobileOpen(false); }}
-        >
-          <span className="text-base">📅</span>
-          Prenotazioni
-        </NavLink>
+        {canView('prenotazioni') && (
+          <NavLink
+            to="/prenotazioni"
+            className={function(p) { return navClass(p.isActive); }}
+            onClick={function() { setMobileOpen(false); }}
+          >
+            <span className="text-base">📅</span>
+            Prenotazioni
+          </NavLink>
+        )}
 
-        <NavLink
-          to="/clienti"
-          className={function(p) { return navClass(p.isActive); }}
-          onClick={function() { setMobileOpen(false); }}
-        >
-          <span className="text-base">👥</span>
-          Clienti
-        </NavLink>
+        {canView('clienti') && (
+          <NavLink
+            to="/clienti"
+            className={function(p) { return navClass(p.isActive); }}
+            onClick={function() { setMobileOpen(false); }}
+          >
+            <span className="text-base">👥</span>
+            Clienti
+          </NavLink>
+        )}
 
-        {hasRole(['super_admin', 'proprieta', 'direttore', 'reception', 'sala']) && (
+        {canView('sale') && (
           <NavLink
             to="/sale"
             className={function(p) { return navClass(p.isActive); }}
@@ -76,7 +83,7 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
-        {hasRole(['super_admin', 'direttore', 'reception']) && (
+        {canView('staff') && (
           <NavLink
             to="/staff"
             className={function(p) { return navClass(p.isActive); }}
@@ -87,7 +94,7 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
-        {hasRole(['super_admin', 'direttore']) && (
+        {canView('turni') && (
           <NavLink
             to="/turni"
             className={function(p) { return navClass(p.isActive); }}
@@ -98,7 +105,7 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
-        {hasRole(['super_admin', 'proprieta', 'direttore', 'reception', 'sala']) && (
+        {canView('cassa') && (
           <NavLink
             to="/cassa"
             className={function(p) { return navClass(p.isActive); }}
@@ -109,22 +116,24 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
-        {hasRole(['super_admin', 'direttore']) && (
+        {showAdminSection && (
           <>
             <div className="text-wine-400 text-xs font-semibold uppercase tracking-wider px-3 mt-4 mb-2">Amministrazione</div>
 
-            <NavLink
-              to="/impostazioni"
-              className={function(p) { return navClass(p.isActive); }}
-              onClick={function() { setMobileOpen(false); }}
-            >
-              <span className="text-base">⚙️</span>
-              Impostazioni
-            </NavLink>
+            {canView('impostazioni') && (
+              <NavLink
+                to="/impostazioni"
+                className={function(p) { return navClass(p.isActive); }}
+                onClick={function() { setMobileOpen(false); }}
+              >
+                <span className="text-base">⚙️</span>
+                Impostazioni
+              </NavLink>
+            )}
           </>
         )}
 
-        {hasRole(['super_admin']) && (
+        {canView('utenti') && (
           <NavLink
             to="/utenti"
             className={function(p) { return navClass(p.isActive); }}
