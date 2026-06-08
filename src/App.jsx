@@ -17,9 +17,12 @@ import UserManagement from './pages/UserManagement';
 import ProfilePage from './pages/ProfilePage';
 import CassaPage from './pages/CassaPage';
 import SalePage from './pages/SalePage';
+import OrdiniBordoPage from './pages/OrdiniBordoPage';
+import ListinoBordoPage from './pages/ListinoBordoPage';
+import OrdineBordoPubblico from './pages/OrdineBordoPubblico';
 
-// ProtectedRoute basato sul nuovo sistema di permessi.
-// - feature: chiave della funzione (es. 'clienti'); se assente, basta essere loggati.
+// ProtectedRoute basato sul sistema di permessi.
+// - feature: chiave della funzione; se assente, basta essere loggati.
 // - requireEdit: se true, richiede il permesso di scrittura sulla funzione.
 function ProtectedRoute({ children, feature, requireEdit }) {
   var { session, loading, canView, canEdit } = useAuth();
@@ -154,10 +157,22 @@ function AppRoutes() {
           </ProtectedRoute>
         } />
 
-        {/* Cassa - Reception e Ristorante */}
+        {/* Cassa */}
         <Route path="/cassa" element={
           <ProtectedRoute feature="cassa">
             <CassaPage />
+          </ProtectedRoute>
+        } />
+
+        {/* Ordini Bordo (staff) */}
+        <Route path="/ordini-bordo" element={
+          <ProtectedRoute feature="ordini_bordo">
+            <OrdiniBordoPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/listino-bordo" element={
+          <ProtectedRoute feature="ordini_bordo" requireEdit>
+            <ListinoBordoPage />
           </ProtectedRoute>
         } />
 
@@ -175,7 +190,7 @@ function AppRoutes() {
           </ProtectedRoute>
         } />
 
-        {/* Profilo personale - tutti gli utenti autenticati */}
+        {/* Profilo personale */}
         <Route path="/profilo" element={
           <ProtectedRoute>
             <ProfilePage />
@@ -191,6 +206,12 @@ function AppRoutes() {
 }
 
 export default function App() {
+  // Area pubblica del QR: pagina autonoma, completamente fuori dal
+  // gestionale (niente login, niente AuthProvider, niente Layout).
+  if (typeof window !== 'undefined' && window.location.pathname === '/ordina') {
+    return <OrdineBordoPubblico />;
+  }
+
   return (
     <BrowserRouter>
       <AuthProvider>

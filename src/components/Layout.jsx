@@ -3,7 +3,7 @@ import { NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 
 export default function Layout({ children }) {
-  var { profile, signOut, canView } = useAuth();
+  var { profile, signOut, canView, canEdit } = useAuth();
   var navigate = useNavigate();
   var [mobileOpen, setMobileOpen] = useState(false);
 
@@ -33,7 +33,6 @@ export default function Layout({ children }) {
     return navLinkBase + (isActive ? navLinkActive : navLinkInactive);
   }
 
-  // La sezione Amministrazione contiene solo Impostazioni.
   var showAdminSection = canView('impostazioni');
 
   var sidebarContent = (
@@ -113,6 +112,28 @@ export default function Layout({ children }) {
           >
             <span className="text-base">💰</span>
             Cassa
+          </NavLink>
+        )}
+
+        {canView('ordini_bordo') && (
+          <NavLink
+            to="/ordini-bordo"
+            className={function(p) { return navClass(p.isActive); }}
+            onClick={function() { setMobileOpen(false); }}
+          >
+            <span className="text-base">🍹</span>
+            Ordini Bordo
+          </NavLink>
+        )}
+
+        {canEdit('ordini_bordo') && (
+          <NavLink
+            to="/listino-bordo"
+            className={function(p) { return navClass(p.isActive); }}
+            onClick={function() { setMobileOpen(false); }}
+          >
+            <span className="text-base">📋</span>
+            Listino Bordo
           </NavLink>
         )}
 

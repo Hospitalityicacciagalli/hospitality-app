@@ -16,26 +16,27 @@ export var FEATURES = [
   { key: 'staff',        label: 'Staff',          type: 'standard' },
   { key: 'turni',        label: 'Turni',          type: 'standard' },
   { key: 'cassa',        label: 'Cassa',          type: 'cassa' },
+  { key: 'ordini_bordo', label: 'Ordini Bordo',   type: 'standard' },
   { key: 'impostazioni', label: 'Impostazioni',   type: 'standard' },
   { key: 'utenti',       label: 'Utenti App',     type: 'standard' }
 ]
 
 // ============================================================
 // Permessi predefiniti per ruolo.
-// Deve coincidere con la migrazione SQL (punto 5).
+// Deve coincidere con la migrazione SQL.
 // Usato come fallback se un profilo non ha ancora il jsonb popolato.
 // ============================================================
 export var DEFAULT_PERMS_BY_ROLE = {
-  super_admin: { prenotazioni: 'write', clienti: 'write', sale: 'write', staff: 'write', turni: 'write', cassa: 'full',  impostazioni: 'write', utenti: 'write' },
-  proprieta:   { prenotazioni: 'write', clienti: 'write', sale: 'read',  staff: 'none',  turni: 'none',  cassa: 'full',  impostazioni: 'none',  utenti: 'none' },
-  direttore:   { prenotazioni: 'write', clienti: 'write', sale: 'read',  staff: 'write', turni: 'write', cassa: 'full',  impostazioni: 'write', utenti: 'none' },
-  reception:   { prenotazioni: 'write', clienti: 'write', sale: 'read',  staff: 'read',  turni: 'none',  cassa: 'full',  impostazioni: 'none',  utenti: 'none' },
-  sala:        { prenotazioni: 'write', clienti: 'write', sale: 'read',  staff: 'none',  turni: 'none',  cassa: 'full',  impostazioni: 'none',  utenti: 'none' },
-  cucina:      { prenotazioni: 'read',  clienti: 'read',  sale: 'none',  staff: 'none',  turni: 'none',  cassa: 'none',  impostazioni: 'none',  utenti: 'none' }
+  super_admin: { prenotazioni: 'write', clienti: 'write', sale: 'write', staff: 'write', turni: 'write', cassa: 'full',  ordini_bordo: 'write', impostazioni: 'write', utenti: 'write' },
+  proprieta:   { prenotazioni: 'write', clienti: 'write', sale: 'read',  staff: 'none',  turni: 'none',  cassa: 'full',  ordini_bordo: 'read',  impostazioni: 'none',  utenti: 'none' },
+  direttore:   { prenotazioni: 'write', clienti: 'write', sale: 'read',  staff: 'write', turni: 'write', cassa: 'full',  ordini_bordo: 'write', impostazioni: 'write', utenti: 'none' },
+  reception:   { prenotazioni: 'write', clienti: 'write', sale: 'read',  staff: 'read',  turni: 'none',  cassa: 'full',  ordini_bordo: 'write', impostazioni: 'none',  utenti: 'none' },
+  sala:        { prenotazioni: 'write', clienti: 'write', sale: 'read',  staff: 'none',  turni: 'none',  cassa: 'full',  ordini_bordo: 'write', impostazioni: 'none',  utenti: 'none' },
+  cucina:      { prenotazioni: 'read',  clienti: 'read',  sale: 'none',  staff: 'none',  turni: 'none',  cassa: 'none',  ordini_bordo: 'none',  impostazioni: 'none',  utenti: 'none' }
 }
 
 // Pavimento di sicurezza per ruoli non previsti.
-var BASE_FALLBACK = { prenotazioni: 'write', clienti: 'write', sale: 'none', staff: 'none', turni: 'none', cassa: 'light', impostazioni: 'none', utenti: 'none' }
+var BASE_FALLBACK = { prenotazioni: 'write', clienti: 'write', sale: 'none', staff: 'none', turni: 'none', cassa: 'light', ordini_bordo: 'none', impostazioni: 'none', utenti: 'none' }
 
 export function defaultPermissionsForRole(role) {
   return DEFAULT_PERMS_BY_ROLE[role] || BASE_FALLBACK
@@ -55,7 +56,6 @@ export function AuthProvider(props) {
   var setLoading = loadingState[1]
 
   useEffect(function() {
-    // Controlla la sessione attuale
     supabase.auth.getSession().then(function(result) {
       setSession(result.data.session)
       if (result.data.session) {
@@ -65,7 +65,6 @@ export function AuthProvider(props) {
       }
     })
 
-    // Ascolta cambiamenti di autenticazione
     var listener = supabase.auth.onAuthStateChange(function(event, newSession) {
       setSession(newSession)
       if (newSession) {
@@ -110,20 +109,16 @@ export function AuthProvider(props) {
   // NUOVO SISTEMA — permessi per funzione
   // ----------------------------------------------------------
 
-  // Ritorna l'oggetto dei permessi effettivi del profilo corrente.
   function currentPermissions() {
     if (!profile) return {}
     if (profile.permissions && typeof profile.permissions === 'object') {
       return profile.permissions
     }
-    // Fallback se il jsonb non e' ancora popolato.
     return defaultPermissionsForRole(profile.role)
   }
 
-  // Livello per una funzione: 'none' | 'read' | 'write' (oppure 'none' | 'light' | 'full' per la cassa).
   function permissionLevel(feature) {
     if (!profile) return 'none'
-    // Il super_admin ha sempre il massimo, a prova di blocco.
     if (profile.role === 'super_admin') {
       return feature === 'cassa' ? 'full' : 'write'
     }
@@ -131,12 +126,10 @@ export function AuthProvider(props) {
     return perms[feature] || 'none'
   }
 
-  // Puo' vedere/accedere alla funzione?
   function canView(feature) {
     return permissionLevel(feature) !== 'none'
   }
 
-  // Puo' modificare/scrivere nella funzione?
   function canEdit(feature) {
     var lvl = permissionLevel(feature)
     if (feature === 'cassa') return lvl === 'full'
@@ -144,8 +137,7 @@ export function AuthProvider(props) {
   }
 
   // ----------------------------------------------------------
-  // RETROCOMPATIBILITA' — il vecchio sistema a ruoli resta attivo
-  // per le pagine non ancora migrate al nuovo modello.
+  // RETROCOMPATIBILITA' — vecchio sistema a ruoli (pagine non migrate)
   // ----------------------------------------------------------
   function hasRole(roles) {
     if (!profile) return false
@@ -191,12 +183,10 @@ export function AuthProvider(props) {
     loading: loading,
     signIn: signIn,
     signOut: signOut,
-    // nuovo sistema permessi
     permissionLevel: permissionLevel,
     canView: canView,
     canEdit: canEdit,
     currentPermissions: currentPermissions,
-    // retrocompatibilita'
     hasRole: hasRole,
     canWrite: canWrite
   }
