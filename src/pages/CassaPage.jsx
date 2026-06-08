@@ -477,7 +477,7 @@ function FormMovimento(props) {
             <label style={S.label}>Tavolo (opzionale)</label>
             <select value={tavoloId} onChange={function(e) { setTavoloId(e.target.value); }} style={S.select}>
               <option value="">nessun tavolo</option>
-              {tavoli.map(function(t) { return <option key={t.id} value={t.id}>{t.nome} ({t.capacita} posti)</option>; })}
+              {tavoli.map(function(t) { return <option key={t.id} value={t.id}>{t.nome}{t.capacita ? ' (' + t.capacita + ' posti)' : ''}</option>; })}
             </select>
           </div>
         )}
@@ -726,7 +726,7 @@ function VistaTavoli(props) {
             >
               <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: coloreStato, margin: '0 auto 8px auto' }}></div>
               <div style={{ color: '#f8fafc', fontWeight: '700', fontSize: '14px', marginBottom: '4px' }}>{tavolo.nome}</div>
-              <div style={{ color: '#64748b', fontSize: '11px', marginBottom: stato !== 'libero' ? '8px' : '0' }}>{tavolo.capacita} posti</div>
+              {tavolo.capacita ? <div style={{ color: '#64748b', fontSize: '11px', marginBottom: stato !== 'libero' ? '8px' : '0' }}>{tavolo.capacita} posti</div> : null}
               {stato !== 'libero' && (
                 <div style={{ color: '#4ade80', fontFamily: 'Georgia, serif', fontWeight: '700', fontSize: '14px' }}>
                   {formatEuro(totale)}
@@ -779,9 +779,9 @@ export default function CassaPage() {
     });
   }, []);
 
-  // Carica tavoli da tavoli_sala (allineato con SalePage)
+  // Carica tavoli dalla tabella semplificata 'tavoli_sala' (colonne reali: id, sala_id, nome, attivo, ordine)
   useEffect(function() {
-    supabase.from('tavoli_sala').select('id, nome, capacita').eq('attivo', true).order('nome').then(function(r) {
+    supabase.from('tavoli_sala').select('id, nome, attivo, ordine').eq('attivo', true).order('ordine').then(function(r) {
       if (r.data) setTavoli(r.data);
     });
   }, []);
