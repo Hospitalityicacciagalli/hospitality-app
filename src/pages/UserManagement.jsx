@@ -71,6 +71,13 @@ export default function UserManagement() {
   var [newProfileName, setNewProfileName] = useState('');
   var [saveProfileLoading, setSaveProfileLoading] = useState(false);
 
+  // Modale reset PIN
+  var [showPinModal, setShowPinModal] = useState(false);
+  var [pinTarget, setPinTarget] = useState(null);
+  var [pinLoading, setPinLoading] = useState(false);
+  var [pinMessage, setPinMessage] = useState(null);
+  var [pinError, setPinError] = useState(null);
+
   var roleOptions = [
     { value: 'super_admin', label: 'Super Admin' },
     { value: 'proprieta', label: 'Proprietà' },
@@ -420,6 +427,28 @@ export default function UserManagement() {
       });
   }
 
+  // --- RESET PIN ---
+  function openPinModal(user) {
+    setPinTarget(user);
+    setPinMessage(null);
+    setPinError(null);
+    setShowPinModal(true);
+  }
+
+  function handleResetPin() {
+    setPinMessage(null);
+    setPinError(null);
+    setPinLoading(true);
+    supabase.rpc('reset_pin', { p_user_id: pinTarget.id }).then(function(result) {
+      setPinLoading(false);
+      if (result.error) {
+        setPinError('Errore reset PIN: ' + result.error.message);
+      } else {
+        setPinMessage('PIN azzerato. L\'utente dovrà impostarne uno nuovo dal proprio profilo.');
+      }
+    });
+  }
+
   if (!canView('utenti')) {
     return (
       <div className="p-6">
@@ -509,6 +538,12 @@ export default function UserManagement() {
                               className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
                             >
                               Reset password
+                            </button>
+                            <button
+                              onClick={function() { openPinModal(user); }}
+                              className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
+                            >
+                              Reset PIN
                             </button>
                             {isActive ? (
                               <button
@@ -947,6 +982,48 @@ export default function UserManagement() {
                     <p className="text-sm font-medium text-gray-900">{resetMessage}</p>
                   </div>
                   <button onClick={function() { setShowResetModal(false); }} className="w-full bg-wine-700 hover:bg-wine-800 text-white px-4 py-2 rounded-lg text-sm font-medium mt-2">Chiudi</button>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODALE RESET PIN */}
+      {showPinModal && pinTarget && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900">Reset PIN</h2>
+              <button onClick={function() { setShowPinModal(false); }} className="text-gray-400 hover:text-gray-600 text-xl font-light">x</button>
+            </div>
+            <div className="p-6">
+              {!pinMessage ? (
+                <>
+                  <p className="text-sm text-gray-600 mb-6">
+                    Stai per azzerare il PIN di <strong>{pinTarget.display_name || (pinTarget.first_name + ' ' + pinTarget.last_name)}</strong>. Dopo il reset l'utente dovrà impostarne uno nuovo dal proprio profilo.
+                  </p>
+                  {pinError && (
+                    <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{pinError}</div>
+                  )}
+                  <div className="flex gap-3">
+                    <button onClick={function() { setShowPinModal(false); }} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">Annulla</button>
+                    <button
+                      onClick={handleResetPin}
+                      disabled={pinLoading}
+                      className="flex-1 bg-wine-700 hover:bg-wine-800 disabled:bg-wine-300 text-white px-4 py-2 rounded-lg text-sm font-medium"
+                    >
+                      {pinLoading ? 'Operazione...' : 'Azzera PIN'}
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="text-center py-4">
+                    <div className="text-4xl mb-3">🔢</div>
+                    <p className="text-sm font-medium text-gray-900">{pinMessage}</p>
+                  </div>
+                  <button onClick={function() { setShowPinModal(false); }} className="w-full bg-wine-700 hover:bg-wine-800 text-white px-4 py-2 rounded-lg text-sm font-medium mt-2">Chiudi</button>
                 </>
               )}
             </div>
