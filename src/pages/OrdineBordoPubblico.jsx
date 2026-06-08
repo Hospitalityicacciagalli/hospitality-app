@@ -6,18 +6,18 @@ var T = {
   it: {
     title: 'Ordina dal tuo lettino',
     subtitle: 'Scegli i prodotti, indica dove ti trovi e invia. Te li portiamo noi.',
-    lang: 'Lingua',
     room: 'Numero camera',
     name: 'Nome',
     place: 'Dove ti trovi',
     pool: 'Piscina',
     lake: 'Biolago',
     notes: 'Note (allergie, preferenze...)',
-    yourOrder: 'Il tuo ordine',
-    empty: 'Nessun prodotto selezionato',
     total: 'Totale',
-    send: 'Invia ordine',
+    review: 'Rivedi e invia',
+    summaryTitle: 'Riepilogo ordine',
+    confirmSend: 'Conferma e invia',
     sending: 'Invio in corso...',
+    edit: 'Modifica',
     okTitle: 'Ordine inviato!',
     okText: 'Lo staff ha ricevuto la tua richiesta. Arriviamo il prima possibile.',
     newOrder: 'Nuovo ordine',
@@ -25,23 +25,26 @@ var T = {
     errEmpty: 'Seleziona almeno un prodotto.',
     errGeneric: 'Si è verificato un errore. Riprova.',
     loading: 'Caricamento listino...',
-    noItems: 'Al momento non ci sono prodotti disponibili.'
+    noItems: 'Al momento non ci sono prodotti disponibili.',
+    other: 'Altro',
+    yourData: 'I tuoi dati',
+    items: 'Prodotti'
   },
   en: {
     title: 'Order from your sunbed',
     subtitle: 'Pick what you like, tell us where you are and send. We bring it to you.',
-    lang: 'Language',
     room: 'Room number',
     name: 'Name',
     place: 'Where you are',
     pool: 'Pool',
     lake: 'Natural pond',
     notes: 'Notes (allergies, preferences...)',
-    yourOrder: 'Your order',
-    empty: 'No items selected',
     total: 'Total',
-    send: 'Send order',
+    review: 'Review and send',
+    summaryTitle: 'Order summary',
+    confirmSend: 'Confirm and send',
     sending: 'Sending...',
+    edit: 'Edit',
     okTitle: 'Order sent!',
     okText: 'Our staff received your request. We will be there as soon as possible.',
     newOrder: 'New order',
@@ -49,7 +52,10 @@ var T = {
     errEmpty: 'Please select at least one item.',
     errGeneric: 'Something went wrong. Please try again.',
     loading: 'Loading menu...',
-    noItems: 'There are no available items at the moment.'
+    noItems: 'There are no available items at the moment.',
+    other: 'Other',
+    yourData: 'Your details',
+    items: 'Items'
   }
 };
 
@@ -63,6 +69,9 @@ export default function OrdineBordoPubblico() {
   var [nome, setNome] = useState('');
   var [luogo, setLuogo] = useState('piscina');
   var [note, setNote] = useState('');
+
+  var [aperte, setAperte] = useState({}); // { categoria: true }
+  var [mostraRiepilogo, setMostraRiepilogo] = useState(false);
 
   var [sending, setSending] = useState(false);
   var [error, setError] = useState(null);
@@ -118,6 +127,10 @@ export default function OrdineBordoPubblico() {
     return tot;
   }
 
+  function vociSelezionate() {
+    return voci.filter(function(v) { return (quantita[v.id] || 0) > 0; });
+  }
+
   function righeSelezionate() {
     var righe = [];
     voci.forEach(function(v) {
@@ -129,26 +142,44 @@ export default function OrdineBordoPubblico() {
     return righe;
   }
 
-  function handleSend() {
-    setError(null);
+  function toggleCat(cat) {
+    setAperte(function(prev) {
+      var next = {};
+      for (var k in prev) { next[k] = prev[k]; }
+      next[cat] = !next[cat];
+      return next;
+    });
+  }
 
+  function articoliInCategoria(lista) {
+    var n = 0;
+    lista.forEach(function(v) { n = n + (quantita[v.id] || 0); });
+    return n;
+  }
+
+  function vaiAlRiepilogo() {
+    setError(null);
     if (!camera.trim() || !nome.trim()) {
       setError(t.errRoom);
       return;
     }
-    var righe = righeSelezionate();
-    if (righe.length === 0) {
+    if (righeSelezionate().length === 0) {
       setError(t.errEmpty);
       return;
     }
+    setMostraRiepilogo(true);
+    if (typeof window !== 'undefined') { window.scrollTo(0, 0); }
+  }
 
+  function confermaInvio() {
+    setError(null);
     setSending(true);
     supabase.rpc('crea_ordine_bordo', {
       p_numero_camera: camera.trim(),
       p_nome_cliente: nome.trim(),
       p_luogo: luogo,
       p_note: note.trim(),
-      p_righe: righe
+      p_righe: righeSelezionate()
     }).then(function(result) {
       setSending(false);
       if (result.error) {
@@ -162,6 +193,8 @@ export default function OrdineBordoPubblico() {
   function reset() {
     setQuantita({});
     setNote('');
+    setAperte({});
+    setMostraRiepilogo(false);
     setSent(false);
     setError(null);
   }
@@ -170,7 +203,7 @@ export default function OrdineBordoPubblico() {
   var categorie = [];
   var perCategoria = {};
   voci.forEach(function(v) {
-    var cat = v.categoria || '';
+    var cat = v.categoria || t.other;
     if (!perCategoria[cat]) {
       perCategoria[cat] = [];
       categorie.push(cat);
@@ -178,7 +211,9 @@ export default function OrdineBordoPubblico() {
     perCategoria[cat].push(v);
   });
 
-  var righeTot = righeSelezionate();
+  function luogoLabel() {
+    return luogo === 'piscina' ? t.pool : t.lake;
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-wine-50 to-white">
@@ -186,9 +221,7 @@ export default function OrdineBordoPubblico() {
 
         {/* Intestazione + lingua */}
         <div className="flex items-start justify-between mb-2">
-          <div>
-            <div className="text-wine-800 font-bold text-xl leading-tight">I Cacciagalli</div>
-          </div>
+          <div className="text-wine-800 font-bold text-xl leading-tight">I Cacciagalli</div>
           <div className="flex gap-1">
             <button
               onClick={function() { setLang('it'); }}
@@ -217,7 +250,54 @@ export default function OrdineBordoPubblico() {
               {t.newOrder}
             </button>
           </div>
+        ) : mostraRiepilogo ? (
+          /* ---- RIEPILOGO ---- */
+          <div className="mt-2">
+            <h1 className="text-2xl font-bold text-gray-900 mb-4">{t.summaryTitle}</h1>
+
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 mb-4">
+              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">{t.yourData}</div>
+              <div className="flex justify-between py-1 text-sm">
+                <span className="text-gray-500">{t.room}</span>
+                <span className="font-medium text-gray-900">{camera}</span>
+              </div>
+              <div className="flex justify-between py-1 text-sm">
+                <span className="text-gray-500">{t.name}</span>
+                <span className="font-medium text-gray-900">{nome}</span>
+              </div>
+              <div className="flex justify-between py-1 text-sm">
+                <span className="text-gray-500">{t.place}</span>
+                <span className="font-medium text-gray-900">{luogoLabel()}</span>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 mb-4">
+              <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">{t.items}</div>
+              <ul className="divide-y divide-gray-100">
+                {vociSelezionate().map(function(v) {
+                  var q = quantita[v.id] || 0;
+                  return (
+                    <li key={v.id} className="flex justify-between py-2 text-sm">
+                      <span className="text-gray-800"><span className="font-medium">{q}×</span> {nomeVoce(v)}</span>
+                      <span className="text-gray-500">€ {(Number(v.prezzo) * q).toFixed(2)}</span>
+                    </li>
+                  );
+                })}
+              </ul>
+              {note.trim() ? (
+                <div className="mt-3 p-2 bg-amber-50 border border-amber-100 rounded text-xs text-amber-800">{note}</div>
+              ) : null}
+            </div>
+
+            <button
+              onClick={function() { setMostraRiepilogo(false); }}
+              className="text-sm text-wine-700 font-medium underline"
+            >
+              {t.edit}
+            </button>
+          </div>
         ) : (
+          /* ---- LISTINO ---- */
           <>
             <h1 className="text-2xl font-bold text-gray-900">{t.title}</h1>
             <p className="text-gray-500 text-sm mt-1 mb-5">{t.subtitle}</p>
@@ -263,58 +343,78 @@ export default function OrdineBordoPubblico() {
               </div>
             </div>
 
-            {/* Listino */}
+            {/* Listino a fisarmonica per categoria */}
             {loading ? (
               <div className="text-center py-12 text-gray-400">{t.loading}</div>
             ) : voci.length === 0 ? (
               <div className="bg-white rounded-2xl border border-gray-200 p-8 text-center text-gray-400">{t.noItems}</div>
             ) : (
-              categorie.map(function(cat) {
-                return (
-                  <div key={cat || 'senza'} className="mb-5">
-                    {cat ? (
-                      <div className="text-wine-700 text-xs font-semibold uppercase tracking-wider mb-2 px-1">{cat}</div>
-                    ) : null}
-                    <div className="space-y-2">
-                      {perCategoria[cat].map(function(v) {
-                        var q = quantita[v.id] || 0;
-                        var desc = descVoce(v);
-                        return (
-                          <div key={v.id} className="bg-white rounded-xl border border-gray-200 p-3 flex items-center gap-3">
-                            <div className="flex-1 min-w-0">
-                              <div className="font-medium text-gray-900">{nomeVoce(v)}</div>
-                              {desc ? <div className="text-xs text-gray-500 mt-0.5">{desc}</div> : null}
-                              <div className="text-sm text-wine-700 font-medium mt-1">€ {Number(v.prezzo).toFixed(2)}</div>
-                            </div>
-                            <div className="flex items-center gap-2 flex-shrink-0">
-                              {q > 0 && (
-                                <button
-                                  onClick={function() { setQta(v.id, -1); }}
-                                  className="w-9 h-9 rounded-full bg-gray-100 text-gray-700 text-lg font-medium flex items-center justify-center"
-                                >
-                                  −
-                                </button>
-                              )}
-                              {q > 0 && <span className="w-6 text-center font-medium">{q}</span>}
-                              <button
-                                onClick={function() { setQta(v.id, 1); }}
-                                className="w-9 h-9 rounded-full bg-wine-700 text-white text-lg font-medium flex items-center justify-center"
-                              >
-                                +
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
+              <div className="space-y-3">
+                {categorie.map(function(cat) {
+                  var lista = perCategoria[cat];
+                  var aperta = !!aperte[cat];
+                  var nSel = articoliInCategoria(lista);
+                  return (
+                    <div key={cat} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                      <button
+                        onClick={function() { toggleCat(cat); }}
+                        className="w-full flex items-center justify-between px-4 py-3 text-left"
+                      >
+                        <span className="flex items-center gap-2 font-semibold text-gray-900">
+                          <span className="text-gray-400">{aperta ? '▾' : '▸'}</span>
+                          {cat}
+                        </span>
+                        <span className="flex items-center gap-2">
+                          {nSel > 0 && (
+                            <span className="bg-wine-700 text-white text-xs font-medium rounded-full w-6 h-6 flex items-center justify-center">{nSel}</span>
+                          )}
+                          <span className="text-xs text-gray-400">{lista.length}</span>
+                        </span>
+                      </button>
+
+                      {aperta && (
+                        <div className="px-3 pb-3 space-y-2 border-t border-gray-100 pt-3">
+                          {lista.map(function(v) {
+                            var q = quantita[v.id] || 0;
+                            var desc = descVoce(v);
+                            return (
+                              <div key={v.id} className="flex items-center gap-3 p-2 rounded-lg bg-gray-50">
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-medium text-gray-900">{nomeVoce(v)}</div>
+                                  {desc ? <div className="text-xs text-gray-500 mt-0.5">{desc}</div> : null}
+                                  <div className="text-sm text-wine-700 font-medium mt-1">€ {Number(v.prezzo).toFixed(2)}</div>
+                                </div>
+                                <div className="flex items-center gap-2 flex-shrink-0">
+                                  {q > 0 && (
+                                    <button
+                                      onClick={function() { setQta(v.id, -1); }}
+                                      className="w-9 h-9 rounded-full bg-gray-200 text-gray-700 text-lg font-medium flex items-center justify-center"
+                                    >
+                                      −
+                                    </button>
+                                  )}
+                                  {q > 0 && <span className="w-6 text-center font-medium">{q}</span>}
+                                  <button
+                                    onClick={function() { setQta(v.id, 1); }}
+                                    className="w-9 h-9 rounded-full bg-wine-700 text-white text-lg font-medium flex items-center justify-center"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                  </div>
-                );
-              })
+                  );
+                })}
+              </div>
             )}
 
             {/* Note */}
             {voci.length > 0 && (
-              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 mb-4">
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-4 mt-4">
                 <label className="block text-xs font-medium text-gray-700 mb-1">{t.notes}</label>
                 <textarea
                   value={note}
@@ -328,7 +428,7 @@ export default function OrdineBordoPubblico() {
         )}
       </div>
 
-      {/* Barra inferiore fissa con totale e invio */}
+      {/* Barra inferiore fissa */}
       {!sent && voci.length > 0 && (
         <div className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 px-4 py-3">
           <div className="max-w-xl mx-auto">
@@ -340,13 +440,23 @@ export default function OrdineBordoPubblico() {
                 <div className="text-xs text-gray-500">{t.total}</div>
                 <div className="text-xl font-bold text-gray-900">€ {totale().toFixed(2)}</div>
               </div>
-              <button
-                onClick={handleSend}
-                disabled={sending || righeTot.length === 0}
-                className="flex-1 max-w-[220px] bg-wine-700 hover:bg-wine-800 disabled:bg-gray-300 text-white px-6 py-3.5 rounded-xl text-base font-semibold"
-              >
-                {sending ? t.sending : t.send}
-              </button>
+              {mostraRiepilogo ? (
+                <button
+                  onClick={confermaInvio}
+                  disabled={sending}
+                  className="flex-1 max-w-[220px] bg-wine-700 hover:bg-wine-800 disabled:bg-gray-300 text-white px-6 py-3.5 rounded-xl text-base font-semibold"
+                >
+                  {sending ? t.sending : t.confirmSend}
+                </button>
+              ) : (
+                <button
+                  onClick={vaiAlRiepilogo}
+                  disabled={righeSelezionate().length === 0}
+                  className="flex-1 max-w-[220px] bg-wine-700 hover:bg-wine-800 disabled:bg-gray-300 text-white px-6 py-3.5 rounded-xl text-base font-semibold"
+                >
+                  {t.review}
+                </button>
+              )}
             </div>
           </div>
         </div>

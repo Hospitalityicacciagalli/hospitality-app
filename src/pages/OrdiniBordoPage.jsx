@@ -19,38 +19,105 @@ function luogoLabel(luogo) {
   return luogo;
 }
 
-function beep() {
-  try {
-    var Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return;
-    var ctx = new Ctx();
-    var osc = ctx.createOscillator();
-    var gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.type = 'sine';
-    osc.frequency.value = 880;
-    gain.gain.value = 0.12;
-    osc.start();
-    setTimeout(function() {
-      osc.stop();
-      ctx.close();
-    }, 350);
-  } catch (e) {
-    // silenzioso
-  }
-}
-
 export default function OrdiniBordoPage() {
   var [ordini, setOrdini] = useState([]);
   var [loading, setLoading] = useState(true);
   var [error, setError] = useState(null);
   var [filtro, setFiltro] = useState('attivi');
-  var [flash, setFlash] = useState(false);
 
-  // Ref per evitare beep al primo caricamento
-  var primoCaricamento = useRef(true);
+  // Allarme sonoro/visivo
+  var [allarme, setAllarme] = useState(false);
+  var [audioPronto, setAudioPronto] = useState(false);
+  var audioCtxRef = useRef(null);
+  var intervalRef = useRef(null);
 
+  // ---- Audio ----
+  function ensureAudio() {
+    try {
+      if (!audioCtxRef.current) {
+        var Ctx = window.AudioContext || window.webkitAudioContext;
+        if (!Ctx) return;
+        audioCtxRef.current = new Ctx();
+      }
+      audioCtxRef.current.resume().then(function() {
+        setAudioPronto(true);
+      });
+    } catch (e) {
+      // silenzioso
+    }
+  }
+
+  function beepOnce() {
+    var ctx = audioCtxRef.current;
+    if (!ctx) return;
+    try {
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.value = 1000;
+      var t = ctx.currentTime;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.28, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+      osc.start(t);
+      osc.stop(t + 0.3);
+    } catch (e) {
+      // silenzioso
+    }
+  }
+
+  function stopAllarme() {
+    setAllarme(false);
+  }
+
+  // Sblocca l'audio al primo tocco/click in pagina (in aggiunta al pulsante)
+  useEffect(function() {
+    function unlock() {
+      ensureAudio();
+    }
+    document.addEventListener('click', unlock);
+    document.addEventListener('touchstart', unlock);
+    return function() {
+      document.removeEventListener('click', unlock);
+      document.removeEventListener('touchstart', unlock);
+    };
+  }, []);
+
+  // Ciclo dell'allarme: suono ripetuto + vibrazione finche' allarme e' attivo
+  useEffect(function() {
+    if (!allarme) {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      if (navigator.vibrate) {
+        try { navigator.vibrate(0); } catch (e) {}
+      }
+      return;
+    }
+
+    function tick() {
+      beepOnce();
+      if (navigator.vibrate) {
+        try { navigator.vibrate(500); } catch (e) {}
+      }
+    }
+
+    tick();
+    var id = setInterval(tick, 1000);
+    intervalRef.current = id;
+
+    return function() {
+      clearInterval(id);
+      if (navigator.vibrate) {
+        try { navigator.vibrate(0); } catch (e) {}
+      }
+    };
+  }, [allarme]);
+
+  // ---- Dati ----
   function caricaOrdini() {
     supabase
       .from('ordini_bordo')
@@ -75,14 +142,10 @@ export default function OrdiniBordoPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'ordini_bordo' }, function(payload) {
         caricaOrdini();
         if (payload.eventType === 'INSERT') {
-          beep();
-          setFlash(true);
-          setTimeout(function() { setFlash(false); }, 2500);
+          setAllarme(true);
         }
       })
       .subscribe();
-
-    primoCaricamento.current = false;
 
     return function() {
       supabase.removeChannel(channel);
@@ -90,6 +153,8 @@ export default function OrdiniBordoPage() {
   }, []);
 
   function cambiaStato(ordine, nuovoStato) {
+    // Prendere in carico un ordine ferma anche l'allarme
+    stopAllarme();
     supabase
       .from('ordini_bordo')
       .update({ stato: nuovoStato })
@@ -122,15 +187,45 @@ export default function OrdiniBordoPage() {
   return (
     <div className="p-6">
 
-      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+      {/* Banner allarme nuovo ordine */}
+      {allarme && (
+        <div className="fixed top-0 left-0 right-0 z-50 bg-red-600 text-white px-4 py-4 flex items-center justify-between shadow-lg animate-pulse">
+          <div className="flex items-center gap-3">
+            <span className="text-2xl">🔔</span>
+            <span className="font-bold text-lg">Nuovo ordine in arrivo!</span>
+          </div>
+          <button
+            onClick={stopAllarme}
+            className="bg-white text-red-700 px-5 py-2.5 rounded-lg font-semibold text-base hover:bg-red-50"
+          >
+            Tacita
+          </button>
+        </div>
+      )}
+
+      <div className={'flex items-center justify-between mb-6 flex-wrap gap-3 ' + (allarme ? 'mt-16' : '')}>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-            Ordini Bordo
-            {flash && <span className="text-xs px-2 py-1 rounded-full bg-amber-100 text-amber-800 animate-pulse">Nuovo ordine!</span>}
-          </h1>
+          <h1 className="text-2xl font-bold text-gray-900">Ordini Bordo</h1>
           <p className="text-gray-500 mt-1 text-sm">{conteggioAttivi} ordini da gestire</p>
         </div>
+        {!audioPronto && (
+          <button
+            onClick={ensureAudio}
+            className="bg-wine-700 hover:bg-wine-800 text-white px-4 py-2 rounded-lg text-sm font-medium"
+          >
+            🔔 Attiva avvisi sonori
+          </button>
+        )}
+        {audioPronto && (
+          <span className="text-xs text-green-700 bg-green-50 border border-green-200 px-3 py-1.5 rounded-lg">Avvisi sonori attivi</span>
+        )}
       </div>
+
+      {!audioPronto && (
+        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+          Per sentire l'allarme all'arrivo degli ordini, tocca una volta "Attiva avvisi sonori" a inizio turno. Tieni il dispositivo con il volume alto e non in silenzioso.
+        </div>
+      )}
 
       {/* Filtri */}
       <div className="flex gap-2 mb-5 flex-wrap">
@@ -213,7 +308,6 @@ export default function OrdiniBordoPage() {
                   <span className="font-semibold text-gray-900">€ {Number(o.totale).toFixed(2)}</span>
                 </div>
 
-                {/* Azioni stato */}
                 <div className="px-4 py-3 border-t border-gray-100 flex flex-wrap gap-2">
                   {o.stato === 'nuovo' && (
                     <button
