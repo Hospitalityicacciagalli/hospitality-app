@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Save, Search, AlertTriangle, UserPlus, Check, Users, ChevronRight } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../lib/AuthContext'
+import ConfermaPin from '../components/ConfermaPin'
 
 function pad(n) {
   return n < 10 ? '0' + n : '' + n
@@ -46,6 +48,11 @@ function ReservationForm() {
   var searchParams = searchParamsResult[0]
   var navigate = useNavigate()
   var isEditing = Boolean(id)
+
+  var { user, profile } = useAuth()
+
+  var [showPinModal, setShowPinModal] = useState(false)
+  var [pendingData, setPendingData] = useState(null)
 
   var [loading, setLoading] = useState(false)
   var [saving, setSaving] = useState(false)
@@ -249,21 +256,19 @@ function ReservationForm() {
       })
   }
 
-  function handleSubmit(e) {
-    e.preventDefault()
-    if (!selectedCustomer) { alert('Seleziona un cliente per la prenotazione.'); return }
-    if (!formData.reservation_date) { alert('Seleziona una data.'); return }
-    if (formData.adults_count < 1) { alert('Il numero di adulti deve essere almeno 1.'); return }
-    if (availability && !availability.is_available) {
-      if (!window.confirm('Attenzione: i coperti disponibili (' + availability.remaining_covers + ') non sono sufficienti per ' + totalGuests + ' ospiti. Vuoi procedere comunque?')) return
+  function isSharedDevice() {
+    try {
+      return localStorage.getItem('icg_shared_device') === '1'
+    } catch (e) {
+      return false
     }
-    setSaving(true)
+  }
+
+  function buildReservationData() {
     var requestedTime = null
     if (selectedHour !== '') requestedTime = pad(parseInt(selectedHour)) + ':' + selectedMinute + ':00'
-
     var haAllergeni = Boolean(customerAllergens.length > 0 || hasAllergiePrenotazione)
-
-    var reservationData = {
+    return {
       customer_id: selectedCustomer.id,
       reservation_date: formData.reservation_date,
       meal_type: formData.meal_type,
@@ -278,16 +283,66 @@ function ReservationForm() {
       source: formData.source,
       has_allergen_alerts: haAllergeni
     }
+  }
+
+  function doSave(reservationData, autore) {
+    setSaving(true)
+    var payload = reservationData
+    if (autore && autore.user_id) {
+      payload = Object.assign({}, reservationData, {
+        creata_da: autore.user_id,
+        creata_da_nome: autore.nome || null
+      })
+    }
 
     var promise = isEditing
       ? supabase.from('reservations').update(reservationData).eq('id', id)
-      : supabase.from('reservations').insert(reservationData)
+      : supabase.from('reservations').insert(payload)
 
     promise.then(function(result) {
       setSaving(false)
       if (result.error) { alert('Errore nel salvataggio. Riprova.'); return }
       navigate('/prenotazioni/giorno/' + formData.reservation_date)
     })
+  }
+
+  function handleSubmit(e) {
+    e.preventDefault()
+    if (!selectedCustomer) { alert('Seleziona un cliente per la prenotazione.'); return }
+    if (!formData.reservation_date) { alert('Seleziona una data.'); return }
+    if (formData.adults_count < 1) { alert('Il numero di adulti deve essere almeno 1.'); return }
+    if (availability && !availability.is_available) {
+      if (!window.confirm('Attenzione: i coperti disponibili (' + availability.remaining_covers + ') non sono sufficienti per ' + totalGuests + ' ospiti. Vuoi procedere comunque?')) return
+    }
+
+    var reservationData = buildReservationData()
+
+    // In modifica: comportamento invariato (nessun PIN, autore non toccato).
+    if (isEditing) {
+      doSave(reservationData, null)
+      return
+    }
+
+    // Nuova prenotazione su postazione condivisa: il PIN identifica e firma.
+    if (isSharedDevice()) {
+      setPendingData(reservationData)
+      setShowPinModal(true)
+      return
+    }
+
+    // Postazione personale: autore = utente loggato, nessun PIN.
+    var autore = {
+      user_id: user ? user.id : null,
+      nome: profile ? (profile.display_name || (profile.first_name + ' ' + profile.last_name)) : null
+    }
+    doSave(reservationData, autore)
+  }
+
+  function handlePinConfirmed(info) {
+    setShowPinModal(false)
+    var data = pendingData
+    setPendingData(null)
+    doSave(data, { user_id: info.user_id, nome: info.nome })
   }
 
   var clientiFiltrati = listaClienti.filter(function(c) {
@@ -698,6 +753,14 @@ function ReservationForm() {
           </div>
         </div>
       )}
+
+      <ConfermaPin
+        open={showPinModal}
+        title="Conferma prenotazione"
+        message="Postazione condivisa: inserisci il tuo PIN a 6 cifre per formalizzare la prenotazione a tuo nome."
+        onCancel={function() { setShowPinModal(false); setPendingData(null) }}
+        onConfirmed={handlePinConfirmed}
+      />
 
     </div>
   )

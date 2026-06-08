@@ -20,7 +20,22 @@ export default function ProfilePage() {
   var [pinError, setPinError] = useState(null);
   var [pinJustSet, setPinJustSet] = useState(false);
 
+  var [sharedDevice, setSharedDevice] = useState(function() {
+    try { return localStorage.getItem('icg_shared_device') === '1'; } catch (e) { return false; }
+  });
+
   var hasPin = pinJustSet || (profile && profile.pin_hash ? true : false);
+
+  function toggleSharedDevice() {
+    setSharedDevice(function(prev) {
+      var next = !prev;
+      try {
+        if (next) localStorage.setItem('icg_shared_device', '1');
+        else localStorage.removeItem('icg_shared_device');
+      } catch (e) {}
+      return next;
+    });
+  }
 
   function getRoleLabel(role) {
     var labels = {
@@ -255,6 +270,33 @@ export default function ProfilePage() {
             {pinLoading ? 'Salvataggio...' : (hasPin ? 'Aggiorna PIN' : 'Imposta PIN')}
           </button>
         </form>
+      </div>
+
+      {/* Postazione */}
+      <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 mt-6">
+        <h2 className="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wide">Postazione</h2>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-gray-900">Dispositivo condiviso</p>
+            <p className="text-xs text-gray-500 mt-1">
+              Attivalo solo sugli iPad usati da più persone. Quando è attivo, le operazioni che richiedono identificazione (es. formalizzare una prenotazione) chiedono il PIN. L'impostazione resta su questo dispositivo e browser.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={toggleSharedDevice}
+            className={'relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ' + (sharedDevice ? 'bg-wine-700' : 'bg-gray-300')}
+          >
+            <span className={'inline-block h-5 w-5 transform rounded-full bg-white transition-transform ' + (sharedDevice ? 'translate-x-5' : 'translate-x-1')} />
+          </button>
+        </div>
+        <div className="mt-3">
+          {sharedDevice ? (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Questo dispositivo è condiviso</span>
+          ) : (
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">Postazione personale</span>
+          )}
+        </div>
       </div>
     </div>
   );
