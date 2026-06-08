@@ -6,7 +6,8 @@ var T = {
   it: {
     title: 'Ordina dal tuo lettino',
     subtitle: 'Scegli i prodotti, indica dove ti trovi e invia. Te li portiamo noi.',
-    room: 'Numero camera',
+    room: 'Camera',
+    selectRoom: 'Seleziona la camera',
     name: 'Nome',
     place: 'Dove ti trovi',
     pool: 'Piscina',
@@ -21,7 +22,7 @@ var T = {
     okTitle: 'Ordine inviato!',
     okText: 'Lo staff ha ricevuto la tua richiesta. Arriviamo il prima possibile.',
     newOrder: 'Nuovo ordine',
-    errRoom: 'Inserisci il numero di camera e il nome.',
+    errRoom: 'Seleziona la camera e inserisci il nome.',
     errEmpty: 'Seleziona almeno un prodotto.',
     errGeneric: 'Si è verificato un errore. Riprova.',
     loading: 'Caricamento listino...',
@@ -33,7 +34,8 @@ var T = {
   en: {
     title: 'Order from your sunbed',
     subtitle: 'Pick what you like, tell us where you are and send. We bring it to you.',
-    room: 'Room number',
+    room: 'Room',
+    selectRoom: 'Select your room',
     name: 'Name',
     place: 'Where you are',
     pool: 'Pool',
@@ -48,7 +50,7 @@ var T = {
     okTitle: 'Order sent!',
     okText: 'Our staff received your request. We will be there as soon as possible.',
     newOrder: 'New order',
-    errRoom: 'Please enter your room number and name.',
+    errRoom: 'Please select your room and enter your name.',
     errEmpty: 'Please select at least one item.',
     errGeneric: 'Something went wrong. Please try again.',
     loading: 'Loading menu...',
@@ -62,10 +64,11 @@ var T = {
 export default function OrdineBordoPubblico() {
   var [lang, setLang] = useState('it');
   var [voci, setVoci] = useState([]);
+  var [camere, setCamere] = useState([]);
   var [loading, setLoading] = useState(true);
 
   var [quantita, setQuantita] = useState({}); // { listino_id: qta }
-  var [camera, setCamera] = useState('');
+  var [camera, setCamera] = useState('');     // nome camera selezionata
   var [nome, setNome] = useState('');
   var [luogo, setLuogo] = useState('piscina');
   var [note, setNote] = useState('');
@@ -91,6 +94,18 @@ export default function OrdineBordoPubblico() {
         setLoading(false);
         if (!result.error) {
           setVoci(result.data || []);
+        }
+      });
+
+    supabase
+      .from('camere')
+      .select('*')
+      .eq('attivo', true)
+      .order('ordine', { ascending: true })
+      .order('nome', { ascending: true })
+      .then(function(result) {
+        if (!result.error) {
+          setCamere(result.data || []);
         }
       });
   }, []);
@@ -307,12 +322,16 @@ export default function OrdineBordoPubblico() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">{t.room}</label>
-                  <input
-                    type="text"
+                  <select
                     value={camera}
                     onChange={function(e) { setCamera(e.target.value); }}
-                    className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-base focus:outline-none focus:ring-2 focus:ring-wine-500"
-                  />
+                    className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-base bg-white focus:outline-none focus:ring-2 focus:ring-wine-500"
+                  >
+                    <option value="">{t.selectRoom}</option>
+                    {camere.map(function(c) {
+                      return <option key={c.id} value={c.nome}>{c.nome}</option>;
+                    })}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">{t.name}</label>
