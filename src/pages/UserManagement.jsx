@@ -23,6 +23,9 @@ export default function UserManagement() {
   var [loading, setLoading] = useState(true);
   var [error, setError] = useState(null);
 
+  // Email utenti (caricate separatamente da auth tramite RPC)
+  var [userEmails, setUserEmails] = useState({});
+
   // Profili-tipo salvabili
   var [profiles, setProfiles] = useState([]);
 
@@ -34,6 +37,14 @@ export default function UserManagement() {
   var [newUserLoading, setNewUserLoading] = useState(false);
   var [newUserError, setNewUserError] = useState(null);
   var [newUserSuccess, setNewUserSuccess] = useState(null);
+
+  // Modale modifica utente
+  var [showEditModal, setShowEditModal] = useState(false);
+  var [editTarget, setEditTarget] = useState(null);
+  var [editForm, setEditForm] = useState({ first_name: '', last_name: '', display_name: '', role: 'reception' });
+  var [editLoading, setEditLoading] = useState(false);
+  var [editError, setEditError] = useState(null);
+  var [editSuccess, setEditSuccess] = useState(null);
 
   // Modale reset password email
   var [showResetModal, setShowResetModal] = useState(false);
@@ -103,6 +114,17 @@ export default function UserManagement() {
       });
   }
 
+  // Carica le email da auth tramite la funzione RPC (solo super_admin).
+  function loadEmails() {
+    supabase.rpc('admin_list_user_emails').then(function(result) {
+      if (!result.error && result.data) {
+        var map = {};
+        result.data.forEach(function(row) { map[row.id] = row.email; });
+        setUserEmails(map);
+      }
+    });
+  }
+
   function loadProfiles() {
     supabase
       .from('permission_profiles')
@@ -118,6 +140,7 @@ export default function UserManagement() {
 
   useEffect(function() {
     loadUsers();
+    loadEmails();
     loadProfiles();
   }, []);
 
@@ -190,10 +213,64 @@ export default function UserManagement() {
         setNewUserSuccess(msg);
         setNewUserForm({ email: '', password: '', first_name: '', last_name: '', role: 'reception' });
         loadUsers();
+        loadEmails();
       },
       function(err) { setNewUserError(err); },
       setNewUserLoading
     );
+  }
+
+  // --- MODIFICA UTENTE (anagrafica + ruolo) ---
+  function openEditModal(user) {
+    setEditTarget(user);
+    setEditError(null);
+    setEditSuccess(null);
+    setEditForm({
+      first_name: user.first_name || '',
+      last_name: user.last_name || '',
+      display_name: user.display_name || '',
+      role: user.role || 'reception'
+    });
+    setShowEditModal(true);
+  }
+
+  function setEditField(field, value) {
+    setEditForm(function(prev) {
+      var next = {};
+      for (var k in prev) { next[k] = prev[k]; }
+      next[field] = value;
+      return next;
+    });
+  }
+
+  function handleSaveEdit() {
+    setEditError(null);
+    setEditSuccess(null);
+
+    if (!editForm.first_name.trim() || !editForm.last_name.trim()) {
+      setEditError('Nome e cognome sono obbligatori.');
+      return;
+    }
+
+    setEditLoading(true);
+    supabase
+      .from('user_profiles')
+      .update({
+        first_name: editForm.first_name.trim(),
+        last_name: editForm.last_name.trim(),
+        display_name: editForm.display_name.trim() ? editForm.display_name.trim() : null,
+        role: editForm.role
+      })
+      .eq('id', editTarget.id)
+      .then(function(result) {
+        setEditLoading(false);
+        if (result.error) {
+          setEditError('Errore salvataggio: ' + result.error.message);
+        } else {
+          setEditSuccess('Dati aggiornati.');
+          loadUsers();
+        }
+      });
   }
 
   // --- RESET PASSWORD VIA EMAIL ---
@@ -208,7 +285,7 @@ export default function UserManagement() {
     setResetMessage(null);
     setResetError(null);
     callEdgeFunction(
-      { action: 'reset_password_email', userId: resetTarget.id, email: resetTarget.auth_email || '' },
+      { action: 'reset_password_email', userId: resetTarget.id, email: userEmails[resetTarget.id] || '' },
       function(msg) { setResetMessage(msg); },
       function(err) { setResetError(err); },
       setResetLoading
@@ -343,12 +420,6 @@ export default function UserManagement() {
       });
   }
 
-  function levelLabel(featureType, level) {
-    var opts = featureType === 'cassa' ? LEVEL_OPTIONS_CASSA : LEVEL_OPTIONS_STANDARD;
-    var found = opts.find(function(o) { return o.value === level; });
-    return found ? found.label : level;
-  }
-
   if (!canView('utenti')) {
     return (
       <div className="p-6">
@@ -365,7 +436,7 @@ export default function UserManagement() {
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Gestione Utenti App</h1>
-          <p className="text-gray-500 mt-1 text-sm">Crea, blocca, gestisci accessi e permessi</p>
+          <p className="text-gray-500 mt-1 text-sm">Crea, modifica, blocca, gestisci accessi e permessi</p>
         </div>
         <button
           onClick={function() { setShowNewUserModal(true); setNewUserError(null); setNewUserSuccess(null); }}
@@ -386,7 +457,7 @@ export default function UserManagement() {
           <table className="w-full text-sm">
             <thead className="bg-gray-50 border-b border-gray-200">
               <tr>
-                <th className="text-left px-4 py-3 font-medium text-gray-600">Nome</th>
+                <th className="text-left px-4 py-3 font-medium text-gray-600">Nome / Email</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Ruolo</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Stato</th>
                 <th className="text-right px-4 py-3 font-medium text-gray-600">Azioni</th>
@@ -398,9 +469,12 @@ export default function UserManagement() {
                 var isActive = user.is_active !== false;
                 return (
                   <tr key={user.id} className={!isActive ? 'bg-red-50 opacity-70' : 'hover:bg-gray-50'}>
-                    <td className="px-4 py-3 font-medium text-gray-900">
-                      {user.display_name || (user.first_name + ' ' + user.last_name)}
-                      {isSelf && <span className="ml-2 text-xs text-gray-400">(tu)</span>}
+                    <td className="px-4 py-3">
+                      <div className="font-medium text-gray-900">
+                        {user.display_name || (user.first_name + ' ' + user.last_name)}
+                        {isSelf && <span className="ml-2 text-xs text-gray-400">(tu)</span>}
+                      </div>
+                      <div className="text-xs text-gray-400 mt-0.5">{userEmails[user.id] || '—'}</div>
                     </td>
                     <td className="px-4 py-3">
                       <span className={'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ' + getRoleBadgeColor(user.role)}>
@@ -415,43 +489,146 @@ export default function UserManagement() {
                       )}
                     </td>
                     <td className="px-4 py-3">
-                      {!isSelf && (
-                        <div className="flex items-center justify-end gap-2 flex-wrap">
-                          <button
-                            onClick={function() { openPermModal(user); }}
-                            className="text-xs px-2 py-1 rounded border border-wine-300 text-wine-700 hover:bg-wine-50 transition-colors"
-                          >
-                            Permessi
-                          </button>
-                          <button
-                            onClick={function() { openResetModal(user); }}
-                            className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
-                          >
-                            Reset password
-                          </button>
-                          {isActive ? (
+                      <div className="flex items-center justify-end gap-2 flex-wrap">
+                        <button
+                          onClick={function() { openEditModal(user); }}
+                          className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors"
+                        >
+                          Modifica
+                        </button>
+                        {!isSelf && (
+                          <>
                             <button
-                              onClick={function() { openBanModal(user, 'ban'); }}
-                              className="text-xs px-2 py-1 rounded border border-red-300 text-red-700 hover:bg-red-50 transition-colors"
+                              onClick={function() { openPermModal(user); }}
+                              className="text-xs px-2 py-1 rounded border border-wine-300 text-wine-700 hover:bg-wine-50 transition-colors"
                             >
-                              Blocca accesso
+                              Permessi
                             </button>
-                          ) : (
                             <button
-                              onClick={function() { openBanModal(user, 'unban'); }}
-                              className="text-xs px-2 py-1 rounded border border-green-300 text-green-700 hover:bg-green-50 transition-colors"
+                              onClick={function() { openResetModal(user); }}
+                              className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
                             >
-                              Sblocca accesso
+                              Reset password
                             </button>
-                          )}
-                        </div>
-                      )}
+                            {isActive ? (
+                              <button
+                                onClick={function() { openBanModal(user, 'ban'); }}
+                                className="text-xs px-2 py-1 rounded border border-red-300 text-red-700 hover:bg-red-50 transition-colors"
+                              >
+                                Blocca accesso
+                              </button>
+                            ) : (
+                              <button
+                                onClick={function() { openBanModal(user, 'unban'); }}
+                                className="text-xs px-2 py-1 rounded border border-green-300 text-green-700 hover:bg-green-50 transition-colors"
+                              >
+                                Sblocca accesso
+                              </button>
+                            )}
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* MODALE MODIFICA UTENTE */}
+      {showEditModal && editTarget && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900">Modifica utente</h2>
+              <button onClick={function() { setShowEditModal(false); }} className="text-gray-400 hover:text-gray-600 text-xl font-light">x</button>
+            </div>
+            <div className="p-6 space-y-4">
+              {editError && (
+                <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{editError}</div>
+              )}
+              {editSuccess && (
+                <div className="p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">{'✓ ' + editSuccess}</div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Nome *</label>
+                  <input
+                    type="text"
+                    value={editForm.first_name}
+                    onChange={function(e) { setEditField('first_name', e.target.value); }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">Cognome *</label>
+                  <input
+                    type="text"
+                    value={editForm.last_name}
+                    onChange={function(e) { setEditField('last_name', e.target.value); }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Nome visualizzato (opzionale)</label>
+                <input
+                  type="text"
+                  value={editForm.display_name}
+                  onChange={function(e) { setEditField('display_name', e.target.value); }}
+                  placeholder="Se vuoto, viene mostrato Nome + Cognome"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Ruolo</label>
+                <select
+                  value={editForm.role}
+                  onChange={function(e) { setEditField('role', e.target.value); }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
+                >
+                  {roleOptions.map(function(r) {
+                    return <option key={r.value} value={r.value}>{r.label}</option>;
+                  })}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">Il ruolo è ormai solo un'etichetta: gli accessi reali si gestiscono dal pulsante "Permessi".</p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Email</label>
+                <input
+                  type="text"
+                  value={userEmails[editTarget.id] || '—'}
+                  disabled
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-500"
+                />
+                <p className="text-xs text-gray-400 mt-1">La modifica dell'email sarà disponibile in una fase successiva.</p>
+              </div>
+
+              <div className="flex gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={function() { setShowEditModal(false); }}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  Chiudi
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveEdit}
+                  disabled={editLoading}
+                  className="flex-1 bg-wine-700 hover:bg-wine-800 disabled:bg-wine-300 text-white px-4 py-2 rounded-lg text-sm font-medium"
+                >
+                  {editLoading ? 'Salvataggio...' : 'Salva modifiche'}
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 
