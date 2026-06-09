@@ -150,6 +150,22 @@ export default function ListinoBordoPage() {
     setShowProdModal(true);
   }
 
+  function openDuplicateProd(voce) {
+    setProdForm({
+      id: null,
+      nome_it: (voce.nome_it || '') + ' (copia)',
+      nome_en: voce.nome_en || '',
+      descrizione_it: voce.descrizione_it || '',
+      descrizione_en: voce.descrizione_en || '',
+      prezzo: voce.prezzo != null ? String(voce.prezzo) : '',
+      categoria_id: voce.categoria_id || '',
+      disponibile: voce.disponibile !== false,
+      ordine: voce.ordine || 0
+    });
+    setProdModalError(null);
+    setShowProdModal(true);
+  }
+
   function saveProd() {
     setProdModalError(null);
     if (!prodForm.nome_it.trim()) {
@@ -447,6 +463,7 @@ export default function ListinoBordoPage() {
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-end gap-2">
                             <button onClick={function() { openEditProd(voce); }} className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50">Modifica</button>
+                            <button onClick={function() { openDuplicateProd(voce); }} className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50">Duplica</button>
                             <button onClick={function() { setDelProd(voce); }} className="text-xs px-2 py-1 rounded border border-red-300 text-red-700 hover:bg-red-50">Elimina</button>
                           </div>
                         </td>
