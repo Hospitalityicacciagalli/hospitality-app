@@ -64,6 +64,7 @@ var T = {
 export default function OrdineBordoPubblico() {
   var [lang, setLang] = useState('it');
   var [voci, setVoci] = useState([]);
+  var [categorie, setCategorie] = useState([]);
   var [camere, setCamere] = useState([]);
   var [loading, setLoading] = useState(true);
 
@@ -106,6 +107,18 @@ export default function OrdineBordoPubblico() {
       .then(function(result) {
         if (!result.error) {
           setCamere(result.data || []);
+        }
+      });
+
+    supabase
+      .from('categorie_bordo')
+      .select('*')
+      .eq('attivo', true)
+      .order('ordine', { ascending: true })
+      .order('nome_it', { ascending: true })
+      .then(function(result) {
+        if (!result.error) {
+          setCategorie(result.data || []);
         }
       });
   }, []);
@@ -214,17 +227,34 @@ export default function OrdineBordoPubblico() {
     setError(null);
   }
 
-  // Raggruppa per categoria mantenendo l'ordine di arrivo.
-  var categorie = [];
-  var perCategoria = {};
-  voci.forEach(function(v) {
-    var cat = v.categoria || t.other;
-    if (!perCategoria[cat]) {
-      perCategoria[cat] = [];
-      categorie.push(cat);
-    }
-    perCategoria[cat].push(v);
+  // Raggruppa per categoria (via categoria_id), nell'ordine definito nella
+  // tabella categorie; l'etichetta segue la lingua scelta. I prodotti senza
+  // categoria finiscono nel gruppo "Altro", in fondo.
+  var mappaGruppi = {};
+  categorie.forEach(function(c) {
+    mappaGruppi[c.id] = {
+      key: c.id,
+      label: (lang === 'en' ? (c.nome_en || c.nome_it) : c.nome_it),
+      items: []
+    };
   });
+  voci.forEach(function(v) {
+    var k = v.categoria_id;
+    if (!k || !mappaGruppi[k]) k = '__altro__';
+    if (!mappaGruppi[k]) {
+      mappaGruppi[k] = { key: '__altro__', label: t.other, items: [] };
+    }
+    mappaGruppi[k].items.push(v);
+  });
+  var gruppi = [];
+  categorie.forEach(function(c) {
+    if (mappaGruppi[c.id] && mappaGruppi[c.id].items.length > 0) {
+      gruppi.push(mappaGruppi[c.id]);
+    }
+  });
+  if (mappaGruppi['__altro__'] && mappaGruppi['__altro__'].items.length > 0) {
+    gruppi.push(mappaGruppi['__altro__']);
+  }
 
   function luogoLabel() {
     return luogo === 'piscina' ? t.pool : t.lake;
@@ -369,19 +399,19 @@ export default function OrdineBordoPubblico() {
               <div className="bg-white rounded-2xl border border-gray-200 p-8 text-center text-gray-400">{t.noItems}</div>
             ) : (
               <div className="space-y-3">
-                {categorie.map(function(cat) {
-                  var lista = perCategoria[cat];
-                  var aperta = !!aperte[cat];
+                {gruppi.map(function(g) {
+                  var lista = g.items;
+                  var aperta = !!aperte[g.key];
                   var nSel = articoliInCategoria(lista);
                   return (
-                    <div key={cat} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                    <div key={g.key} className="bg-white rounded-xl border border-gray-200 overflow-hidden">
                       <button
-                        onClick={function() { toggleCat(cat); }}
+                        onClick={function() { toggleCat(g.key); }}
                         className="w-full flex items-center justify-between px-4 py-3 text-left"
                       >
                         <span className="flex items-center gap-2 font-semibold text-gray-900">
                           <span className="text-gray-400">{aperta ? '▾' : '▸'}</span>
-                          {cat}
+                          {g.label}
                         </span>
                         <span className="flex items-center gap-2">
                           {nSel > 0 && (

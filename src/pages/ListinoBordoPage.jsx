@@ -9,10 +9,14 @@ function emptyProdotto() {
     descrizione_it: '',
     descrizione_en: '',
     prezzo: '',
-    categoria: '',
+    categoria_id: '',
     disponibile: true,
     ordine: 0
   };
+}
+
+function emptyCategoria() {
+  return { id: null, nome_it: '', nome_en: '', ordine: 0, attivo: true };
 }
 
 function emptyCamera() {
@@ -31,6 +35,16 @@ export default function ListinoBordoPage() {
   var [savingProd, setSavingProd] = useState(false);
   var [prodModalError, setProdModalError] = useState(null);
   var [delProd, setDelProd] = useState(null);
+
+  // ---- Categorie ----
+  var [categorie, setCategorie] = useState([]);
+  var [loadingCateg, setLoadingCateg] = useState(true);
+  var [errorCateg, setErrorCateg] = useState(null);
+  var [showCategModal, setShowCategModal] = useState(false);
+  var [categForm, setCategForm] = useState(emptyCategoria());
+  var [savingCateg, setSavingCateg] = useState(false);
+  var [categModalError, setCategModalError] = useState(null);
+  var [delCateg, setDelCateg] = useState(null);
 
   // ---- Camere ----
   var [camere, setCamere] = useState([]);
@@ -80,9 +94,28 @@ export default function ListinoBordoPage() {
       });
   }
 
+  function loadCategorie() {
+    setLoadingCateg(true);
+    setErrorCateg(null);
+    supabase
+      .from('categorie_bordo')
+      .select('*')
+      .order('ordine', { ascending: true })
+      .order('nome_it', { ascending: true })
+      .then(function(result) {
+        setLoadingCateg(false);
+        if (result.error) {
+          setErrorCateg('Errore caricamento categorie: ' + result.error.message);
+        } else {
+          setCategorie(result.data || []);
+        }
+      });
+  }
+
   useEffect(function() {
     loadVoci();
     loadCamere();
+    loadCategorie();
   }, []);
 
   // ===== Prodotti: handlers =====
@@ -109,7 +142,7 @@ export default function ListinoBordoPage() {
       descrizione_it: voce.descrizione_it || '',
       descrizione_en: voce.descrizione_en || '',
       prezzo: voce.prezzo != null ? String(voce.prezzo) : '',
-      categoria: voce.categoria || '',
+      categoria_id: voce.categoria_id || '',
       disponibile: voce.disponibile !== false,
       ordine: voce.ordine || 0
     });
@@ -128,13 +161,18 @@ export default function ListinoBordoPage() {
       setProdModalError('Inserisci un prezzo valido.');
       return;
     }
+    var catSel = null;
+    for (var ci = 0; ci < categorie.length; ci++) {
+      if (categorie[ci].id === prodForm.categoria_id) { catSel = categorie[ci]; break; }
+    }
     var payload = {
       nome_it: prodForm.nome_it.trim(),
       nome_en: prodForm.nome_en.trim() ? prodForm.nome_en.trim() : null,
       descrizione_it: prodForm.descrizione_it.trim() ? prodForm.descrizione_it.trim() : null,
       descrizione_en: prodForm.descrizione_en.trim() ? prodForm.descrizione_en.trim() : null,
       prezzo: prezzoNum,
-      categoria: prodForm.categoria.trim() ? prodForm.categoria.trim() : null,
+      categoria_id: prodForm.categoria_id ? prodForm.categoria_id : null,
+      categoria: catSel ? catSel.nome_it : null,
       disponibile: Boolean(prodForm.disponibile),
       ordine: parseInt(prodForm.ordine, 10) || 0
     };
@@ -239,6 +277,97 @@ export default function ListinoBordoPage() {
     });
   }
 
+  // ===== Categorie: handlers =====
+  function setCategField(field, value) {
+    setCategForm(function(prev) {
+      var next = {};
+      for (var k in prev) { next[k] = prev[k]; }
+      next[field] = value;
+      return next;
+    });
+  }
+
+  function openNewCateg() {
+    setCategForm(emptyCategoria());
+    setCategModalError(null);
+    setShowCategModal(true);
+  }
+
+  function openEditCateg(c) {
+    setCategForm({
+      id: c.id,
+      nome_it: c.nome_it || '',
+      nome_en: c.nome_en || '',
+      ordine: c.ordine || 0,
+      attivo: c.attivo !== false
+    });
+    setCategModalError(null);
+    setShowCategModal(true);
+  }
+
+  function saveCateg() {
+    setCategModalError(null);
+    if (!categForm.nome_it.trim()) {
+      setCategModalError('Il nome in italiano è obbligatorio.');
+      return;
+    }
+    var payload = {
+      nome_it: categForm.nome_it.trim(),
+      nome_en: categForm.nome_en.trim() ? categForm.nome_en.trim() : null,
+      ordine: parseInt(categForm.ordine, 10) || 0,
+      attivo: Boolean(categForm.attivo)
+    };
+    setSavingCateg(true);
+    var q = categForm.id
+      ? supabase.from('categorie_bordo').update(payload).eq('id', categForm.id)
+      : supabase.from('categorie_bordo').insert(payload);
+    q.then(function(result) {
+      setSavingCateg(false);
+      if (result.error) {
+        setCategModalError('Errore salvataggio: ' + result.error.message);
+      } else {
+        setShowCategModal(false);
+        loadCategorie();
+        // I prodotti mostrano il nome categoria: ricarico per riflettere eventuali rinomine.
+        loadVoci();
+      }
+    });
+  }
+
+  function toggleCategAttiva(c) {
+    supabase
+      .from('categorie_bordo')
+      .update({ attivo: !(c.attivo !== false) })
+      .eq('id', c.id)
+      .then(function(result) {
+        if (!result.error) { loadCategorie(); }
+      });
+  }
+
+  function deleteCateg() {
+    if (!delCateg) return;
+    supabase.from('categorie_bordo').delete().eq('id', delCateg.id).then(function(result) {
+      setDelCateg(null);
+      if (!result.error) {
+        loadCategorie();
+        loadVoci();
+      } else {
+        setErrorCateg('Errore eliminazione: ' + result.error.message);
+      }
+    });
+  }
+
+  function nomeCategoria(voce) {
+    for (var i = 0; i < categorie.length; i++) {
+      if (categorie[i].id === voce.categoria_id) {
+        return categorie[i].nome_en
+          ? categorie[i].nome_it + ' / ' + categorie[i].nome_en
+          : categorie[i].nome_it;
+      }
+    }
+    return voce.categoria || '—';
+  }
+
   var tabBtn = 'px-4 py-2 rounded-lg text-sm font-medium ';
 
   return (
@@ -262,6 +391,12 @@ export default function ListinoBordoPage() {
           className={tabBtn + (tab === 'camere' ? 'bg-wine-700 text-white' : 'bg-white border border-gray-300 text-gray-600')}
         >
           Camere
+        </button>
+        <button
+          onClick={function() { setTab('categorie'); }}
+          className={tabBtn + (tab === 'categorie' ? 'bg-wine-700 text-white' : 'bg-white border border-gray-300 text-gray-600')}
+        >
+          Categorie
         </button>
       </div>
 
@@ -299,7 +434,7 @@ export default function ListinoBordoPage() {
                           <div className="font-medium text-gray-900">{voce.nome_it}</div>
                           {voce.nome_en && <div className="text-xs text-gray-400">{voce.nome_en}</div>}
                         </td>
-                        <td className="px-4 py-3 text-gray-600">{voce.categoria || '—'}</td>
+                        <td className="px-4 py-3 text-gray-600">{nomeCategoria(voce)}</td>
                         <td className="px-4 py-3 text-right text-gray-900">€ {Number(voce.prezzo).toFixed(2)}</td>
                         <td className="px-4 py-3 text-center">
                           <button
@@ -378,6 +513,63 @@ export default function ListinoBordoPage() {
         </>
       )}
 
+      {/* ===================== TAB CATEGORIE ===================== */}
+      {tab === 'categorie' && (
+        <>
+          <div className="flex justify-end mb-4">
+            <button onClick={openNewCateg} className="bg-wine-700 hover:bg-wine-800 text-white px-4 py-2 rounded-lg text-sm font-medium">+ Nuova categoria</button>
+          </div>
+
+          {errorCateg && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{errorCateg}</div>}
+
+          {loadingCateg ? (
+            <div className="text-center py-12 text-gray-400">Caricamento...</div>
+          ) : categorie.length === 0 ? (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center text-gray-400">Nessuna categoria. Aggiungi la prima: comparirà nel menù del prodotto e raggrupperà il listino nella pagina cliente.</div>
+          ) : (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-gray-50 border-b border-gray-200">
+                  <tr>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600">Nome (IT)</th>
+                    <th className="text-left px-4 py-3 font-medium text-gray-600">Nome (EN)</th>
+                    <th className="text-center px-4 py-3 font-medium text-gray-600">Ordine</th>
+                    <th className="text-center px-4 py-3 font-medium text-gray-600">Attiva</th>
+                    <th className="text-right px-4 py-3 font-medium text-gray-600">Azioni</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {categorie.map(function(c) {
+                    var att = c.attivo !== false;
+                    return (
+                      <tr key={c.id} className={att ? 'hover:bg-gray-50' : 'bg-gray-50 opacity-70'}>
+                        <td className="px-4 py-3 font-medium text-gray-900">{c.nome_it}</td>
+                        <td className="px-4 py-3 text-gray-600">{c.nome_en || <span className="text-gray-300">— da tradurre —</span>}</td>
+                        <td className="px-4 py-3 text-center text-gray-600">{c.ordine || 0}</td>
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            onClick={function() { toggleCategAttiva(c); }}
+                            className={'inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ' + (att ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-600')}
+                          >
+                            {att ? 'Sì' : 'No'}
+                          </button>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-2">
+                            <button onClick={function() { openEditCateg(c); }} className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-700 hover:bg-gray-50">Modifica</button>
+                            <button onClick={function() { setDelCateg(c); }} className="text-xs px-2 py-1 rounded border border-red-300 text-red-700 hover:bg-red-50">Elimina</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+
       {/* MODALE PRODOTTO */}
       {showProdModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
@@ -415,7 +607,16 @@ export default function ListinoBordoPage() {
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Categoria</label>
-                  <input type="text" value={prodForm.categoria} onChange={function(e) { setProdField('categoria', e.target.value); }} placeholder="es. Bibite" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                  <select
+                    value={prodForm.categoria_id}
+                    onChange={function(e) { setProdField('categoria_id', e.target.value); }}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-wine-500"
+                  >
+                    <option value="">— Nessuna —</option>
+                    {categorie.map(function(c) {
+                      return <option key={c.id} value={c.id}>{c.nome_it}</option>;
+                    })}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Ordine</label>
@@ -489,6 +690,55 @@ export default function ListinoBordoPage() {
             <div className="flex gap-3">
               <button onClick={function() { setDelCam(null); }} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">Annulla</button>
               <button onClick={deleteCam} className="flex-1 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium">Elimina</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODALE CATEGORIA */}
+      {showCategModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900">{categForm.id ? 'Modifica categoria' : 'Nuova categoria'}</h2>
+              <button onClick={function() { setShowCategModal(false); }} className="text-gray-400 hover:text-gray-600 text-xl font-light">x</button>
+            </div>
+            <div className="p-6 space-y-4">
+              {categModalError && <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{categModalError}</div>}
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Nome (IT) *</label>
+                <input type="text" value={categForm.nome_it} onChange={function(e) { setCategField('nome_it', e.target.value); }} placeholder="es. Bibite" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Nome (EN)</label>
+                <input type="text" value={categForm.nome_en} onChange={function(e) { setCategField('nome_en', e.target.value); }} placeholder="es. Drinks" className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Ordine</label>
+                <input type="number" value={categForm.ordine} onChange={function(e) { setCategField('ordine', e.target.value); }} className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+              </div>
+              <label className="flex items-center gap-2 text-sm text-gray-700">
+                <input type="checkbox" checked={Boolean(categForm.attivo)} onChange={function(e) { setCategField('attivo', e.target.checked); }} className="w-4 h-4" />
+                Attiva (mostrata ai clienti)
+              </label>
+            </div>
+            <div className="flex gap-3 px-6 py-4 border-t border-gray-200">
+              <button type="button" onClick={function() { setShowCategModal(false); }} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">Annulla</button>
+              <button type="button" onClick={saveCateg} disabled={savingCateg} className="flex-1 bg-wine-700 hover:bg-wine-800 disabled:bg-wine-300 text-white px-4 py-2 rounded-lg text-sm font-medium">{savingCateg ? 'Salvataggio...' : 'Salva'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CONFERMA ELIMINAZIONE CATEGORIA */}
+      {delCateg && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-2">Elimina categoria</h2>
+            <p className="text-sm text-gray-600 mb-6">Vuoi eliminare la categoria <strong>{delCateg.nome_it}</strong>? I prodotti che la usano resteranno senza categoria (finiranno in "Altro"). In alternativa puoi solo disattivarla.</p>
+            <div className="flex gap-3">
+              <button onClick={function() { setDelCateg(null); }} className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">Annulla</button>
+              <button onClick={deleteCateg} className="flex-1 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium">Elimina</button>
             </div>
           </div>
         </div>
