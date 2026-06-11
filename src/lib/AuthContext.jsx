@@ -17,6 +17,7 @@ export var FEATURES = [
   { key: 'turni',        label: 'Turni',          type: 'standard' },
   { key: 'cassa',        label: 'Cassa',          type: 'cassa' },
   { key: 'ordini_bordo', label: 'Ordini Bordo',   type: 'standard' },
+  { key: 'stipendi',     label: 'Stipendi',       type: 'standard' },
   { key: 'impostazioni', label: 'Impostazioni',   type: 'standard' },
   { key: 'utenti',       label: 'Utenti App',     type: 'standard' }
 ]
@@ -27,16 +28,16 @@ export var FEATURES = [
 // Usato come fallback se un profilo non ha ancora il jsonb popolato.
 // ============================================================
 export var DEFAULT_PERMS_BY_ROLE = {
-  super_admin: { prenotazioni: 'write', clienti: 'write', sale: 'write', staff: 'write', turni: 'write', cassa: 'full',  ordini_bordo: 'write', impostazioni: 'write', utenti: 'write' },
-  proprieta:   { prenotazioni: 'write', clienti: 'write', sale: 'read',  staff: 'none',  turni: 'none',  cassa: 'full',  ordini_bordo: 'read',  impostazioni: 'none',  utenti: 'none' },
-  direttore:   { prenotazioni: 'write', clienti: 'write', sale: 'read',  staff: 'write', turni: 'write', cassa: 'full',  ordini_bordo: 'write', impostazioni: 'write', utenti: 'none' },
-  reception:   { prenotazioni: 'write', clienti: 'write', sale: 'read',  staff: 'read',  turni: 'none',  cassa: 'full',  ordini_bordo: 'write', impostazioni: 'none',  utenti: 'none' },
-  sala:        { prenotazioni: 'write', clienti: 'write', sale: 'read',  staff: 'none',  turni: 'none',  cassa: 'full',  ordini_bordo: 'write', impostazioni: 'none',  utenti: 'none' },
-  cucina:      { prenotazioni: 'read',  clienti: 'read',  sale: 'none',  staff: 'none',  turni: 'none',  cassa: 'none',  ordini_bordo: 'none',  impostazioni: 'none',  utenti: 'none' }
+  super_admin: { prenotazioni: 'write', clienti: 'write', sale: 'write', staff: 'write', turni: 'write', cassa: 'full',  ordini_bordo: 'write', stipendi: 'write', impostazioni: 'write', utenti: 'write' },
+  proprieta:   { prenotazioni: 'write', clienti: 'write', sale: 'read',  staff: 'none',  turni: 'none',  cassa: 'full',  ordini_bordo: 'read',  stipendi: 'write', impostazioni: 'none',  utenti: 'none' },
+  direttore:   { prenotazioni: 'write', clienti: 'write', sale: 'read',  staff: 'write', turni: 'write', cassa: 'full',  ordini_bordo: 'write', stipendi: 'none',  impostazioni: 'write', utenti: 'none' },
+  reception:   { prenotazioni: 'write', clienti: 'write', sale: 'read',  staff: 'read',  turni: 'none',  cassa: 'full',  ordini_bordo: 'write', stipendi: 'none',  impostazioni: 'none',  utenti: 'none' },
+  sala:        { prenotazioni: 'write', clienti: 'write', sale: 'read',  staff: 'none',  turni: 'none',  cassa: 'full',  ordini_bordo: 'write', stipendi: 'none',  impostazioni: 'none',  utenti: 'none' },
+  cucina:      { prenotazioni: 'read',  clienti: 'read',  sale: 'none',  staff: 'none',  turni: 'none',  cassa: 'none',  ordini_bordo: 'none',  stipendi: 'none',  impostazioni: 'none',  utenti: 'none' }
 }
 
 // Pavimento di sicurezza per ruoli non previsti.
-var BASE_FALLBACK = { prenotazioni: 'write', clienti: 'write', sale: 'none', staff: 'none', turni: 'none', cassa: 'light', ordini_bordo: 'none', impostazioni: 'none', utenti: 'none' }
+var BASE_FALLBACK = { prenotazioni: 'write', clienti: 'write', sale: 'none', staff: 'none', turni: 'none', cassa: 'light', ordini_bordo: 'none', stipendi: 'none', impostazioni: 'none', utenti: 'none' }
 
 export function defaultPermissionsForRole(role) {
   return DEFAULT_PERMS_BY_ROLE[role] || BASE_FALLBACK

@@ -20,6 +20,8 @@ import SalePage from './pages/SalePage';
 import OrdiniBordoPage from './pages/OrdiniBordoPage';
 import ListinoBordoPage from './pages/ListinoBordoPage';
 import OrdineBordoPubblico from './pages/OrdineBordoPubblico';
+import StipendiDipendentiPage from './pages/StipendiDipendentiPage';
+import StipendioDipendenteDetail from './pages/StipendioDipendenteDetail';
 
 // ProtectedRoute basato sul sistema di permessi.
 // - feature: chiave della funzione; se assente, basta essere loggati.
@@ -173,6 +175,23 @@ function AppRoutes() {
         <Route path="/listino-bordo" element={
           <ProtectedRoute feature="ordini_bordo" requireEdit>
             <ListinoBordoPage />
+          </ProtectedRoute>
+        } />
+
+        {/* Stipendi */}
+        <Route path="/stipendi" element={
+          <ProtectedRoute feature="stipendi">
+            <Navigate to="/stipendi/dipendenti" replace />
+          </ProtectedRoute>
+        } />
+        <Route path="/stipendi/dipendenti" element={
+          <ProtectedRoute feature="stipendi">
+            <StipendiDipendentiPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/stipendi/dipendenti/:id" element={
+          <ProtectedRoute feature="stipendi">
+            <StipendioDipendenteDetail />
           </ProtectedRoute>
         } />
 
