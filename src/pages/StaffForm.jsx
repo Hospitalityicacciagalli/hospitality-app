@@ -2,7 +2,11 @@ import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/AuthContext";
-import { ArrowLeft, Save, UserPlus, Calendar, Briefcase, Phone, MapPin, Plus, Trash2, UserCheck } from "lucide-react";
+import { ArrowLeft, Save, UserPlus, Calendar, Briefcase, Phone, MapPin, Plus, Trash2, UserCheck, FileText, AlertTriangle, CheckCircle } from "lucide-react";
+import * as pdfjsLib from "pdfjs-dist";
+import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 var DAY_NAMES = ["Domenica", "Lunedi", "Martedi", "Mercoledi", "Giovedi", "Venerdi", "Sabato"];
 
@@ -27,6 +31,91 @@ var EMPTY_FORM = {
   is_extra:          false
 };
 
+// ============================================================
+// FUNZIONI DI SUPPORTO PER LA LETTURA DELLA UNILAV
+// ============================================================
+
+// Estrae con una regex il primo gruppo catturato, oppure stringa vuota
+function grab(text, regex) {
+  var m = text.match(regex);
+  return m ? m[1].replace(/\s+/g, " ").trim() : "";
+}
+
+// Converte una data dd/mm/yyyy in yyyy-mm-dd (formato campo date)
+function toIsoDate(it) {
+  var m = it.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (!m) return "";
+  return m[3] + "-" + m[2] + "-" + m[1];
+}
+
+// Da "F839 - NAPOLI" o "L083 - TEANO - 81057" tiene solo il nome del comune
+function cleanComune(raw) {
+  if (!raw) return "";
+  var parts = raw.split("-");
+  var kept = [];
+  for (var i = 0; i < parts.length; i++) {
+    var p = parts[i].trim();
+    if (!p) continue;
+    if (/^[A-Z]\d{3}$/i.test(p)) continue;  // codice catastale (es. F839)
+    if (/^\d{5}$/.test(p)) continue;        // CAP
+    kept.push(p);
+  }
+  return toTitleCase(kept.join(" - "));
+}
+
+// Da "IANNACCONE" a "Iannaccone", gestendo apostrofi e spazi (D'ALESSANDRO -> D'Alessandro)
+function toTitleCase(s) {
+  if (!s) return "";
+  var lower = s.toLowerCase();
+  var out = "";
+  var capitalizeNext = true;
+  for (var i = 0; i < lower.length; i++) {
+    var ch = lower[i];
+    if (capitalizeNext && /[a-zà-ù]/.test(ch)) {
+      out += ch.toUpperCase();
+      capitalizeNext = false;
+    } else {
+      out += ch;
+    }
+    if (ch === " " || ch === "'" || ch === "-" || ch === ".") capitalizeNext = true;
+  }
+  return out;
+}
+
+// Analizza il testo completo della UniLav e restituisce i dati estratti
+function parseUnilav(fullText) {
+  var text = fullText.replace(/\s+/g, " ");
+
+  // La sezione del lavoratore inizia da "Sezione 2": cosi' evitiamo di
+  // prendere il codice fiscale del datore di lavoro (Sezione 1)
+  var upper = text.toUpperCase();
+  var idx2 = upper.indexOf("SEZIONE 2");
+  var workerText = idx2 !== -1 ? text.slice(idx2) : text;
+
+  var cfMatch = workerText.match(/[A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z]/);
+
+  var result = {
+    fiscal_code:   cfMatch ? cfMatch[0] : "",
+    last_name:     toTitleCase(grab(workerText, /Cognome\s+(.+?)\s+Nome\s/i)),
+    first_name:    toTitleCase(grab(workerText, /\sNome\s+(.+?)\s+(?:Sesso|Cittadinanza|Data di nascita)/i)),
+    birth_date:    toIsoDate(grab(workerText, /Data di nascita\s+(\d{2}\/\d{2}\/\d{4})/i)),
+    birth_place:   cleanComune(grab(workerText, /Comune di nascita\s+(.+?)\s+Comune domicilio/i)),
+    city:          cleanComune(grab(workerText, /Comune domicilio\s+(.+?)\s+Indirizzo domicilio/i)),
+    address:       toTitleCase(grab(workerText, /Indirizzo domicilio\s+(.+?)\s+(?:Livello|Sezione)/i)),
+    hire_date:     toIsoDate(grab(text, /Data inizio\s+(\d{2}\/\d{2}\/\d{4})/i)),
+    contract_end_date: toIsoDate(grab(text, /Data fine\s+(\d{2}\/\d{2}\/\d{4})/i)),
+    tipologia:     grab(text, /Tipologia contrattuale\s+(.+?)\s+(?:Socio|Lavoratore|Lavoro Stagionale)/i),
+    // Dati solo indicativi: mostrati come riferimento, NON inseriti nel modulo
+    tipo_lavorazione: grab(text, /Tipo lavorazione\s+(.+?)\s+Giornate lavorative/i),
+    giornate_previste: grab(text, /Giornate lavorative previste\s+(\d+)/i),
+    ore_settimanali:   grab(text, /Ore settimanali medie\s+([\d.,]+)/i),
+    qualifica:         grab(text, /Qualifica professionale\s+(.+?)\s+(?:Retribuzione|Sezione)/i),
+    retribuzione:      grab(text, /Retribuzione\s+([\d.,]+)\s+Lavoro in agricoltura/i)
+  };
+
+  return result;
+}
+
 export default function StaffForm() {
   var navigate = useNavigate();
   var params = useParams();
@@ -45,6 +134,12 @@ export default function StaffForm() {
 
   var [newDay, setNewDay] = useState("1");
   var [newMeal, setNewMeal] = useState("");
+
+  // Stati per la lettura della UniLav
+  var [unilavLoading, setUnilavLoading] = useState(false);
+  var [unilavError, setUnilavError] = useState(null);
+  var [unilavInfo, setUnilavInfo] = useState(null);      // dati indicativi estratti
+  var [duplicate, setDuplicate] = useState(null);        // dipendente gia' presente
 
   var canManage = hasRole(["super_admin", "direttore"]);
 
@@ -140,6 +235,137 @@ export default function StaffForm() {
       next[field] = value;
       return next;
     });
+  }
+
+  // ============================================================
+  // LETTURA UNILAV
+  // ============================================================
+
+  function handleUnilavFile(e) {
+    var file = e.target.files && e.target.files[0];
+    e.target.value = "";  // permette di ricaricare lo stesso file
+    if (!file) return;
+
+    setUnilavLoading(true);
+    setUnilavError(null);
+    setUnilavInfo(null);
+    setDuplicate(null);
+
+    file.arrayBuffer().then(function(buffer) {
+      return pdfjsLib.getDocument({ data: buffer }).promise;
+    }).then(function(pdf) {
+      var tasks = [];
+      for (var i = 1; i <= pdf.numPages; i++) {
+        tasks.push(
+          pdf.getPage(i).then(function(page) {
+            return page.getTextContent();
+          })
+        );
+      }
+      return Promise.all(tasks);
+    }).then(function(contents) {
+      var fullText = "";
+      for (var i = 0; i < contents.length; i++) {
+        var items = contents[i].items || [];
+        for (var j = 0; j < items.length; j++) {
+          fullText += items[j].str + " ";
+        }
+      }
+
+      var parsed = parseUnilav(fullText);
+
+      if (!parsed.fiscal_code && !parsed.last_name) {
+        setUnilavLoading(false);
+        setUnilavError("Non sono riuscito a riconoscere i dati. Verifica che sia una ricevuta UniLav in PDF (non una scansione).");
+        return;
+      }
+
+      applyParsedData(parsed);
+      checkDuplicate(parsed);
+      setUnilavInfo(parsed);
+      setUnilavLoading(false);
+    }).catch(function(err) {
+      setUnilavLoading(false);
+      setUnilavError("Errore nella lettura del PDF: " + (err && err.message ? err.message : "file non valido"));
+    });
+  }
+
+  // Riempie il modulo con i dati estratti (solo quelli affidabili)
+  function applyParsedData(parsed) {
+    // Prova ad abbinare la tipologia contrattuale alle opzioni esistenti
+    var contractValue = "";
+    var tip = (parsed.tipologia || "").toLowerCase();
+    if (tip) {
+      var i;
+      if (tip.indexOf("indeterminato") !== -1) {
+        for (i = 0; i < contractTypes.length; i++) {
+          if (contractTypes[i].label.toLowerCase().indexOf("indeterminato") !== -1) {
+            contractValue = contractTypes[i].value;
+            break;
+          }
+        }
+      } else if (tip.indexOf("determinato") !== -1) {
+        for (i = 0; i < contractTypes.length; i++) {
+          var lbl = contractTypes[i].label.toLowerCase();
+          if (lbl.indexOf("determinato") !== -1 && lbl.indexOf("indeterminato") === -1) {
+            contractValue = contractTypes[i].value;
+            break;
+          }
+        }
+      }
+    }
+
+    setForm(function(prev) {
+      var next = {};
+      for (var k in prev) next[k] = prev[k];
+      if (parsed.first_name)        next.first_name = parsed.first_name;
+      if (parsed.last_name)         next.last_name = parsed.last_name;
+      if (parsed.fiscal_code)       next.fiscal_code = parsed.fiscal_code;
+      if (parsed.birth_date)        next.birth_date = parsed.birth_date;
+      if (parsed.birth_place)       next.birth_place = parsed.birth_place;
+      if (parsed.address)           next.address = parsed.address;
+      if (parsed.city)              next.city = parsed.city;
+      if (parsed.hire_date)         next.hire_date = parsed.hire_date;
+      if (parsed.contract_end_date) next.contract_end_date = parsed.contract_end_date;
+      if (contractValue)            next.contract_type = contractValue;
+      return next;
+    });
+  }
+
+  // Controlla se il dipendente esiste gia': prima per codice fiscale,
+  // poi (in mancanza) per nome e cognome
+  function checkDuplicate(parsed) {
+    if (parsed.fiscal_code) {
+      supabase
+        .from("staff_members")
+        .select("id, first_name, last_name, is_active, fiscal_code")
+        .eq("fiscal_code", parsed.fiscal_code)
+        .then(function(result) {
+          if (!result.error && result.data && result.data.length > 0) {
+            var d = result.data[0];
+            setDuplicate({ id: d.id, name: d.first_name + " " + d.last_name, is_active: d.is_active !== false, byName: false });
+          } else {
+            checkDuplicateByName(parsed);
+          }
+        });
+    } else {
+      checkDuplicateByName(parsed);
+    }
+  }
+
+  function checkDuplicateByName(parsed) {
+    if (!parsed.first_name || !parsed.last_name) return;
+    supabase
+      .from("staff_members")
+      .select("id, first_name, last_name, is_active")
+      .ilike("first_name", parsed.first_name)
+      .ilike("last_name", parsed.last_name)
+      .then(function(result) {
+        if (!result.error && result.data && result.data.length > 0) {
+          var d = result.data[0];
+          setDuplicate({ id: d.id, name: d.first_name + " " + d.last_name, is_active: d.is_active !== false, byName: true });
+        }
+      });
   }
 
   function getMealLabel(value) {
@@ -271,6 +497,102 @@ export default function StaffForm() {
       </div>
 
       <div className="space-y-6">
+
+        {/* Compilazione automatica da UniLav — solo in inserimento */}
+        {!isEdit && (
+          <div className="bg-white rounded-xl border border-wine-200 p-6">
+            <div className="flex items-center gap-2 mb-2">
+              <FileText size={18} className="text-wine-600" />
+              <h2 className="font-semibold text-gray-800">Compilazione automatica da UniLav</h2>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">
+              Carica il PDF della ricevuta di Comunicazione Obbligatoria (UniLav): i dati anagrafici
+              e le date del contratto verranno inseriti automaticamente nel modulo. Potrai controllare
+              e correggere tutto prima di salvare.
+            </p>
+
+            <label className="inline-flex items-center gap-2 bg-wine-700 text-white px-4 py-2.5 rounded-lg hover:bg-wine-800 transition-colors font-medium text-sm cursor-pointer">
+              <FileText size={16} />
+              {unilavLoading ? "Lettura in corso..." : "Carica PDF UniLav"}
+              <input type="file" accept="application/pdf" className="hidden"
+                onChange={handleUnilavFile} disabled={unilavLoading} />
+            </label>
+
+            {unilavError && (
+              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                {unilavError}
+              </div>
+            )}
+
+            {/* Avviso dipendente gia' presente */}
+            {duplicate && (
+              <div className="mt-4 p-4 bg-amber-50 border border-amber-300 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle size={18} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-amber-800">
+                      {duplicate.byName
+                        ? "Attenzione: esiste gia' un dipendente con lo stesso nome"
+                        : "Attenzione: questo codice fiscale e' gia' in anagrafica"}
+                    </p>
+                    <p className="text-sm text-amber-700 mt-1">
+                      {duplicate.name}
+                      {!duplicate.is_active && " (attualmente non attivo)"}
+                      {". Se e' la stessa persona, conviene aggiornare la sua scheda invece di crearne una nuova."}
+                    </p>
+                    <div className="flex gap-2 mt-3 flex-wrap">
+                      <button
+                        onClick={function() { navigate("/staff/" + duplicate.id + "/modifica"); }}
+                        className="bg-amber-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-amber-700 transition-colors">
+                        Apri la scheda esistente
+                      </button>
+                      <button
+                        onClick={function() { setDuplicate(null); }}
+                        className="border border-amber-300 text-amber-700 px-3 py-1.5 rounded-lg text-sm hover:bg-amber-100 transition-colors">
+                        Ignora e crea comunque
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Conferma lettura + dati indicativi */}
+            {unilavInfo && !duplicate && (
+              <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
+                <p className="text-sm text-green-800 flex items-center gap-2">
+                  <CheckCircle size={16} className="flex-shrink-0" />
+                  Dati letti e inseriti nel modulo. Controllali e completa i campi mancanti.
+                </p>
+              </div>
+            )}
+
+            {unilavInfo && (
+              <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+                  Dati indicativi dalla UniLav (solo riferimento, non salvati)
+                </p>
+                <div className="text-sm text-gray-600 space-y-1">
+                  {unilavInfo.tipo_lavorazione && (
+                    <p><span className="text-gray-400">Tipo lavorazione:</span> {unilavInfo.tipo_lavorazione}</p>
+                  )}
+                  {unilavInfo.qualifica && (
+                    <p><span className="text-gray-400">Qualifica:</span> {unilavInfo.qualifica}</p>
+                  )}
+                  {unilavInfo.giornate_previste && (
+                    <p><span className="text-gray-400">Giornate previste:</span> {unilavInfo.giornate_previste}</p>
+                  )}
+                  {unilavInfo.ore_settimanali && (
+                    <p><span className="text-gray-400">Ore settimanali medie:</span> {unilavInfo.ore_settimanali}</p>
+                  )}
+                  {unilavInfo.retribuzione && (
+                    <p><span className="text-gray-400">Retribuzione dichiarata:</span> {unilavInfo.retribuzione}</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Dati anagrafici */}
         <div className="bg-white rounded-xl border border-gray-200 p-6">
