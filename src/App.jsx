@@ -20,12 +20,10 @@ import SalePage from './pages/SalePage';
 import OrdiniBordoPage from './pages/OrdiniBordoPage';
 import ListinoBordoPage from './pages/ListinoBordoPage';
 import OrdineBordoPubblico from './pages/OrdineBordoPubblico';
+import StipendiMesePage from './pages/StipendiMesePage';
 import StipendiDipendentiPage from './pages/StipendiDipendentiPage';
 import StipendioDipendenteDetail from './pages/StipendioDipendenteDetail';
 
-// ProtectedRoute basato sul sistema di permessi.
-// - feature: chiave della funzione; se assente, basta essere loggati.
-// - requireEdit: se true, richiede il permesso di scrittura sulla funzione.
 function ProtectedRoute({ children, feature, requireEdit }) {
   var { session, loading, canView, canEdit } = useAuth();
 
@@ -75,7 +73,6 @@ function AppRoutes() {
     <Layout>
       <Routes>
 
-        {/* Redirect radice */}
         <Route path="/" element={<Navigate to="/prenotazioni" replace />} />
         <Route path="/login" element={<Navigate to="/prenotazioni" replace />} />
 
@@ -178,10 +175,15 @@ function AppRoutes() {
           </ProtectedRoute>
         } />
 
-        {/* Stipendi */}
+        {/* Stipendi: la pagina principale e' il mese */}
         <Route path="/stipendi" element={
           <ProtectedRoute feature="stipendi">
-            <Navigate to="/stipendi/dipendenti" replace />
+            <Navigate to="/stipendi/mese" replace />
+          </ProtectedRoute>
+        } />
+        <Route path="/stipendi/mese" element={
+          <ProtectedRoute feature="stipendi">
+            <StipendiMesePage />
           </ProtectedRoute>
         } />
         <Route path="/stipendi/dipendenti" element={
@@ -216,7 +218,6 @@ function AppRoutes() {
           </ProtectedRoute>
         } />
 
-        {/* Fallback */}
         <Route path="*" element={<Navigate to="/prenotazioni" replace />} />
 
       </Routes>
@@ -225,8 +226,6 @@ function AppRoutes() {
 }
 
 export default function App() {
-  // Area pubblica del QR: pagina autonoma, completamente fuori dal
-  // gestionale (niente login, niente AuthProvider, niente Layout).
   if (typeof window !== 'undefined' && window.location.pathname === '/ordina') {
     return <OrdineBordoPubblico />;
   }

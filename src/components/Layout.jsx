@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 
 export default function Layout({ children }) {
   var { profile, signOut, canView, canEdit } = useAuth();
   var navigate = useNavigate();
+  var location = useLocation();
   var [mobileOpen, setMobileOpen] = useState(false);
 
   function handleSignOut() {
@@ -33,6 +34,9 @@ export default function Layout({ children }) {
     return navLinkBase + (isActive ? navLinkActive : navLinkInactive);
   }
 
+  // Per il menu Stipendi: e' attivo se siamo su una qualunque sotto-pagina
+  var stipendiActive = location.pathname.indexOf('/stipendi') === 0;
+
   var showAdminSection = canView('impostazioni');
 
   var sidebarContent = (
@@ -53,8 +57,7 @@ export default function Layout({ children }) {
           <NavLink
             to="/prenotazioni"
             className={function(p) { return navClass(p.isActive); }}
-            onClick={function() { setMobileOpen(false); }}
-          >
+            onClick={function() { setMobileOpen(false); }}>
             <span className="text-base">📅</span>
             Prenotazioni
           </NavLink>
@@ -64,8 +67,7 @@ export default function Layout({ children }) {
           <NavLink
             to="/clienti"
             className={function(p) { return navClass(p.isActive); }}
-            onClick={function() { setMobileOpen(false); }}
-          >
+            onClick={function() { setMobileOpen(false); }}>
             <span className="text-base">👥</span>
             Clienti
           </NavLink>
@@ -75,8 +77,7 @@ export default function Layout({ children }) {
           <NavLink
             to="/sale"
             className={function(p) { return navClass(p.isActive); }}
-            onClick={function() { setMobileOpen(false); }}
-          >
+            onClick={function() { setMobileOpen(false); }}>
             <span className="text-base">🗺️</span>
             Sale e Tavoli
           </NavLink>
@@ -86,8 +87,7 @@ export default function Layout({ children }) {
           <NavLink
             to="/staff"
             className={function(p) { return navClass(p.isActive); }}
-            onClick={function() { setMobileOpen(false); }}
-          >
+            onClick={function() { setMobileOpen(false); }}>
             <span className="text-base">🏷️</span>
             Staff
           </NavLink>
@@ -97,8 +97,7 @@ export default function Layout({ children }) {
           <NavLink
             to="/turni"
             className={function(p) { return navClass(p.isActive); }}
-            onClick={function() { setMobileOpen(false); }}
-          >
+            onClick={function() { setMobileOpen(false); }}>
             <span className="text-base">🗓️</span>
             Turni
           </NavLink>
@@ -108,8 +107,7 @@ export default function Layout({ children }) {
           <NavLink
             to="/cassa"
             className={function(p) { return navClass(p.isActive); }}
-            onClick={function() { setMobileOpen(false); }}
-          >
+            onClick={function() { setMobileOpen(false); }}>
             <span className="text-base">💰</span>
             Cassa
           </NavLink>
@@ -119,8 +117,7 @@ export default function Layout({ children }) {
           <NavLink
             to="/ordini-bordo"
             className={function(p) { return navClass(p.isActive); }}
-            onClick={function() { setMobileOpen(false); }}
-          >
+            onClick={function() { setMobileOpen(false); }}>
             <span className="text-base">🍹</span>
             Ordini Bordo
           </NavLink>
@@ -130,22 +127,49 @@ export default function Layout({ children }) {
           <NavLink
             to="/listino-bordo"
             className={function(p) { return navClass(p.isActive); }}
-            onClick={function() { setMobileOpen(false); }}
-          >
+            onClick={function() { setMobileOpen(false); }}>
             <span className="text-base">📋</span>
             Listino Bordo
           </NavLink>
         )}
 
+        {/* Stipendi: voce principale + sotto-voci se attivo */}
         {canView('stipendi') && (
-          <NavLink
-            to="/stipendi"
-            className={function(p) { return navClass(p.isActive); }}
-            onClick={function() { setMobileOpen(false); }}
-          >
-            <span className="text-base">💶</span>
-            Stipendi
-          </NavLink>
+          <>
+            <NavLink
+              to="/stipendi/mese"
+              className={function(p) {
+                var isActive = p.isActive || location.pathname === '/stipendi';
+                return navClass(isActive);
+              }}
+              onClick={function() { setMobileOpen(false); }}>
+              <span className="text-base">💶</span>
+              Stipendi
+            </NavLink>
+            {stipendiActive && (
+              <div className="ml-3 pl-3 border-l border-wine-700 space-y-1">
+                <NavLink
+                  to="/stipendi/mese"
+                  className={function(p) {
+                    var base = 'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ';
+                    return base + (p.isActive ? 'bg-wine-800 text-white' : 'text-wine-300 hover:text-white');
+                  }}
+                  onClick={function() { setMobileOpen(false); }}>
+                  Mese
+                </NavLink>
+                <NavLink
+                  to="/stipendi/dipendenti"
+                  className={function(p) {
+                    var isActive = p.isActive || location.pathname.indexOf('/stipendi/dipendenti') === 0;
+                    var base = 'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ';
+                    return base + (isActive ? 'bg-wine-800 text-white' : 'text-wine-300 hover:text-white');
+                  }}
+                  onClick={function() { setMobileOpen(false); }}>
+                  Dipendenti
+                </NavLink>
+              </div>
+            )}
+          </>
         )}
 
         {showAdminSection && (
@@ -156,8 +180,7 @@ export default function Layout({ children }) {
               <NavLink
                 to="/impostazioni"
                 className={function(p) { return navClass(p.isActive); }}
-                onClick={function() { setMobileOpen(false); }}
-              >
+                onClick={function() { setMobileOpen(false); }}>
                 <span className="text-base">⚙️</span>
                 Impostazioni
               </NavLink>
@@ -169,8 +192,7 @@ export default function Layout({ children }) {
           <NavLink
             to="/utenti"
             className={function(p) { return navClass(p.isActive); }}
-            onClick={function() { setMobileOpen(false); }}
-          >
+            onClick={function() { setMobileOpen(false); }}>
             <span className="text-base">🔐</span>
             Utenti App
           </NavLink>
@@ -184,8 +206,7 @@ export default function Layout({ children }) {
         <NavLink
           to="/profilo"
           className={function(p) { return navClass(p.isActive); }}
-          onClick={function() { setMobileOpen(false); }}
-        >
+          onClick={function() { setMobileOpen(false); }}>
           <span className="text-base">👤</span>
           Il mio profilo
         </NavLink>
@@ -201,8 +222,7 @@ export default function Layout({ children }) {
 
         <button
           onClick={handleSignOut}
-          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-wine-300 hover:bg-wine-800 hover:text-white transition-colors mt-1"
-        >
+          className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium text-wine-300 hover:bg-wine-800 hover:text-white transition-colors mt-1">
           <span className="text-base">🚪</span>
           Esci
         </button>
@@ -242,8 +262,7 @@ export default function Layout({ children }) {
         <header className="lg:hidden bg-wine-900 px-4 py-3 flex items-center justify-between">
           <button
             onClick={function() { setMobileOpen(true); }}
-            className="text-white p-1"
-          >
+            className="text-white p-1">
             <div className="w-5 h-0.5 bg-white mb-1"></div>
             <div className="w-5 h-0.5 bg-white mb-1"></div>
             <div className="w-5 h-0.5 bg-white"></div>
