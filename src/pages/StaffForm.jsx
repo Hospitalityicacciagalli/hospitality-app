@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/AuthContext";
-import { ArrowLeft, Save, UserPlus, Calendar, Briefcase, Phone, MapPin, Plus, Trash2, UserCheck, FileText, AlertTriangle, CheckCircle } from "lucide-react";
+import { ArrowLeft, Save, UserPlus, Calendar, Briefcase, Phone, MapPin, Plus, Trash2, UserCheck, FileText, AlertTriangle, CheckCircle, UserX } from "lucide-react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
@@ -35,20 +35,23 @@ var EMPTY_FORM = {
 // FUNZIONI DI SUPPORTO PER LA LETTURA DELLA UNILAV
 // ============================================================
 
-// Estrae con una regex il primo gruppo catturato, oppure stringa vuota
 function grab(text, regex) {
   var m = text.match(regex);
   return m ? m[1].replace(/\s+/g, " ").trim() : "";
 }
 
-// Converte una data dd/mm/yyyy in yyyy-mm-dd (formato campo date)
 function toIsoDate(it) {
   var m = it.match(/(\d{2})\/(\d{2})\/(\d{4})/);
   if (!m) return "";
   return m[3] + "-" + m[2] + "-" + m[1];
 }
 
-// Da "F839 - NAPOLI" o "L083 - TEANO - 81057" tiene solo il nome del comune
+function formatIsoToIt(iso) {
+  var m = (iso || "").match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return iso || "";
+  return m[3] + "/" + m[2] + "/" + m[1];
+}
+
 function cleanComune(raw) {
   if (!raw) return "";
   var parts = raw.split("-");
@@ -56,14 +59,13 @@ function cleanComune(raw) {
   for (var i = 0; i < parts.length; i++) {
     var p = parts[i].trim();
     if (!p) continue;
-    if (/^[A-Z]\d{3}$/i.test(p)) continue;  // codice catastale (es. F839)
-    if (/^\d{5}$/.test(p)) continue;        // CAP
+    if (/^[A-Z]\d{3}$/i.test(p)) continue;
+    if (/^\d{5}$/.test(p)) continue;
     kept.push(p);
   }
   return toTitleCase(kept.join(" - "));
 }
 
-// Da "IANNACCONE" a "Iannaccone", gestendo apostrofi e spazi (D'ALESSANDRO -> D'Alessandro)
 function toTitleCase(s) {
   if (!s) return "";
   var lower = s.toLowerCase();
@@ -82,38 +84,46 @@ function toTitleCase(s) {
   return out;
 }
 
-// Analizza il testo completo della UniLav e restituisce i dati estratti
+// Analizza il testo della UniLav e capisce se e' un'assunzione o una cessazione.
+// La cessazione e' identificata dalla presenza della "Sezione 7 - Cessazione".
 function parseUnilav(fullText) {
   var text = fullText.replace(/\s+/g, " ");
-
-  // La sezione del lavoratore inizia da "Sezione 2": cosi' evitiamo di
-  // prendere il codice fiscale del datore di lavoro (Sezione 1)
   var upper = text.toUpperCase();
+
+  var isCessazione = upper.indexOf("SEZIONE 7") !== -1 && upper.indexOf("CESSAZIONE") !== -1;
+
   var idx2 = upper.indexOf("SEZIONE 2");
   var workerText = idx2 !== -1 ? text.slice(idx2) : text;
 
   var cfMatch = workerText.match(/[A-Z]{6}\d{2}[A-Z]\d{2}[A-Z]\d{3}[A-Z]/);
 
-  var result = {
-    fiscal_code:   cfMatch ? cfMatch[0] : "",
-    last_name:     toTitleCase(grab(workerText, /Cognome\s+(.+?)\s+Nome\s/i)),
-    first_name:    toTitleCase(grab(workerText, /\sNome\s+(.+?)\s+(?:Sesso|Cittadinanza|Data di nascita)/i)),
-    birth_date:    toIsoDate(grab(workerText, /Data di nascita\s+(\d{2}\/\d{2}\/\d{4})/i)),
-    birth_place:   cleanComune(grab(workerText, /Comune di nascita\s+(.+?)\s+Comune domicilio/i)),
-    city:          cleanComune(grab(workerText, /Comune domicilio\s+(.+?)\s+Indirizzo domicilio/i)),
-    address:       toTitleCase(grab(workerText, /Indirizzo domicilio\s+(.+?)\s+(?:Livello|Sezione)/i)),
-    hire_date:     toIsoDate(grab(text, /Data inizio\s+(\d{2}\/\d{2}\/\d{4})/i)),
-    contract_end_date: toIsoDate(grab(text, /Data fine\s+(\d{2}\/\d{2}\/\d{4})/i)),
-    tipologia:     grab(text, /Tipologia contrattuale\s+(.+?)\s+(?:Socio|Lavoratore|Lavoro Stagionale)/i),
-    // Dati solo indicativi: mostrati come riferimento, NON inseriti nel modulo
-    tipo_lavorazione: grab(text, /Tipo lavorazione\s+(.+?)\s+Giornate lavorative/i),
-    giornate_previste: grab(text, /Giornate lavorative previste\s+(\d+)/i),
-    ore_settimanali:   grab(text, /Ore settimanali medie\s+([\d.,]+)/i),
-    qualifica:         grab(text, /Qualifica professionale\s+(.+?)\s+(?:Retribuzione|Sezione)/i),
-    retribuzione:      grab(text, /Retribuzione\s+([\d.,]+)\s+Lavoro in agricoltura/i)
+  var common = {
+    tipo_comunicazione: isCessazione ? "cessazione" : "assunzione",
+    fiscal_code:        cfMatch ? cfMatch[0] : "",
+    last_name:          toTitleCase(grab(workerText, /Cognome\s+(.+?)\s+Nome\s/i)),
+    first_name:         toTitleCase(grab(workerText, /\sNome\s+(.+?)\s+(?:Sesso|Cittadinanza|Data di nascita)/i)),
+    birth_date:         toIsoDate(grab(workerText, /Data di nascita\s+(\d{2}\/\d{2}\/\d{4})/i)),
+    birth_place:        cleanComune(grab(workerText, /Comune di nascita\s+(.+?)\s+Comune domicilio/i)),
+    city:               cleanComune(grab(workerText, /Comune domicilio\s+(.+?)\s+Indirizzo domicilio/i)),
+    address:            toTitleCase(grab(workerText, /Indirizzo domicilio\s+(.+?)\s+(?:Livello|Sezione)/i)),
+    tipologia:          grab(text, /Tipologia contrattuale\s+(.+?)\s+(?:Socio|Lavoratore|Lavoro Stagionale)/i),
+    tipo_lavorazione:   grab(text, /Tipo lavorazione\s+(.+?)\s+Giornate lavorative/i),
+    giornate_previste:  grab(text, /Giornate lavorative previste\s+(\d+)/i),
+    ore_settimanali:    grab(text, /Ore settimanali medie\s+([\d.,]+)/i),
+    qualifica:          grab(text, /Qualifica professionale\s+(.+?)\s+(?:Retribuzione|Sezione)/i),
+    retribuzione:       grab(text, /Retribuzione\s+([\d.,]+)\s+Lavoro in agricoltura/i)
   };
 
-  return result;
+  if (isCessazione) {
+    common.data_cessazione = toIsoDate(grab(text, /Data cessazione\s+(\d{2}\/\d{2}\/\d{4})/i));
+    common.motivo_cessazione = grab(text, /Motivo cessazione\s+(.+?)\s+Sezione/i);
+    common.hire_date = toIsoDate(grab(text, /Data inizio\s+(\d{2}\/\d{2}\/\d{4})/i));
+  } else {
+    common.hire_date = toIsoDate(grab(text, /Data inizio\s+(\d{2}\/\d{2}\/\d{4})/i));
+    common.contract_end_date = toIsoDate(grab(text, /Data fine\s+(\d{2}\/\d{2}\/\d{4})/i));
+  }
+
+  return common;
 }
 
 export default function StaffForm() {
@@ -135,11 +145,13 @@ export default function StaffForm() {
   var [newDay, setNewDay] = useState("1");
   var [newMeal, setNewMeal] = useState("");
 
-  // Stati per la lettura della UniLav
   var [unilavLoading, setUnilavLoading] = useState(false);
   var [unilavError, setUnilavError] = useState(null);
-  var [unilavInfo, setUnilavInfo] = useState(null);      // dati indicativi estratti
-  var [duplicate, setDuplicate] = useState(null);        // dipendente gia' presente
+  var [unilavInfo, setUnilavInfo] = useState(null);
+  var [duplicate, setDuplicate] = useState(null);
+  var [cessazione, setCessazione] = useState(null);
+  var [cessazioneSaving, setCessazioneSaving] = useState(false);
+  var [cessazioneDone, setCessazioneDone] = useState(false);
 
   var canManage = hasRole(["super_admin", "direttore"]);
 
@@ -243,13 +255,15 @@ export default function StaffForm() {
 
   function handleUnilavFile(e) {
     var file = e.target.files && e.target.files[0];
-    e.target.value = "";  // permette di ricaricare lo stesso file
+    e.target.value = "";
     if (!file) return;
 
     setUnilavLoading(true);
     setUnilavError(null);
     setUnilavInfo(null);
     setDuplicate(null);
+    setCessazione(null);
+    setCessazioneDone(false);
 
     file.arrayBuffer().then(function(buffer) {
       return pdfjsLib.getDocument({ data: buffer }).promise;
@@ -280,19 +294,88 @@ export default function StaffForm() {
         return;
       }
 
-      applyParsedData(parsed);
-      checkDuplicate(parsed);
-      setUnilavInfo(parsed);
-      setUnilavLoading(false);
+      if (parsed.tipo_comunicazione === "cessazione") {
+        handleUnilavCessazione(parsed);
+      } else {
+        applyParsedData(parsed);
+        checkDuplicate(parsed);
+        setUnilavInfo(parsed);
+        setUnilavLoading(false);
+      }
     }).catch(function(err) {
       setUnilavLoading(false);
       setUnilavError("Errore nella lettura del PDF: " + (err && err.message ? err.message : "file non valido"));
     });
   }
 
-  // Riempie il modulo con i dati estratti (solo quelli affidabili)
+  function handleUnilavCessazione(parsed) {
+    if (!parsed.fiscal_code) {
+      setUnilavLoading(false);
+      setUnilavError("La UniLav di cessazione non contiene un codice fiscale leggibile.");
+      return;
+    }
+    supabase
+      .from("staff_members")
+      .select("id, first_name, last_name, is_active, contract_end_date")
+      .eq("fiscal_code", parsed.fiscal_code)
+      .then(function(result) {
+        setUnilavLoading(false);
+        if (result.error || !result.data || result.data.length === 0) {
+          setUnilavError("Nessun dipendente trovato con codice fiscale " + parsed.fiscal_code + ". Inserisci prima il dipendente in anagrafica.");
+          return;
+        }
+        var d = result.data[0];
+        setCessazione({
+          staff_id:           d.id,
+          name:               d.first_name + " " + d.last_name,
+          is_active:          d.is_active !== false,
+          previous_end_date:  d.contract_end_date,
+          data_cessazione:    parsed.data_cessazione,
+          motivo_cessazione:  parsed.motivo_cessazione
+        });
+      });
+  }
+
+  function confirmCessazione() {
+    if (!cessazione) return;
+    setCessazioneSaving(true);
+
+    var noteCessazione = "Cessazione registrata da UniLav: " + formatIsoToIt(cessazione.data_cessazione);
+    if (cessazione.motivo_cessazione) {
+      noteCessazione += " - " + cessazione.motivo_cessazione;
+    }
+
+    supabase
+      .from("staff_members")
+      .select("notes")
+      .eq("id", cessazione.staff_id)
+      .single()
+      .then(function(readRes) {
+        var existingNotes = (readRes.data && readRes.data.notes) ? readRes.data.notes : "";
+        var newNotes = existingNotes
+          ? (existingNotes + "\n" + noteCessazione)
+          : noteCessazione;
+
+        return supabase
+          .from("staff_members")
+          .update({
+            contract_end_date: cessazione.data_cessazione,
+            is_active:         false,
+            notes:             newNotes
+          })
+          .eq("id", cessazione.staff_id);
+      })
+      .then(function(updRes) {
+        setCessazioneSaving(false);
+        if (updRes && updRes.error) {
+          alert("Errore: " + updRes.error.message);
+          return;
+        }
+        setCessazioneDone(true);
+      });
+  }
+
   function applyParsedData(parsed) {
-    // Prova ad abbinare la tipologia contrattuale alle opzioni esistenti
     var contractValue = "";
     var tip = (parsed.tipologia || "").toLowerCase();
     if (tip) {
@@ -332,8 +415,6 @@ export default function StaffForm() {
     });
   }
 
-  // Controlla se il dipendente esiste gia': prima per codice fiscale,
-  // poi (in mancanza) per nome e cognome
   function checkDuplicate(parsed) {
     if (parsed.fiscal_code) {
       supabase
@@ -506,9 +587,10 @@ export default function StaffForm() {
               <h2 className="font-semibold text-gray-800">Compilazione automatica da UniLav</h2>
             </div>
             <p className="text-sm text-gray-500 mb-4">
-              Carica il PDF della ricevuta di Comunicazione Obbligatoria (UniLav): i dati anagrafici
-              e le date del contratto verranno inseriti automaticamente nel modulo. Potrai controllare
-              e correggere tutto prima di salvare.
+              Carica il PDF della ricevuta di Comunicazione Obbligatoria (UniLav). Il sistema
+              riconosce automaticamente se si tratta di un'assunzione o di una cessazione:
+              nel primo caso precompila il modulo, nel secondo aggiorna la scheda del dipendente
+              esistente. Potrai controllare e correggere tutto prima di confermare.
             </p>
 
             <label className="inline-flex items-center gap-2 bg-wine-700 text-white px-4 py-2.5 rounded-lg hover:bg-wine-800 transition-colors font-medium text-sm cursor-pointer">
@@ -524,7 +606,79 @@ export default function StaffForm() {
               </div>
             )}
 
-            {/* Avviso dipendente gia' presente */}
+            {/* CESSAZIONE — riquadro azzurro per confermare la chiusura del rapporto */}
+            {cessazione && !cessazioneDone && (
+              <div className="mt-4 p-4 bg-blue-50 border border-blue-300 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <UserX size={18} className="text-blue-600 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-blue-800">
+                      UniLav di cessazione riconosciuta
+                    </p>
+                    <div className="text-sm text-blue-700 mt-2 space-y-1">
+                      <p><span className="text-blue-500">Dipendente:</span> <span className="font-medium">{cessazione.name}</span></p>
+                      <p><span className="text-blue-500">Data cessazione:</span> <span className="font-medium">{formatIsoToIt(cessazione.data_cessazione)}</span></p>
+                      {cessazione.motivo_cessazione && (
+                        <p><span className="text-blue-500">Motivo:</span> {cessazione.motivo_cessazione}</p>
+                      )}
+                      {!cessazione.is_active && (
+                        <p className="text-amber-700 mt-2">Nota: il dipendente risulta gia' non attivo.</p>
+                      )}
+                    </div>
+                    <p className="text-sm text-blue-600 mt-3">
+                      Confermando aggiornero' la sua scheda: scadenza contratto = data cessazione,
+                      stato = non attivo, e aggiungero' una nota con motivo e data.
+                    </p>
+                    <div className="flex gap-2 mt-3 flex-wrap">
+                      <button
+                        onClick={confirmCessazione}
+                        disabled={cessazioneSaving}
+                        className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-blue-700 transition-colors disabled:opacity-50">
+                        {cessazioneSaving ? "Salvataggio..." : "Conferma cessazione"}
+                      </button>
+                      <button
+                        onClick={function() { navigate("/staff/" + cessazione.staff_id); }}
+                        className="border border-blue-300 text-blue-700 px-3 py-1.5 rounded-lg text-sm hover:bg-blue-100 transition-colors">
+                        Apri la scheda
+                      </button>
+                      <button
+                        onClick={function() { setCessazione(null); }}
+                        className="border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm hover:bg-gray-50 transition-colors">
+                        Annulla
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* CESSAZIONE — conferma avvenuta */}
+            {cessazioneDone && cessazione && (
+              <div className="mt-4 p-4 bg-green-50 border border-green-300 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <CheckCircle size={18} className="text-green-600 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-green-800">
+                      Cessazione registrata con successo per {cessazione.name}
+                    </p>
+                    <div className="flex gap-2 mt-3">
+                      <button
+                        onClick={function() { navigate("/staff/" + cessazione.staff_id); }}
+                        className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-green-700 transition-colors">
+                        Apri la scheda
+                      </button>
+                      <button
+                        onClick={function() { navigate("/staff"); }}
+                        className="border border-green-300 text-green-700 px-3 py-1.5 rounded-lg text-sm hover:bg-green-100 transition-colors">
+                        Torna alla lista staff
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* DUPLICATO IN ASSUNZIONE */}
             {duplicate && (
               <div className="mt-4 p-4 bg-amber-50 border border-amber-300 rounded-lg">
                 <div className="flex items-start gap-2">
@@ -557,8 +711,8 @@ export default function StaffForm() {
               </div>
             )}
 
-            {/* Conferma lettura + dati indicativi */}
-            {unilavInfo && !duplicate && (
+            {/* CONFERMA ASSUNZIONE */}
+            {unilavInfo && unilavInfo.tipo_comunicazione === "assunzione" && !duplicate && (
               <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
                 <p className="text-sm text-green-800 flex items-center gap-2">
                   <CheckCircle size={16} className="flex-shrink-0" />
@@ -567,7 +721,8 @@ export default function StaffForm() {
               </div>
             )}
 
-            {unilavInfo && (
+            {/* DATI INDICATIVI */}
+            {unilavInfo && unilavInfo.tipo_comunicazione === "assunzione" && (
               <div className="mt-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
                 <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
                   Dati indicativi dalla UniLav (solo riferimento, non salvati)
