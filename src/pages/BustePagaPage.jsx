@@ -148,10 +148,12 @@ export default function BustePagaPage() {
   function loadMonthData() {
     setLoading(true);
 
+    // Tutti i dipendenti, attivi e cessati: la busta di un mese si lavora a
+    // inizio del mese dopo, e un cessato il 31 risulta gia' is_active=false.
+    // Il codice fiscale e' univoco, quindi nessun rischio di confusione.
     var pStaff = supabase
       .from('staff_members')
-      .select('id, first_name, last_name, fiscal_code')
-      .eq('is_active', true);
+      .select('id, first_name, last_name, fiscal_code, is_active');
 
     var pProfili = supabase
       .from('stip_profili')
@@ -604,6 +606,7 @@ export default function BustePagaPage() {
                     <tr key={p.cf} className="border-b border-gray-100 hover:bg-gray-50">
                       <td className="px-3 py-2 whitespace-nowrap font-medium text-gray-900">
                         {row.staff.last_name} {row.staff.first_name}
+                        {row.staff.is_active === false && <span className="ml-2 text-xs text-gray-400 italic">(cessato)</span>}
                         {vuoto && <span className="ml-2 text-xs text-gray-400 italic">(non lavorato)</span>}
                       </td>
                       <td className="px-3 py-2 text-right font-semibold text-gray-900 whitespace-nowrap">
