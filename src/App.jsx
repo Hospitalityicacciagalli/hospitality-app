@@ -23,6 +23,7 @@ import OrdineBordoPubblico from './pages/OrdineBordoPubblico';
 import StipendiMesePage from './pages/StipendiMesePage';
 import StipendiDipendentiPage from './pages/StipendiDipendentiPage';
 import StipendioDipendenteDetail from './pages/StipendioDipendenteDetail';
+import BustePagaPage from './pages/BustePagaPage';
 
 function ProtectedRoute({ children, feature, requireEdit }) {
   var { session, loading, canView, canEdit } = useAuth();
@@ -184,6 +185,11 @@ function AppRoutes() {
         <Route path="/stipendi/mese" element={
           <ProtectedRoute feature="stipendi">
             <StipendiMesePage />
+          </ProtectedRoute>
+        } />
+        <Route path="/stipendi/buste" element={
+          <ProtectedRoute feature="stipendi">
+            <BustePagaPage />
           </ProtectedRoute>
         } />
         <Route path="/stipendi/dipendenti" element={

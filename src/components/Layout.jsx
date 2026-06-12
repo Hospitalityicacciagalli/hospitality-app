@@ -158,6 +158,15 @@ export default function Layout({ children }) {
                   Mese
                 </NavLink>
                 <NavLink
+                  to="/stipendi/buste"
+                  className={function(p) {
+                    var base = 'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ';
+                    return base + (p.isActive ? 'bg-wine-800 text-white' : 'text-wine-300 hover:text-white');
+                  }}
+                  onClick={function() { setMobileOpen(false); }}>
+                  Buste paga
+                </NavLink>
+                <NavLink
                   to="/stipendi/dipendenti"
                   className={function(p) {
                     var isActive = p.isActive || location.pathname.indexOf('/stipendi/dipendenti') === 0;
