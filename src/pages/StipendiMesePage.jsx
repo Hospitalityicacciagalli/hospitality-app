@@ -115,8 +115,31 @@ export default function StipendiMesePage() {
       .eq('mese', meseScorsoMm);
 
     Promise.all([pMembers, pStip, pTar, pRighe, pMov, pRigheScorse, pMovScorso]).then(function(results) {
+      // Quali dipendenti hanno gia' dati salvati su questo mese?
+      // (busta, conteggio, extra, tfr, ore o movimenti) -> non vanno mai nascosti.
+      var righeMeseData = results[3].data || [];
+      var movMeseData = results[4].data || [];
+      var movCountByStaff = {};
+      movMeseData.forEach(function(m) {
+        movCountByStaff[m.staff_id] = (movCountByStaff[m.staff_id] || 0) + 1;
+      });
+      var hasDati = {};
+      righeMeseData.forEach(function(r) {
+        var ha = (r.busta_prova !== null && r.busta_prova !== undefined)
+          || (r.busta_definitiva !== null && r.busta_definitiva !== undefined)
+          || parseNum(r.conteggio_euro) > 0
+          || parseNum(r.extra) !== 0
+          || parseNum(r.tfr) !== 0
+          || parseNum(r.ore) > 0
+          || (movCountByStaff[r.staff_id] > 0);
+        if (ha) hasDati[r.staff_id] = true;
+      });
+
+      // L'organico del mese si basa sul CONTRATTO (non sullo stato attuale):
+      // entra chi era assunto in quel mese. In piu' mostro chi ha gia' dati salvati.
       var membersData = (results[0].data || []).filter(function(p) {
-        return p.staff && p.staff.is_active && p.attivo;
+        if (!p.staff) return false;
+        return (p.attivo && lavoraNelMese(p.staff)) || hasDati[p.staff_id];
       });
 
       // Ordina per settore poi cognome
@@ -184,6 +207,20 @@ export default function StipendiMesePage() {
 
       setLoading(false);
     });
+  }
+
+  // Un dipendente "lavora nel mese" se il suo contratto copre il mese selezionato:
+  // assunto entro la fine del mese e non cessato prima dell'inizio del mese.
+  function lavoraNelMese(staff) {
+    if (!staff) return false;
+    var mm = String(mese).padStart(2, '0');
+    var primo = anno + '-' + mm + '-01';
+    var ultimo = anno + '-' + mm + '-31';
+    var assunto = staff.hire_date ? String(staff.hire_date).slice(0, 10) : null;
+    var cessato = staff.contract_end_date ? String(staff.contract_end_date).slice(0, 10) : null;
+    if (assunto && assunto > ultimo) return false;   // assunto dopo il mese
+    if (cessato && cessato < primo) return false;    // cessato prima del mese
+    return true;
   }
 
   // Calcola conteggio_euro suggerito (resort: stipendio vigente; campagna: ore x tariffa)
