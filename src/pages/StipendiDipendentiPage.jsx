@@ -17,6 +17,7 @@ export default function StipendiDipendentiPage() {
   var [profili, setProfili] = useState({});       // mappa staff_id -> profilo paghe
   var [searchTerm, setSearchTerm] = useState('');
   var [filterTipo, setFilterTipo] = useState('tutti');  // tutti / campagna / resort / senza_profilo
+  var [mostraCessati, setMostraCessati] = useState(false);
 
   useEffect(function() {
     loadAll();
@@ -25,11 +26,11 @@ export default function StipendiDipendentiPage() {
   function loadAll() {
     setLoading(true);
 
-    // Carica dipendenti attivi
+    // Carica tutti i dipendenti (attivi e cessati): per recuperare i mesi
+    // passati serve poter configurare anche la paga di chi non lavora piu'.
     var pStaff = supabase
       .from('staff_members')
       .select('id, first_name, last_name, is_active, hire_date, contract_end_date, fiscal_code')
-      .eq('is_active', true)
       .order('last_name', { ascending: true });
 
     // Carica profili paghe
@@ -67,6 +68,9 @@ export default function StipendiDipendentiPage() {
 
   function filtered() {
     var list = members;
+    if (!mostraCessati) {
+      list = list.filter(function(m) { return m.is_active !== false; });
+    }
     var term = searchTerm.trim().toLowerCase();
     if (term) {
       list = list.filter(function(m) {
@@ -85,12 +89,16 @@ export default function StipendiDipendentiPage() {
     return list;
   }
 
+  function attivi() {
+    return members.filter(function(m) { return m.is_active !== false; });
+  }
+
   function totaleConProfilo() {
-    return members.filter(function(m) { return !!profili[m.id]; }).length;
+    return attivi().filter(function(m) { return !!profili[m.id]; }).length;
   }
 
   function totalePerTipo(tipo) {
-    return members.filter(function(m) {
+    return attivi().filter(function(m) {
       var p = profili[m.id];
       return p && p.tipo === tipo;
     }).length;
@@ -125,7 +133,7 @@ export default function StipendiDipendentiPage() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         <div className="bg-white border border-gray-200 rounded-xl p-4">
           <div className="text-xs text-gray-500 uppercase tracking-wide">Totale attivi</div>
-          <div className="text-2xl font-bold text-gray-900 mt-1">{members.length}</div>
+          <div className="text-2xl font-bold text-gray-900 mt-1">{attivi().length}</div>
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-4">
           <div className="text-xs text-gray-500 uppercase tracking-wide">Con profilo paghe</div>
@@ -169,6 +177,15 @@ export default function StipendiDipendentiPage() {
             <option value="resort">Solo resort</option>
             <option value="senza_profilo">Senza profilo paghe</option>
           </select>
+          <label className="flex items-center gap-2 px-3 py-2.5 border border-gray-200 rounded-lg bg-white text-sm cursor-pointer whitespace-nowrap select-none">
+            <input
+              type="checkbox"
+              checked={mostraCessati}
+              onChange={function(e) { setMostraCessati(e.target.checked); }}
+              className="rounded border-gray-300 text-wine-600 focus:ring-wine-500"
+            />
+            <span className="text-gray-700">Includi cessati</span>
+          </label>
         </div>
       </div>
 
@@ -203,6 +220,11 @@ export default function StipendiDipendentiPage() {
                       <h3 className="font-semibold text-gray-900">
                         {m.last_name} {m.first_name}
                       </h3>
+                      {m.is_active === false && (
+                        <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-500">
+                          Cessato
+                        </span>
+                      )}
                       {hasProfile ? (
                         <span className={
                           'text-xs px-2 py-0.5 rounded-full font-medium flex items-center gap-1 ' +
