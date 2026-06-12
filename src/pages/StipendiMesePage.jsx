@@ -570,7 +570,7 @@ export default function StipendiMesePage() {
                 <th className="px-3 py-2 text-right" title="Restano in contanti dal mese precedente">Mese prec.</th>
                 <th className="px-3 py-2 text-right">TFR</th>
                 <th className="px-3 py-2 text-right bg-gray-100">Totale</th>
-                <th className="px-3 py-2 text-right">Busta prova</th>
+                <th className="px-3 py-2 text-right">Busta</th>
                 <th className="px-3 py-2 text-right" title="Totale - Busta paga">Diff.</th>
                 <th className="px-3 py-2 text-right bg-blue-50">Bonifici</th>
                 <th className="px-3 py-2 text-right bg-blue-50" title="Busta - Bonifici">Da bonif.</th>
@@ -668,9 +668,23 @@ export default function StipendiMesePage() {
                           </td>
                           <td className="px-2 py-1">
                             <input type="number" step="0.01"
-                              value={r.busta_prova === null || r.busta_prova === undefined ? '' : r.busta_prova}
-                              onChange={function(e) { updateRigaField(p.staff_id, 'busta_prova', e.target.value); }}
-                              className="w-24 text-right bg-transparent border border-transparent hover:border-gray-200 focus:border-wine-300 rounded px-1 py-1 focus:outline-none" />
+                              value={
+                                r.busta_definitiva !== null && r.busta_definitiva !== undefined
+                                  ? r.busta_definitiva
+                                  : (r.busta_prova !== null && r.busta_prova !== undefined ? r.busta_prova : '')
+                              }
+                              onChange={function(e) { updateRigaField(p.staff_id, 'busta_definitiva', e.target.value); }}
+                              title={
+                                (r.busta_definitiva === null || r.busta_definitiva === undefined) && (r.busta_prova !== null && r.busta_prova !== undefined)
+                                  ? 'Valore della busta di prova. Scrivi qui la busta finale per confermarlo.'
+                                  : ''
+                              }
+                              className={
+                                'w-24 text-right bg-transparent border border-transparent hover:border-gray-200 focus:border-wine-300 rounded px-1 py-1 focus:outline-none ' +
+                                ((r.busta_definitiva === null || r.busta_definitiva === undefined) && (r.busta_prova !== null && r.busta_prova !== undefined)
+                                  ? 'text-gray-400 italic'
+                                  : 'text-gray-900')
+                              } />
                           </td>
                           <td className={
                             "px-3 py-2 text-right whitespace-nowrap font-medium " +
