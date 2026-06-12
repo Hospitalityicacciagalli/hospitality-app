@@ -411,6 +411,26 @@ export default function StipendiMesePage() {
     updateRigaField(staffId, 'riporto_precedente', nuovoRiporto);
   }
 
+  // Quante righe hanno un "mese precedente" diverso dal "restano" reale del mese scorso?
+  function contaRiportiDaAggiornare() {
+    var n = 0;
+    righe.forEach(function(r) {
+      var atteso = meseScorsoMap[r.staff_id] || 0;
+      if (Math.abs(parseNum(r.riporto_precedente) - atteso) > 0.01) n++;
+    });
+    return n;
+  }
+
+  // Allinea tutti i riporti al "restano in contanti" reale del mese scorso.
+  function aggiornaTuttiRiporti() {
+    righe.forEach(function(r) {
+      var atteso = meseScorsoMap[r.staff_id] || 0;
+      if (Math.abs(parseNum(r.riporto_precedente) - atteso) > 0.01) {
+        updateRigaField(r.staff_id, 'riporto_precedente', atteso);
+      }
+    });
+  }
+
   // Navigazione mese
   function meseProx() {
     if (mese === 12) { setAnno(anno + 1); setMese(1); } else { setMese(mese + 1); }
@@ -521,6 +541,25 @@ export default function StipendiMesePage() {
         </div>
       </div>
 
+      {/* Avviso: riporti del mese precedente non allineati al "restano" reale */}
+      {contaRiportiDaAggiornare() > 0 && (
+        <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-start gap-2">
+            <RefreshCw size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+            <p className="text-sm text-amber-800">
+              {contaRiportiDaAggiornare()} dipendenti hanno un "mese precedente" diverso dal valore
+              "restano" reale del mese scorso (di solito perché questo mese era stato aperto prima
+              di completare il precedente).
+            </p>
+          </div>
+          <button
+            onClick={aggiornaTuttiRiporti}
+            className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap">
+            Aggiorna tutti i riporti
+          </button>
+        </div>
+      )}
+
       {/* Pulsante aggiungi dipendente */}
       {aggiungibili.length > 0 && (
         <div className="mb-4">
@@ -558,25 +597,25 @@ export default function StipendiMesePage() {
       )}
 
       {/* Tabella */}
-      <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-50 border-b border-gray-200 text-xs uppercase tracking-wide text-gray-600">
+      <div className="bg-white border border-gray-200 rounded-xl">
+        <div className="overflow-auto max-h-[70vh]">
+          <table className="min-w-full text-sm border-separate border-spacing-0">
+            <thead className="text-xs uppercase tracking-wide text-gray-600">
               <tr>
-                <th className="px-3 py-2 text-left">Nominativo</th>
-                <th className="px-3 py-2 text-right">Ore</th>
-                <th className="px-3 py-2 text-right">Conteggio €</th>
-                <th className="px-3 py-2 text-right">Extra</th>
-                <th className="px-3 py-2 text-right" title="Restano in contanti dal mese precedente">Mese prec.</th>
-                <th className="px-3 py-2 text-right">TFR</th>
-                <th className="px-3 py-2 text-right bg-gray-100">Totale</th>
-                <th className="px-3 py-2 text-right">Busta</th>
-                <th className="px-3 py-2 text-right" title="Totale - Busta paga">Diff.</th>
-                <th className="px-3 py-2 text-right bg-blue-50">Bonifici</th>
-                <th className="px-3 py-2 text-right bg-blue-50" title="Busta - Bonifici">Da bonif.</th>
-                <th className="px-3 py-2 text-right bg-emerald-50">Contanti</th>
-                <th className="px-3 py-2 text-right bg-emerald-50" title="Totale - Busta - Contanti">Restano</th>
-                <th className="px-3 py-2"></th>
+                <th className="sticky top-0 left-0 z-30 bg-gray-50 border-b border-r border-gray-200 px-3 py-2 text-left">Nominativo</th>
+                <th className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2 text-right">Ore</th>
+                <th className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2 text-right">Conteggio €</th>
+                <th className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2 text-right">Extra</th>
+                <th className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2 text-right" title="Restano in contanti dal mese precedente">Mese prec.</th>
+                <th className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2 text-right">TFR</th>
+                <th className="sticky top-0 z-20 bg-gray-100 border-b border-gray-200 px-3 py-2 text-right">Totale</th>
+                <th className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2 text-right">Busta</th>
+                <th className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2 text-right" title="Totale - Busta paga">Diff.</th>
+                <th className="sticky top-0 z-20 bg-blue-50 border-b border-gray-200 px-3 py-2 text-right">Bonifici</th>
+                <th className="sticky top-0 z-20 bg-blue-50 border-b border-gray-200 px-3 py-2 text-right" title="Busta - Bonifici">Da bonif.</th>
+                <th className="sticky top-0 z-20 bg-emerald-50 border-b border-gray-200 px-3 py-2 text-right">Contanti</th>
+                <th className="sticky top-0 z-20 bg-emerald-50 border-b border-gray-200 px-3 py-2 text-right" title="Totale - Busta - Contanti">Restano</th>
+                <th className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2"></th>
               </tr>
             </thead>
             <tbody>
@@ -592,7 +631,7 @@ export default function StipendiMesePage() {
                 return (
                   <>
                     <tr key={'sett-' + settore} className="bg-wine-50">
-                      <td colSpan={14} className="px-3 py-1.5 text-xs font-semibold text-wine-800 uppercase tracking-wide">
+                      <td colSpan={14} className="sticky left-0 z-10 bg-wine-50 px-3 py-1.5 text-xs font-semibold text-wine-800 uppercase tracking-wide">
                         {settore} <span className="text-wine-500 font-normal">({lista.length})</span>
                       </td>
                     </tr>
@@ -609,7 +648,7 @@ export default function StipendiMesePage() {
 
                       return (
                         <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
-                          <td className="px-3 py-2 whitespace-nowrap font-medium text-gray-900">
+                          <td className="sticky left-0 z-10 bg-white border-r border-gray-100 px-3 py-2 whitespace-nowrap font-medium text-gray-900">
                             <div className="flex items-center gap-1.5">
                               <span className={
                                 'w-1.5 h-1.5 rounded-full ' +
@@ -736,7 +775,7 @@ export default function StipendiMesePage() {
               {/* Riga totali */}
               {righe.length > 0 && (
                 <tr className="bg-gray-100 border-t-2 border-gray-300 font-semibold">
-                  <td className="px-3 py-2 text-gray-700">TOTALI</td>
+                  <td className="sticky left-0 z-10 bg-gray-100 border-r border-gray-200 px-3 py-2 text-gray-700">TOTALI</td>
                   <td className="px-3 py-2"></td>
                   <td className="px-3 py-2 text-right text-gray-700">{fmtEuro(tot.conteggio)}</td>
                   <td className="px-3 py-2 text-right text-gray-700">{fmtEuro(tot.extra)}</td>
@@ -883,7 +922,7 @@ function MovimentiPopup(props) {
       <div className="bg-white rounded-2xl shadow-xl max-w-lg w-full max-h-[85vh] overflow-hidden flex flex-col" onClick={function(e) { e.stopPropagation(); }}>
 
         {/* Header */}
-        <div className={'border-b border-gray-200 px-5 py-4 flex items-center justify-between bg-' + color + '-50'}>
+        <div className={'border-b border-gray-200 px-5 py-4 flex items-center justify-between ' + (isContanti ? 'bg-emerald-50' : 'bg-blue-50')}>
           <div>
             <h2 className="font-semibold text-gray-900 flex items-center gap-2">
               {isContanti ? <Coins size={18} className="text-emerald-700" /> : <Banknote size={18} className="text-blue-700" />}
@@ -911,7 +950,7 @@ function MovimentiPopup(props) {
                   <div key={m.id} className="flex items-center gap-3 bg-gray-50 rounded-lg p-3">
                     <div className="text-xs text-gray-500 w-12 font-medium">{fmtDate(m.data_movimento)}</div>
                     <div className="flex-1 min-w-0">
-                      <div className={'font-semibold text-' + color + '-700'}>€ {fmtEuro(m.importo)}</div>
+                      <div className={'font-semibold ' + (isContanti ? 'text-emerald-700' : 'text-blue-700')}>€ {fmtEuro(m.importo)}</div>
                       {m.note && <div className="text-xs text-gray-500 mt-0.5">{m.note}</div>}
                     </div>
                     <button
@@ -924,7 +963,7 @@ function MovimentiPopup(props) {
               })}
               <div className="flex items-center justify-between pt-2 border-t border-gray-200">
                 <span className="text-sm font-medium text-gray-700">Totale</span>
-                <span className={'font-bold text-' + color + '-700'}>€ {fmtEuro(totale)}</span>
+                <span className={'font-bold ' + (isContanti ? 'text-emerald-700' : 'text-blue-700')}>€ {fmtEuro(totale)}</span>
               </div>
             </div>
           )}
@@ -940,7 +979,7 @@ function MovimentiPopup(props) {
               onChange={function(e) { setImporto(e.target.value); }}
               className="col-span-4 border border-gray-200 rounded-lg px-2 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-300" />
             <button onClick={aggiungi} disabled={saving}
-              className={'col-span-3 bg-' + color + '-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-' + color + '-700 transition-colors disabled:opacity-50 flex items-center justify-center gap-1'}>
+              className={'col-span-3 text-white rounded-lg py-2 text-sm font-medium transition-colors disabled:opacity-50 flex items-center justify-center gap-1 ' + (isContanti ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-blue-600 hover:bg-blue-700')}>
               <Plus size={14} />
               {saving ? '...' : 'Aggiungi'}
             </button>
