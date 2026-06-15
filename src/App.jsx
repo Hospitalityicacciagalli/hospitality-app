@@ -24,6 +24,9 @@ import StipendiMesePage from './pages/StipendiMesePage';
 import StipendiDipendentiPage from './pages/StipendiDipendentiPage';
 import StipendioDipendenteDetail from './pages/StipendioDipendenteDetail';
 import BustePagaPage from './pages/BustePagaPage';
+import GiftCardPage from './pages/GiftCardPage';
+import WineTourPage from './pages/WineTourPage';
+import CookingClassPage from './pages/CookingClassPage';
 
 function ProtectedRoute({ children, feature, requireEdit }) {
   var { session, loading, canView, canEdit } = useAuth();
@@ -173,6 +176,25 @@ function AppRoutes() {
         <Route path="/listino-bordo" element={
           <ProtectedRoute feature="ordini_bordo" requireEdit>
             <ListinoBordoPage />
+          </ProtectedRoute>
+        } />
+
+        {/* Gift Card ed esperienze collegate.
+            NB: agganciate temporaneamente alla feature 'prenotazioni'.
+            Da rivedere in futuro con una feature dedicata. */}
+        <Route path="/gift-card" element={
+          <ProtectedRoute feature="prenotazioni">
+            <GiftCardPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/wine-tour" element={
+          <ProtectedRoute feature="prenotazioni">
+            <WineTourPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/cooking-class" element={
+          <ProtectedRoute feature="prenotazioni">
+            <CookingClassPage />
           </ProtectedRoute>
         } />
 

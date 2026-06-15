@@ -133,6 +133,38 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
+        {/* Gift Card ed esperienze. Agganciate a 'prenotazioni'
+            in attesa di una feature dedicata (revisione permessi futura). */}
+        {canView('prenotazioni') && (
+          <NavLink
+            to="/gift-card"
+            className={function(p) { return navClass(p.isActive); }}
+            onClick={function() { setMobileOpen(false); }}>
+            <span className="text-base">🎁</span>
+            Gift Card
+          </NavLink>
+        )}
+
+        {canView('prenotazioni') && (
+          <NavLink
+            to="/wine-tour"
+            className={function(p) { return navClass(p.isActive); }}
+            onClick={function() { setMobileOpen(false); }}>
+            <span className="text-base">🍷</span>
+            Wine Tour
+          </NavLink>
+        )}
+
+        {canView('prenotazioni') && (
+          <NavLink
+            to="/cooking-class"
+            className={function(p) { return navClass(p.isActive); }}
+            onClick={function() { setMobileOpen(false); }}>
+            <span className="text-base">👨‍🍳</span>
+            Cooking Class
+          </NavLink>
+        )}
+
         {/* Stipendi: voce principale + sotto-voci se attivo */}
         {canView('stipendi') && (
           <>
