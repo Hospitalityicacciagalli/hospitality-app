@@ -598,7 +598,7 @@ export default function StipendiMesePage() {
 
       {/* Tabella */}
       <div className="bg-white border border-gray-200 rounded-xl">
-        <div className="overflow-auto max-h-[70vh]">
+        <div className="overflow-x-auto">
           <table className="min-w-full text-sm border-separate border-spacing-0">
             <thead className="text-xs uppercase tracking-wide text-gray-600">
               <tr>

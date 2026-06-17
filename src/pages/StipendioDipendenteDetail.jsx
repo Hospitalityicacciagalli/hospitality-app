@@ -11,6 +11,17 @@ function fmtEuro(n) {
   return num.toFixed(2).replace('.', ',').replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 }
 
+// Formatta una tariffa oraria con fino a 4 decimali significativi (es. 5,6250 → 5,625)
+function fmtTariffa(n) {
+  if (n === null || n === undefined || n === '' || isNaN(parseFloat(n))) return '0,0000';
+  var num = parseFloat(n);
+  // Mostra fino a 4 decimali, rimuovendo gli zeri finali oltre il secondo
+  var s = num.toFixed(4);
+  // Rimuove zeri finali dal terzo decimale in poi, ma lascia almeno 2
+  s = s.replace(/(\.\d{2})0+$/, '$1');
+  return s.replace('.', ',');
+}
+
 // Da yyyy-mm-dd a dd/mm/yyyy
 function fmtDate(iso) {
   if (!iso) return '—';
@@ -596,7 +607,7 @@ export default function StipendioDipendenteDetail() {
                     }>
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="font-semibold text-gray-900">€ {fmtEuro(t.tariffa_oraria)}/ora</span>
+                          <span className="font-semibold text-gray-900">€ {fmtTariffa(t.tariffa_oraria)}/ora</span>
                           {isCorrente && (
                             <span className="text-xs bg-emerald-200 text-emerald-800 px-2 py-0.5 rounded-full font-medium">Vigente</span>
                           )}
