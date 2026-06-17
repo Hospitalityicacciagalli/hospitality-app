@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Upload, FileJson, AlertTriangle, Gift, Bed, Clock, Trash2,
-  ChevronLeft, ChevronRight, CheckCircle2, Calendar, List, Users, Ban, X, Star
+  ChevronLeft, ChevronRight, CheckCircle2, Calendar, List, Ban, X, Star
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
@@ -81,8 +81,7 @@ export default function ImportPrenotazioniPage() {
             _scartata: false,
             adulti: p.adulti == null ? 2 : p.adulti,
             bambini: p.bambini == null ? 0 : p.bambini,
-            titolo: p.nome_libero || p.nome_originale || 'Evento',
-            ospiti: p.adulti == null ? null : p.adulti
+            titolo: p.nome_libero || p.nome_originale || 'Evento'
           }))
         })
 
@@ -95,7 +94,7 @@ export default function ImportPrenotazioniPage() {
             nome_originale: x.titolo || '',
             first_name: '',
             last_name: x.titolo || '',
-            adulti: x.ospiti == null ? 2 : x.ospiti,
+            adulti: x.ospiti == null ? null : x.ospiti,
             bambini: x.bambini == null ? 0 : x.bambini,
             orario: x.orario || (x.meal_type === 'lunch' ? '13:00' : '20:00'),
             orario_default: !x.orario,
@@ -146,10 +145,8 @@ export default function ImportPrenotazioniPage() {
         u._tipo = nuovoTipo
         if (nuovoTipo === 'evento') {
           if (!u.titolo || u.titolo === 'Evento') u.titolo = u.nome_libero || u.nome_originale || 'Evento'
-          if (u.ospiti == null) u.ospiti = u.adulti
         } else {
           if (!u.nome_libero) u.nome_libero = u.titolo || ''
-          if (u.adulti == null) u.adulti = u.ospiti == null ? 2 : u.ospiti
         }
         return u
       })
@@ -231,13 +228,18 @@ export default function ImportPrenotazioniPage() {
     attive.forEach(function(v) {
       chain = chain.then(function() {
         if (v._tipo === 'evento') {
+          var ad = v.adulti == null ? 0 : v.adulti
+          var bb = v.bambini == null ? 0 : v.bambini
+          var noteEv = []
+          if (v.note && String(v.note).trim()) noteEv.push(String(v.note).trim())
+          noteEv.push('Adulti: ' + ad + ' · Bambini: ' + bb)
           var payloadEv = {
             event_date: v.data,
             meal_type: v.meal_type || (v.pasto === 'Pranzo' ? 'lunch' : 'dinner'),
             event_type: 'confirmed',
             title: v.titolo || 'Evento',
-            notes: v.note || null,
-            covers_reserved: v.ospiti != null ? v.ospiti : 0
+            notes: noteEv.join(' | '),
+            covers_reserved: ad + bb
           }
           return supabase.from('event_dates').insert(payloadEv).then(function(r) {
             if (r.error) errori.push('Evento ' + v.data + ' ' + (v.titolo || '') + ': ' + r.error.message)
@@ -561,22 +563,29 @@ function RigaVoce(props) {
               onChange={function(e) { props.aggiorna(v._id, 'titolo', e.target.value) }}
               className="flex-1 min-w-0 px-2 py-1.5 border border-amber-200 rounded text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
             />
-            <div className="flex items-center gap-1">
-              <Users size={14} className="text-amber-600" />
-              <input
-                type="number"
-                value={v.ospiti == null ? '' : v.ospiti}
-                placeholder="?"
-                disabled={scartata}
-                onChange={function(e) { props.aggiorna(v._id, 'ospiti', e.target.value === '' ? null : (parseInt(e.target.value) || 0)) }}
-                className="w-16 px-1 py-1.5 border border-amber-200 rounded text-sm text-center bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
-                title="ospiti previsti"
-              />
-            </div>
+            <input
+              type="number"
+              value={v.adulti == null ? '' : v.adulti}
+              placeholder="ad"
+              disabled={scartata}
+              onChange={function(e) { props.aggiorna(v._id, 'adulti', e.target.value === '' ? null : (parseInt(e.target.value) || 0)) }}
+              className="w-14 px-1 py-1.5 border border-amber-200 rounded text-sm text-center bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+              title="adulti"
+            />
+            <span className="text-amber-400 text-sm">+</span>
+            <input
+              type="number"
+              value={v.bambini == null ? '' : v.bambini}
+              placeholder="bb"
+              disabled={scartata}
+              onChange={function(e) { props.aggiorna(v._id, 'bambini', e.target.value === '' ? 0 : (parseInt(e.target.value) || 0)) }}
+              className="w-14 px-1 py-1.5 border border-amber-200 rounded text-sm text-center bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+              title="bambini"
+            />
           </div>
           <div className="flex flex-wrap items-center gap-1.5 mt-2">
             <span className="text-xs text-amber-700">{v.pasto} · andra in event_dates</span>
-            {v.ospiti == null && (
+            {v.adulti == null && (
               <span className="inline-flex items-center gap-1 bg-orange-100 text-orange-800 text-xs px-2 py-0.5 rounded">
                 <AlertTriangle size={11} /> ospiti da definire
               </span>
@@ -673,7 +682,7 @@ function RevisioneLista(props) {
 
               var nome = isEvento ? v.titolo : v.nome_libero
               var dettaglio = isEvento
-                ? (v.pasto + ' · evento · ' + (v.ospiti != null ? v.ospiti + ' ospiti' : 'ospiti ?'))
+                ? (v.pasto + ' · evento · ' + (v.adulti != null ? (v.adulti + '+' + (v.bambini || 0)) : 'ospiti ?'))
                 : ((v.pasto === 'Pranzo' ? 'Pranzo' : 'Cena') + ' · ' + (v.orario || '—') + ' · ' + v.adulti + '+' + v.bambini)
 
               return (
