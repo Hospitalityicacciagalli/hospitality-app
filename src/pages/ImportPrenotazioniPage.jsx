@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Upload, FileJson, AlertTriangle, Gift, Bed, Clock, Trash2, Edit3,
-  ChevronLeft, ChevronRight, CheckCircle2, Calendar, List, Users, Ban, X
+  Upload, FileJson, AlertTriangle, Gift, Bed, Clock, Trash2,
+  ChevronLeft, ChevronRight, CheckCircle2, Calendar, List, Users, Ban, X, Star
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
@@ -13,13 +13,16 @@ import { useAuth } from '../lib/AuthContext'
 // prenotazioni storiche da un file JSON gia' normalizzato.
 //
 // Il JSON viene prodotto a monte (conversione dell'Excel mensile).
-// Struttura attesa:
-//   { prenotazioni: [...], eventi: [...], alert: [...] }
+// Struttura attesa: { prenotazioni: [...], eventi: [...], alert: [...] }
+//
+// MODELLO INTERNO UNIFICATO:
+// prenotazioni ed eventi vengono fusi in un'unica lista "voci".
+// Ogni voce ha _tipo ('prenotazione' | 'evento') MODIFICABILE dall'utente,
+// cosi' una prenotazione classificata male puo' diventare evento e viceversa.
 //
 // La pagina NON scrive nulla finche' non si preme "Conferma e inserisci".
-// Per ogni prenotazione: cerca un cliente per telefono; se non c'e' lo
-// crea (source='import_excel'); poi inserisce la prenotazione collegata.
-// Gli eventi vanno in event_dates. Gli alert non vengono inseriti.
+// Prenotazioni -> reservations (con cliente per telefono, dedup).
+// Eventi -> event_dates. Alert -> non inseriti.
 // ============================================================
 
 function pad(n) {
@@ -39,26 +42,21 @@ export default function ImportPrenotazioniPage() {
   var { canEdit } = useAuth()
   var navigate = useNavigate()
 
-  var [prenotazioni, setPrenotazioni] = useState([])
-  var [eventi, setEventi] = useState([])
+  var [voci, setVoci] = useState([])
   var [alert, setAlert] = useState([])
   var [caricato, setCaricato] = useState(false)
   var [nomeFile, setNomeFile] = useState('')
   var [errore, setErrore] = useState(null)
 
-  var [modalita, setModalita] = useState('giorno') // 'giorno' | 'lista'
+  var [modalita, setModalita] = useState('giorno')
   var [giornoIdx, setGiornoIdx] = useState(0)
 
   var [inserimento, setInserimento] = useState(false)
   var [progresso, setProgresso] = useState(null)
   var [risultato, setRisultato] = useState(null)
 
-  // Permesso di scrittura prenotazioni richiesto per l'inserimento
   var puoScrivere = canEdit('prenotazioni')
 
-  // ----------------------------------------------------------
-  // CARICAMENTO FILE JSON
-  // ----------------------------------------------------------
   function handleFile(e) {
     setErrore(null)
     var file = e.target.files && e.target.files[0]
@@ -72,20 +70,44 @@ export default function ImportPrenotazioniPage() {
           setErrore('Il file non ha il formato atteso (manca l\'elenco prenotazioni).')
           return
         }
-        // assegno un id locale a ogni riga per gestire modifiche e scarti
-        var pren = dati.prenotazioni.map(function(p, i) {
-          return Object.assign({}, p, {
-            _id: 'p' + i,
+
+        var lista = []
+        var k = 0
+
+        dati.prenotazioni.forEach(function(p) {
+          lista.push(Object.assign({}, p, {
+            _id: 'v' + (k++),
+            _tipo: 'prenotazione',
             _scartata: false,
             adulti: p.adulti == null ? 2 : p.adulti,
-            bambini: p.bambini == null ? 0 : p.bambini
-          })
+            bambini: p.bambini == null ? 0 : p.bambini,
+            titolo: p.nome_libero || p.nome_originale || 'Evento',
+            ospiti: p.adulti == null ? null : p.adulti
+          }))
         })
-        var evs = (dati.eventi || []).map(function(x, i) {
-          return Object.assign({}, x, { _id: 'e' + i, _scartato: false })
+
+        ;(dati.eventi || []).forEach(function(x) {
+          lista.push(Object.assign({}, x, {
+            _id: 'v' + (k++),
+            _tipo: 'evento',
+            _scartata: false,
+            nome_libero: x.titolo || '',
+            nome_originale: x.titolo || '',
+            first_name: '',
+            last_name: x.titolo || '',
+            adulti: x.ospiti == null ? 2 : x.ospiti,
+            bambini: x.bambini == null ? 0 : x.bambini,
+            orario: x.orario || (x.meal_type === 'lunch' ? '13:00' : '20:00'),
+            orario_default: !x.orario,
+            camera: null,
+            gift_codes: [],
+            ha_allergeni: false,
+            allergie_prenotazione: null,
+            pasto: x.pasto || (x.meal_type === 'lunch' ? 'Pranzo' : 'Cena')
+          }))
         })
-        setPrenotazioni(pren)
-        setEventi(evs)
+
+        setVoci(lista)
         setAlert(dati.alert || [])
         setCaricato(true)
         setGiornoIdx(0)
@@ -97,75 +119,55 @@ export default function ImportPrenotazioniPage() {
     reader.readAsText(file)
   }
 
-  // ----------------------------------------------------------
-  // MODIFICA RIGHE
-  // ----------------------------------------------------------
-  function aggiornaPren(pid, campo, valore) {
-    setPrenotazioni(function(prev) {
-      return prev.map(function(p) {
-        if (p._id !== pid) return p
-        var u = Object.assign({}, p)
+  function aggiorna(vid, campo, valore) {
+    setVoci(function(prev) {
+      return prev.map(function(v) {
+        if (v._id !== vid) return v
+        var u = Object.assign({}, v)
         u[campo] = valore
         return u
       })
     })
   }
 
-  function toggleScartaPren(pid) {
-    setPrenotazioni(function(prev) {
-      return prev.map(function(p) {
-        return p._id === pid ? Object.assign({}, p, { _scartata: !p._scartata }) : p
+  function toggleScarta(vid) {
+    setVoci(function(prev) {
+      return prev.map(function(v) {
+        return v._id === vid ? Object.assign({}, v, { _scartata: !v._scartata }) : v
       })
     })
   }
 
-  function aggiornaEvento(eid, campo, valore) {
-    setEventi(function(prev) {
-      return prev.map(function(ev) {
-        if (ev._id !== eid) return ev
-        var u = Object.assign({}, ev)
-        u[campo] = valore
+  function cambiaTipo(vid, nuovoTipo) {
+    setVoci(function(prev) {
+      return prev.map(function(v) {
+        if (v._id !== vid) return v
+        var u = Object.assign({}, v)
+        u._tipo = nuovoTipo
+        if (nuovoTipo === 'evento') {
+          if (!u.titolo || u.titolo === 'Evento') u.titolo = u.nome_libero || u.nome_originale || 'Evento'
+          if (u.ospiti == null) u.ospiti = u.adulti
+        } else {
+          if (!u.nome_libero) u.nome_libero = u.titolo || ''
+          if (u.adulti == null) u.adulti = u.ospiti == null ? 2 : u.ospiti
+        }
         return u
       })
     })
   }
 
-  function toggleScartaEvento(eid) {
-    setEventi(function(prev) {
-      return prev.map(function(ev) {
-        return ev._id === eid ? Object.assign({}, ev, { _scartato: !ev._scartato }) : ev
-      })
-    })
-  }
-
-  // ----------------------------------------------------------
-  // RAGGRUPPAMENTO PER GIORNO
-  // ----------------------------------------------------------
   function giorniUnici() {
     var set = {}
-    prenotazioni.forEach(function(p) { set[p.data] = true })
-    eventi.forEach(function(e) { set[e.data] = true })
+    voci.forEach(function(v) { set[v.data] = true })
     return Object.keys(set).sort()
   }
-
-  function prenDelGiorno(data, pasto) {
-    return prenotazioni.filter(function(p) { return p.data === data && p.pasto === pasto })
-  }
-  function eventiDelGiorno(data) {
-    return eventi.filter(function(e) { return e.data === data })
+  function vociDelGiorno(data, pasto) {
+    return voci.filter(function(v) { return v.data === data && (pasto ? v.pasto === pasto : true) })
   }
 
-  // ----------------------------------------------------------
-  // INSERIMENTO SU SUPABASE
-  // ----------------------------------------------------------
   function trovaOCreaCliente(p, cacheTelefoni) {
-    // ritorna una Promise che risolve con customer_id
     var tel = p.telefono ? String(p.telefono).trim() : null
-
-    // dedup in cache locale (stesso telefono nello stesso batch)
-    if (tel && cacheTelefoni[tel]) {
-      return Promise.resolve(cacheTelefoni[tel])
-    }
+    if (tel && cacheTelefoni[tel]) return Promise.resolve(cacheTelefoni[tel])
 
     var cercaPromise = tel
       ? supabase.from('customers').select('id').eq('phone', tel).limit(1)
@@ -176,7 +178,6 @@ export default function ImportPrenotazioniPage() {
         if (tel) cacheTelefoni[tel] = res.data[0].id
         return res.data[0].id
       }
-      // crea nuova scheda
       var first = (p.first_name || '').trim()
       var last = (p.last_name || '').trim()
       if (!last) { last = first || 'Cliente'; first = '' }
@@ -188,7 +189,6 @@ export default function ImportPrenotazioniPage() {
         source: 'import_excel'
       }).select('id').single().then(function(ins) {
         if (ins.error) {
-          // se telefono duplicato (race/altro), riprovo a leggerlo
           if (ins.error.code === '23505' && tel) {
             return supabase.from('customers').select('id').eq('phone', tel).limit(1).then(function(r2) {
               var cid = r2.data && r2.data[0] ? r2.data[0].id : null
@@ -206,7 +206,7 @@ export default function ImportPrenotazioniPage() {
 
   function costruisciNote(p) {
     var parti = []
-    if (p.note && p.note.trim()) parti.push(p.note.trim())
+    if (p.note && String(p.note).trim()) parti.push(String(p.note).trim())
     if (p.presa_da) parti.push('Presa da: ' + p.presa_da)
     if (p.email) parti.push('Email: ' + p.email)
     if (p.gift_codes && p.gift_codes.length > 0) parti.push('GIFT CARD: ' + p.gift_codes.join(', '))
@@ -215,9 +215,8 @@ export default function ImportPrenotazioniPage() {
 
   function inserisciTutto() {
     if (!puoScrivere) { setErrore('Non hai i permessi per inserire prenotazioni.'); return }
-    var daInserire = prenotazioni.filter(function(p) { return !p._scartata })
-    var eventiDaInserire = eventi.filter(function(e) { return !e._scartato })
-    var totale = daInserire.length + eventiDaInserire.length
+    var attive = voci.filter(function(v) { return !v._scartata })
+    var totale = attive.length
     if (totale === 0) { setErrore('Non c\'e\' nulla da inserire.'); return }
 
     setInserimento(true)
@@ -227,55 +226,50 @@ export default function ImportPrenotazioniPage() {
     var cacheTelefoni = {}
     var errori = []
     var fatte = 0
-
-    // inserimento sequenziale (prudente, evita corse sul vincolo telefono)
     var chain = Promise.resolve()
 
-    daInserire.forEach(function(p) {
+    attive.forEach(function(v) {
       chain = chain.then(function() {
-        return trovaOCreaCliente(p, cacheTelefoni).then(function(customerId) {
-          var requestedTime = p.orario ? p.orario + ':00' : null
+        if (v._tipo === 'evento') {
+          var payloadEv = {
+            event_date: v.data,
+            meal_type: v.meal_type || (v.pasto === 'Pranzo' ? 'lunch' : 'dinner'),
+            event_type: 'confirmed',
+            title: v.titolo || 'Evento',
+            notes: v.note || null,
+            covers_reserved: v.ospiti != null ? v.ospiti : 0
+          }
+          return supabase.from('event_dates').insert(payloadEv).then(function(r) {
+            if (r.error) errori.push('Evento ' + v.data + ' ' + (v.titolo || '') + ': ' + r.error.message)
+            fatte += 1
+            setProgresso({ fatte: fatte, totale: totale, errori: errori.slice() })
+          })
+        }
+        return trovaOCreaCliente(v, cacheTelefoni).then(function(customerId) {
+          var requestedTime = v.orario ? v.orario + ':00' : null
           var payload = {
             customer_id: customerId,
-            reservation_date: p.data,
-            meal_type: p.meal_type,
+            reservation_date: v.data,
+            meal_type: v.meal_type || (v.pasto === 'Pranzo' ? 'lunch' : 'dinner'),
             requested_time: requestedTime,
-            guests_count: (p.adulti || 0) + (p.bambini || 0),
-            adults_count: p.adulti || 0,
-            children_count: p.bambini || 0,
-            allergie_prenotazione: p.allergie_prenotazione || null,
-            notes: costruisciNote(p),
+            guests_count: (v.adulti || 0) + (v.bambini || 0),
+            adults_count: v.adulti || 0,
+            children_count: v.bambini || 0,
+            allergie_prenotazione: v.allergie_prenotazione || null,
+            notes: costruisciNote(v),
             source: 'import_excel',
-            has_allergen_alerts: Boolean(p.ha_allergeni),
-            nome_libero: p.nome_libero || p.nome_originale || null,
-            camera: p.camera || null,
-            orario_default: Boolean(p.orario_default)
+            has_allergen_alerts: Boolean(v.ha_allergeni),
+            nome_libero: v.nome_libero || v.nome_originale || null,
+            camera: v.camera || null,
+            orario_default: Boolean(v.orario_default)
           }
           return supabase.from('reservations').insert(payload).then(function(r) {
-            if (r.error) errori.push(p.data + ' ' + (p.nome_libero || '') + ': ' + r.error.message)
+            if (r.error) errori.push(v.data + ' ' + (v.nome_libero || '') + ': ' + r.error.message)
             fatte += 1
             setProgresso({ fatte: fatte, totale: totale, errori: errori.slice() })
           })
         }).catch(function(err) {
-          errori.push(p.data + ' ' + (p.nome_libero || '') + ': ' + (err.message || 'errore cliente'))
-          fatte += 1
-          setProgresso({ fatte: fatte, totale: totale, errori: errori.slice() })
-        })
-      })
-    })
-
-    eventiDaInserire.forEach(function(ev) {
-      chain = chain.then(function() {
-        var payload = {
-          event_date: ev.data,
-          meal_type: ev.meal_type || null,
-          event_type: 'confirmed',
-          title: ev.titolo || 'Evento',
-          notes: ev.note || null,
-          covers_reserved: ev.ospiti != null ? ev.ospiti : 0
-        }
-        return supabase.from('event_dates').insert(payload).then(function(r) {
-          if (r.error) errori.push('Evento ' + ev.data + ' ' + (ev.titolo || '') + ': ' + r.error.message)
+          errori.push(v.data + ' ' + (v.nome_libero || '') + ': ' + (err.message || 'errore cliente'))
           fatte += 1
           setProgresso({ fatte: fatte, totale: totale, errori: errori.slice() })
         })
@@ -284,17 +278,10 @@ export default function ImportPrenotazioniPage() {
 
     chain.then(function() {
       setInserimento(false)
-      setRisultato({
-        inserite: fatte - errori.length,
-        errori: errori,
-        totale: totale
-      })
+      setRisultato({ inserite: fatte - errori.length, errori: errori, totale: totale })
     })
   }
 
-  // ----------------------------------------------------------
-  // RENDER — schermata iniziale (caricamento file)
-  // ----------------------------------------------------------
   if (!caricato) {
     return (
       <div className="max-w-2xl mx-auto p-6">
@@ -323,9 +310,6 @@ export default function ImportPrenotazioniPage() {
     )
   }
 
-  // ----------------------------------------------------------
-  // RENDER — risultato finale
-  // ----------------------------------------------------------
   if (risultato) {
     return (
       <div className="max-w-2xl mx-auto p-6">
@@ -353,7 +337,7 @@ export default function ImportPrenotazioniPage() {
               Vai al calendario
             </button>
             <button
-              onClick={function() { setCaricato(false); setPrenotazioni([]); setEventi([]); setAlert([]); setRisultato(null); setNomeFile('') }}
+              onClick={function() { setCaricato(false); setVoci([]); setAlert([]); setRisultato(null); setNomeFile('') }}
               className="border border-gray-300 px-5 py-2.5 rounded-lg hover:bg-gray-50 font-medium text-gray-700"
             >
               Importa un altro file
@@ -364,30 +348,24 @@ export default function ImportPrenotazioniPage() {
     )
   }
 
-  // ----------------------------------------------------------
-  // RENDER — anteprima e revisione
-  // ----------------------------------------------------------
   var giorni = giorniUnici()
-  var nValide = prenotazioni.filter(function(p) { return !p._scartata }).length
-  var nConAvvisi = prenotazioni.filter(function(p) {
-    return !p._scartata && (p.orario_default || p.camera || p.ha_allergeni || (p.gift_codes && p.gift_codes.length))
-  }).length
-  var nEventi = eventi.filter(function(e) { return !e._scartato }).length
+  var attive = voci.filter(function(v) { return !v._scartata })
+  var nPren = attive.filter(function(v) { return v._tipo === 'prenotazione' }).length
+  var nEventi = attive.filter(function(v) { return v._tipo === 'evento' }).length
 
   return (
     <div className="max-w-4xl mx-auto p-4 lg:p-6">
 
-      {/* Barra file + totali */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-4 flex items-center gap-3">
         <FileJson className="text-wine-600 flex-shrink-0" size={24} />
         <div className="flex-1 min-w-0">
           <div className="font-medium text-gray-900 text-sm truncate">{nomeFile}</div>
           <div className="text-xs text-gray-500">
-            {nValide} prenotazioni · {nEventi} eventi · {alert.length} avvisi
+            {nPren} prenotazioni · {nEventi} eventi · {alert.length} avvisi
           </div>
         </div>
         <button
-          onClick={function() { setCaricato(false); setPrenotazioni([]); setEventi([]); setAlert([]); setNomeFile('') }}
+          onClick={function() { setCaricato(false); setVoci([]); setAlert([]); setNomeFile('') }}
           className="text-sm text-gray-500 hover:text-gray-700 px-3 py-1.5 rounded-lg hover:bg-gray-100"
         >
           Cambia file
@@ -398,7 +376,6 @@ export default function ImportPrenotazioniPage() {
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{errore}</div>
       )}
 
-      {/* Selettore modalita */}
       <div className="flex gap-2 mb-4">
         <button
           onClick={function() { setModalita('giorno') }}
@@ -420,33 +397,27 @@ export default function ImportPrenotazioniPage() {
         </button>
       </div>
 
-      {/* ===== MODALITA GIORNO ===== */}
       {modalita === 'giorno' && giorni.length > 0 && (
         <RevisioneGiorno
           giorni={giorni}
           giornoIdx={giornoIdx}
           setGiornoIdx={setGiornoIdx}
-          prenDelGiorno={prenDelGiorno}
-          eventiDelGiorno={eventiDelGiorno}
-          aggiornaPren={aggiornaPren}
-          toggleScartaPren={toggleScartaPren}
-          aggiornaEvento={aggiornaEvento}
-          toggleScartaEvento={toggleScartaEvento}
+          vociDelGiorno={vociDelGiorno}
+          aggiorna={aggiorna}
+          toggleScarta={toggleScarta}
+          cambiaTipo={cambiaTipo}
         />
       )}
 
-      {/* ===== MODALITA LISTA ===== */}
       {modalita === 'lista' && (
         <RevisioneLista
           giorni={giorni}
-          prenDelGiorno={prenDelGiorno}
-          eventiDelGiorno={eventiDelGiorno}
-          toggleScartaPren={toggleScartaPren}
-          toggleScartaEvento={toggleScartaEvento}
+          vociDelGiorno={vociDelGiorno}
+          toggleScarta={toggleScarta}
+          cambiaTipo={cambiaTipo}
         />
       )}
 
-      {/* Avvisi (alert non importati) */}
       {alert.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mt-4">
           <div className="flex items-center gap-2 text-amber-800 font-medium text-sm mb-2">
@@ -460,7 +431,6 @@ export default function ImportPrenotazioniPage() {
         </div>
       )}
 
-      {/* Barra inserimento finale */}
       <div className="sticky bottom-0 bg-white border-t border-gray-200 -mx-4 lg:-mx-6 px-4 lg:px-6 py-3 mt-6">
         {inserimento && progresso ? (
           <div>
@@ -478,10 +448,10 @@ export default function ImportPrenotazioniPage() {
         ) : (
           <button
             onClick={inserisciTutto}
-            disabled={!puoScrivere || nValide + nEventi === 0}
+            disabled={!puoScrivere || nPren + nEventi === 0}
             className="w-full bg-wine-700 text-white py-3 rounded-lg hover:bg-wine-800 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Conferma e inserisci {nValide} prenotazioni{nEventi > 0 ? ' + ' + nEventi + ' eventi' : ''}
+            Conferma e inserisci {nPren} prenotazioni{nEventi > 0 ? ' + ' + nEventi + ' eventi' : ''}
           </button>
         )}
       </div>
@@ -491,16 +461,12 @@ export default function ImportPrenotazioniPage() {
   )
 }
 
-// ============================================================
-// SOTTO-COMPONENTE: revisione un giorno alla volta
-// ============================================================
 function RevisioneGiorno(props) {
   var giorni = props.giorni
   var idx = props.giornoIdx
   var data = giorni[idx]
-  var pranzo = props.prenDelGiorno(data, 'Pranzo')
-  var cena = props.prenDelGiorno(data, 'Cena')
-  var eventiG = props.eventiDelGiorno(data)
+  var pranzo = props.vociDelGiorno(data, 'Pranzo')
+  var cena = props.vociDelGiorno(data, 'Cena')
 
   function vai(delta) {
     var n = idx + delta
@@ -511,42 +477,24 @@ function RevisioneGiorno(props) {
 
   return (
     <div>
-      {/* Navigazione giorno */}
       <div className="flex items-center justify-between bg-white rounded-xl shadow-sm border border-gray-200 p-3 mb-4">
-        <button
-          onClick={function() { vai(-1) }}
-          disabled={idx === 0}
-          className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-30"
-        >
+        <button onClick={function() { vai(-1) }} disabled={idx === 0} className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-30">
           <ChevronLeft size={22} />
         </button>
         <div className="text-center">
           <div className="font-semibold text-gray-900">{dataEstesa(data)}</div>
           <div className="text-xs text-gray-500">giorno {idx + 1} di {giorni.length}</div>
         </div>
-        <button
-          onClick={function() { vai(1) }}
-          disabled={idx === giorni.length - 1}
-          className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-30"
-        >
+        <button onClick={function() { vai(1) }} disabled={idx === giorni.length - 1} className="p-2 rounded-lg hover:bg-gray-100 disabled:opacity-30">
           <ChevronRight size={22} />
         </button>
       </div>
 
-      {eventiG.length > 0 && (
-        <div className="mb-4">
-          <div className="text-xs font-semibold text-amber-700 uppercase tracking-wide mb-2">Eventi</div>
-          {eventiG.map(function(ev) {
-            return <RigaEvento key={ev._id} ev={ev} aggiorna={props.aggiornaEvento} scarta={props.toggleScartaEvento} />
-          })}
-        </div>
-      )}
+      <SezionePasto titolo="Pranzo" righe={pranzo} aggiorna={props.aggiorna} scarta={props.toggleScarta} cambiaTipo={props.cambiaTipo} />
+      <SezionePasto titolo="Cena" righe={cena} aggiorna={props.aggiorna} scarta={props.toggleScarta} cambiaTipo={props.cambiaTipo} />
 
-      <SezionePasto titolo="Pranzo" righe={pranzo} aggiorna={props.aggiornaPren} scarta={props.toggleScartaPren} />
-      <SezionePasto titolo="Cena" righe={cena} aggiorna={props.aggiornaPren} scarta={props.toggleScartaPren} />
-
-      {pranzo.length === 0 && cena.length === 0 && eventiG.length === 0 && (
-        <div className="text-center text-gray-400 py-8">Nessuna prenotazione in questo giorno</div>
+      {pranzo.length === 0 && cena.length === 0 && (
+        <div className="text-center text-gray-400 py-8">Nessuna voce in questo giorno</div>
       )}
     </div>
   )
@@ -558,63 +506,44 @@ function SezionePasto(props) {
     <div className="mb-4">
       <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">{props.titolo}</div>
       <div className="space-y-2">
-        {props.righe.map(function(p) {
-          return <RigaPrenotazione key={p._id} p={p} aggiorna={props.aggiorna} scarta={props.scarta} />
+        {props.righe.map(function(v) {
+          return <RigaVoce key={v._id} v={v} aggiorna={props.aggiorna} scarta={props.scarta} cambiaTipo={props.cambiaTipo} />
         })}
       </div>
     </div>
   )
 }
 
-// ============================================================
-// SOTTO-COMPONENTE: singola riga prenotazione (editabile)
-// ============================================================
-function RigaPrenotazione(props) {
-  var p = props.p
-  var scartata = p._scartata
+function RigaVoce(props) {
+  var v = props.v
+  var scartata = v._scartata
+  var isEvento = v._tipo === 'evento'
+
+  var bgClass = scartata ? 'bg-gray-100 border-gray-200 opacity-60'
+    : (isEvento ? 'bg-amber-50 border-amber-200' : 'bg-white border-gray-200')
 
   return (
-    <div className={
-      'rounded-lg border p-3 transition-colors ' +
-      (scartata ? 'bg-gray-100 border-gray-200 opacity-60' : 'bg-white border-gray-200')
-    }>
-      <div className="flex items-center gap-2">
-        <input
-          type="text"
-          value={p.nome_libero || ''}
-          disabled={scartata}
-          onChange={function(e) { props.aggiorna(p._id, 'nome_libero', e.target.value) }}
-          className="flex-1 min-w-0 px-2 py-1.5 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
-        />
-        <input
-          type="text"
-          value={p.orario || ''}
-          disabled={scartata}
-          onChange={function(e) { props.aggiorna(p._id, 'orario', e.target.value) }}
-          className={
-            'w-16 px-2 py-1.5 border rounded text-sm text-center focus:outline-none focus:ring-2 focus:ring-wine-500 ' +
-            (p.orario_default ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-gray-200')
-          }
-        />
-        <input
-          type="number"
-          value={p.adulti}
-          disabled={scartata}
-          onChange={function(e) { props.aggiorna(p._id, 'adulti', parseInt(e.target.value) || 0) }}
-          className="w-12 px-1 py-1.5 border border-gray-200 rounded text-sm text-center focus:outline-none focus:ring-2 focus:ring-wine-500"
-          title="adulti"
-        />
-        <span className="text-gray-300 text-sm">+</span>
-        <input
-          type="number"
-          value={p.bambini}
-          disabled={scartata}
-          onChange={function(e) { props.aggiorna(p._id, 'bambini', parseInt(e.target.value) || 0) }}
-          className="w-12 px-1 py-1.5 border border-gray-200 rounded text-sm text-center focus:outline-none focus:ring-2 focus:ring-wine-500"
-          title="bambini"
-        />
+    <div className={'rounded-lg border p-3 transition-colors ' + bgClass}>
+
+      <div className="flex items-center justify-between mb-2">
+        <div className="inline-flex rounded-lg border border-gray-300 overflow-hidden text-xs">
+          <button
+            onClick={function() { props.cambiaTipo(v._id, 'prenotazione') }}
+            disabled={scartata}
+            className={'px-2.5 py-1 font-medium transition-colors ' + (!isEvento ? 'bg-wine-700 text-white' : 'bg-white text-gray-600 hover:bg-gray-50')}
+          >
+            Prenotazione
+          </button>
+          <button
+            onClick={function() { props.cambiaTipo(v._id, 'evento') }}
+            disabled={scartata}
+            className={'px-2.5 py-1 font-medium transition-colors inline-flex items-center gap-1 ' + (isEvento ? 'bg-amber-500 text-white' : 'bg-white text-gray-600 hover:bg-gray-50')}
+          >
+            <Star size={11} /> Evento
+          </button>
+        </div>
         <button
-          onClick={function() { props.scarta(p._id) }}
+          onClick={function() { props.scarta(v._id) }}
           className={'p-1.5 rounded ' + (scartata ? 'text-green-600 hover:bg-green-50' : 'text-gray-400 hover:bg-red-50 hover:text-red-600')}
           title={scartata ? 'Ripristina' : 'Scarta'}
         >
@@ -622,161 +551,158 @@ function RigaPrenotazione(props) {
         </button>
       </div>
 
-      {/* Badge informativi */}
-      <div className="flex flex-wrap items-center gap-1.5 mt-2">
-        {p.orario_default && (
-          <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded">
-            <Clock size={11} /> orario di default
-          </span>
-        )}
-        {p.camera && (
-          <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 text-xs px-2 py-0.5 rounded">
-            <Bed size={11} /> camera: {p.camera}
-          </span>
-        )}
-        {p.ha_allergeni && (
-          <span className="inline-flex items-center gap-1 bg-red-50 text-red-700 text-xs px-2 py-0.5 rounded">
-            <AlertTriangle size={11} /> allergene
-          </span>
-        )}
-        {p.gift_codes && p.gift_codes.length > 0 && (
-          <span className="inline-flex items-center gap-1 bg-purple-50 text-purple-700 text-xs px-2 py-0.5 rounded">
-            <Gift size={11} /> gift {p.gift_codes.join(', ')}
-          </span>
-        )}
-        {p.note && (
-          <span className="text-xs text-gray-500 truncate max-w-full">{p.note}</span>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// ============================================================
-// SOTTO-COMPONENTE: singola riga evento
-// ============================================================
-function RigaEvento(props) {
-  var ev = props.ev
-  var scartato = ev._scartato
-  return (
-    <div className={
-      'rounded-lg border p-3 mb-2 transition-colors ' +
-      (scartato ? 'bg-gray-100 border-gray-200 opacity-60' : 'bg-amber-50 border-amber-200')
-    }>
-      <div className="flex items-center gap-2">
-        <input
-          type="text"
-          value={ev.titolo || ''}
-          disabled={scartato}
-          onChange={function(e) { props.aggiorna(ev._id, 'titolo', e.target.value) }}
-          className="flex-1 min-w-0 px-2 py-1.5 border border-amber-200 rounded text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
-        />
-        <div className="flex items-center gap-1">
-          <Users size={14} className="text-amber-600" />
-          <input
-            type="number"
-            value={ev.ospiti == null ? '' : ev.ospiti}
-            placeholder="?"
-            disabled={scartato}
-            onChange={function(e) { props.aggiorna(ev._id, 'ospiti', e.target.value === '' ? null : (parseInt(e.target.value) || 0)) }}
-            className="w-16 px-1 py-1.5 border border-amber-200 rounded text-sm text-center bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
-            title="ospiti previsti"
-          />
+      {isEvento ? (
+        <div>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={v.titolo || ''}
+              disabled={scartata}
+              onChange={function(e) { props.aggiorna(v._id, 'titolo', e.target.value) }}
+              className="flex-1 min-w-0 px-2 py-1.5 border border-amber-200 rounded text-sm bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+            />
+            <div className="flex items-center gap-1">
+              <Users size={14} className="text-amber-600" />
+              <input
+                type="number"
+                value={v.ospiti == null ? '' : v.ospiti}
+                placeholder="?"
+                disabled={scartata}
+                onChange={function(e) { props.aggiorna(v._id, 'ospiti', e.target.value === '' ? null : (parseInt(e.target.value) || 0)) }}
+                className="w-16 px-1 py-1.5 border border-amber-200 rounded text-sm text-center bg-white focus:outline-none focus:ring-2 focus:ring-amber-500"
+                title="ospiti previsti"
+              />
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 mt-2">
+            <span className="text-xs text-amber-700">{v.pasto} · andra in event_dates</span>
+            {v.ospiti == null && (
+              <span className="inline-flex items-center gap-1 bg-orange-100 text-orange-800 text-xs px-2 py-0.5 rounded">
+                <AlertTriangle size={11} /> ospiti da definire
+              </span>
+            )}
+            {v.note && <span className="text-xs text-gray-500 truncate max-w-full">{v.note}</span>}
+          </div>
         </div>
-        <button
-          onClick={function() { props.scarta(ev._id) }}
-          className={'p-1.5 rounded ' + (scartato ? 'text-green-600 hover:bg-green-50' : 'text-amber-600 hover:bg-red-50 hover:text-red-600')}
-          title={scartato ? 'Ripristina' : 'Scarta'}
-        >
-          {scartato ? <CheckCircle2 size={18} /> : <Trash2 size={18} />}
-        </button>
-      </div>
-      <div className="flex flex-wrap items-center gap-1.5 mt-2">
-        <span className="text-xs text-amber-700">{ev.pasto} · evento in event_dates</span>
-        {ev.ospiti == null && (
-          <span className="inline-flex items-center gap-1 bg-orange-100 text-orange-800 text-xs px-2 py-0.5 rounded">
-            <AlertTriangle size={11} /> ospiti da definire
-          </span>
-        )}
-        {ev.note && <span className="text-xs text-gray-500 truncate max-w-full">{ev.note}</span>}
-      </div>
+      ) : (
+        <div>
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={v.nome_libero || ''}
+              disabled={scartata}
+              onChange={function(e) { props.aggiorna(v._id, 'nome_libero', e.target.value) }}
+              className="flex-1 min-w-0 px-2 py-1.5 border border-gray-200 rounded text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
+            />
+            <input
+              type="text"
+              value={v.orario || ''}
+              disabled={scartata}
+              onChange={function(e) { props.aggiorna(v._id, 'orario', e.target.value) }}
+              className={
+                'w-16 px-2 py-1.5 border rounded text-sm text-center focus:outline-none focus:ring-2 focus:ring-wine-500 ' +
+                (v.orario_default ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-gray-200')
+              }
+            />
+            <input
+              type="number"
+              value={v.adulti}
+              disabled={scartata}
+              onChange={function(e) { props.aggiorna(v._id, 'adulti', parseInt(e.target.value) || 0) }}
+              className="w-12 px-1 py-1.5 border border-gray-200 rounded text-sm text-center focus:outline-none focus:ring-2 focus:ring-wine-500"
+              title="adulti"
+            />
+            <span className="text-gray-300 text-sm">+</span>
+            <input
+              type="number"
+              value={v.bambini}
+              disabled={scartata}
+              onChange={function(e) { props.aggiorna(v._id, 'bambini', parseInt(e.target.value) || 0) }}
+              className="w-12 px-1 py-1.5 border border-gray-200 rounded text-sm text-center focus:outline-none focus:ring-2 focus:ring-wine-500"
+              title="bambini"
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 mt-2">
+            {v.orario_default && (
+              <span className="inline-flex items-center gap-1 bg-blue-50 text-blue-700 text-xs px-2 py-0.5 rounded">
+                <Clock size={11} /> orario di default
+              </span>
+            )}
+            {v.camera && (
+              <span className="inline-flex items-center gap-1 bg-amber-50 text-amber-800 text-xs px-2 py-0.5 rounded">
+                <Bed size={11} /> camera: {v.camera}
+              </span>
+            )}
+            {v.ha_allergeni && (
+              <span className="inline-flex items-center gap-1 bg-red-50 text-red-700 text-xs px-2 py-0.5 rounded">
+                <AlertTriangle size={11} /> allergene
+              </span>
+            )}
+            {v.gift_codes && v.gift_codes.length > 0 && (
+              <span className="inline-flex items-center gap-1 bg-purple-50 text-purple-700 text-xs px-2 py-0.5 rounded">
+                <Gift size={11} /> gift {v.gift_codes.join(', ')}
+              </span>
+            )}
+            {v.note && <span className="text-xs text-gray-500 truncate max-w-full">{v.note}</span>}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
 
-// ============================================================
-// SOTTO-COMPONENTE: revisione a lista unica
-// ============================================================
 function RevisioneLista(props) {
   return (
     <div className="space-y-4">
       {props.giorni.map(function(data) {
-        var pranzo = props.prenDelGiorno(data, 'Pranzo')
-        var cena = props.prenDelGiorno(data, 'Cena')
-        var eventiG = props.eventiDelGiorno(data)
-        if (pranzo.length === 0 && cena.length === 0 && eventiG.length === 0) return null
+        var righe = props.vociDelGiorno(data)
+        if (righe.length === 0) return null
 
         return (
           <div key={data} className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
             <div className="bg-gray-50 px-4 py-2 text-sm font-semibold text-gray-700">{dataEstesa(data)}</div>
 
-            {eventiG.map(function(ev) {
-              return (
-                <RigaListaCompatta
-                  key={ev._id}
-                  scartata={ev._scartato}
-                  nome={ev.titolo}
-                  dettaglio={ev.pasto + ' · evento · ' + (ev.ospiti != null ? ev.ospiti + ' ospiti' : 'ospiti ?')}
-                  badge="evento"
-                  badgeClass="bg-amber-100 text-amber-800"
-                  onScarta={function() { props.toggleScartaEvento(ev._id) }}
-                />
-              )
-            })}
-
-            {pranzo.concat(cena).map(function(p) {
+            {righe.map(function(v) {
+              var isEvento = v._tipo === 'evento'
               var badge = null, badgeClass = ''
-              if (p.ha_allergeni) { badge = 'allergene'; badgeClass = 'bg-red-100 text-red-700' }
-              else if (p.camera) { badge = 'camera ' + p.camera; badgeClass = 'bg-amber-100 text-amber-800' }
-              else if (p.gift_codes && p.gift_codes.length) { badge = 'gift card'; badgeClass = 'bg-purple-100 text-purple-700' }
-              else if (p.orario_default) { badge = 'orario def'; badgeClass = 'bg-blue-100 text-blue-700' }
+              if (isEvento) { badge = 'evento'; badgeClass = 'bg-amber-100 text-amber-800' }
+              else if (v.ha_allergeni) { badge = 'allergene'; badgeClass = 'bg-red-100 text-red-700' }
+              else if (v.camera) { badge = 'camera ' + v.camera; badgeClass = 'bg-amber-100 text-amber-800' }
+              else if (v.gift_codes && v.gift_codes.length) { badge = 'gift card'; badgeClass = 'bg-purple-100 text-purple-700' }
+              else if (v.orario_default) { badge = 'orario def'; badgeClass = 'bg-blue-100 text-blue-700' }
+
+              var nome = isEvento ? v.titolo : v.nome_libero
+              var dettaglio = isEvento
+                ? (v.pasto + ' · evento · ' + (v.ospiti != null ? v.ospiti + ' ospiti' : 'ospiti ?'))
+                : ((v.pasto === 'Pranzo' ? 'Pranzo' : 'Cena') + ' · ' + (v.orario || '—') + ' · ' + v.adulti + '+' + v.bambini)
+
               return (
-                <RigaListaCompatta
-                  key={p._id}
-                  scartata={p._scartata}
-                  nome={p.nome_libero}
-                  dettaglio={(p.pasto === 'Pranzo' ? 'Pranzo' : 'Cena') + ' · ' + (p.orario || '—') + ' · ' + p.adulti + '+' + p.bambini}
-                  badge={badge}
-                  badgeClass={badgeClass}
-                  onScarta={function() { props.toggleScartaPren(p._id) }}
-                />
+                <div key={v._id} className={'flex items-center gap-2 px-4 py-2.5 border-t border-gray-100 text-sm ' + (v._scartata ? 'bg-gray-100 opacity-50' : '')}>
+                  <button
+                    onClick={function() { props.cambiaTipo(v._id, isEvento ? 'prenotazione' : 'evento') }}
+                    className="flex-shrink-0 p-1 rounded text-gray-400 hover:text-amber-600"
+                    title={isEvento ? 'Rendi prenotazione' : 'Rendi evento'}
+                  >
+                    <Star size={15} className={isEvento ? 'text-amber-500 fill-amber-500' : ''} />
+                  </button>
+                  <span className="flex-1 min-w-0 truncate text-gray-900">{nome}</span>
+                  <span className="text-gray-500 text-xs whitespace-nowrap">{dettaglio}</span>
+                  {badge && (
+                    <span className={'text-xs px-2 py-0.5 rounded whitespace-nowrap ' + badgeClass}>{badge}</span>
+                  )}
+                  <button
+                    onClick={function() { props.toggleScarta(v._id) }}
+                    className={'p-1 rounded flex-shrink-0 ' + (v._scartata ? 'text-green-600' : 'text-gray-400 hover:text-red-600')}
+                    title={v._scartata ? 'Ripristina' : 'Scarta'}
+                  >
+                    {v._scartata ? <CheckCircle2 size={16} /> : <X size={16} />}
+                  </button>
+                </div>
               )
             })}
           </div>
         )
       })}
-    </div>
-  )
-}
-
-function RigaListaCompatta(props) {
-  return (
-    <div className={
-      'flex items-center gap-2 px-4 py-2.5 border-t border-gray-100 text-sm ' +
-      (props.scartata ? 'bg-gray-100 opacity-50' : '')
-    }>
-      <span className="flex-1 min-w-0 truncate text-gray-900">{props.nome}</span>
-      <span className="text-gray-500 text-xs whitespace-nowrap">{props.dettaglio}</span>
-      {props.badge && (
-        <span className={'text-xs px-2 py-0.5 rounded whitespace-nowrap ' + props.badgeClass}>{props.badge}</span>
-      )}
-      <button
-        onClick={props.onScarta}
-        className={'p-1 rounded flex-shrink-0 ' + (props.scartata ? 'text-green-600' : 'text-gray-400 hover:text-red-600')}
-        title={props.scartata ? 'Ripristina' : 'Scarta'}
-      >
-        {props.scartata ? <CheckCircle2 size={16} /> : <X size={16} />}
-      </button>
     </div>
   )
 }
