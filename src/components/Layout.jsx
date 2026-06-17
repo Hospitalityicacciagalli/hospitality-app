@@ -63,6 +63,16 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
+        {canEdit('prenotazioni') && (
+          <NavLink
+            to="/prenotazioni/importa"
+            className={function(p) { return navClass(p.isActive); }}
+            onClick={function() { setMobileOpen(false); }}>
+            <span className="text-base">📥</span>
+            Importa prenotazioni
+          </NavLink>
+        )}
+
         {canView('clienti') && (
           <NavLink
             to="/clienti"

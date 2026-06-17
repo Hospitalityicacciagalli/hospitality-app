@@ -27,6 +27,7 @@ import BustePagaPage from './pages/BustePagaPage';
 import GiftCardPage from './pages/GiftCardPage';
 import WineTourPage from './pages/WineTourPage';
 import CookingClassPage from './pages/CookingClassPage';
+import ImportPrenotazioniPage from './pages/ImportPrenotazioniPage';
 
 function ProtectedRoute({ children, feature, requireEdit }) {
   var { session, loading, canView, canEdit } = useAuth();
@@ -121,6 +122,13 @@ function AppRoutes() {
         <Route path="/prenotazioni/:id/modifica" element={
           <ProtectedRoute feature="prenotazioni" requireEdit>
             <ReservationForm />
+          </ProtectedRoute>
+        } />
+
+        {/* Import prenotazioni storiche da file (richiede modifica prenotazioni) */}
+        <Route path="/prenotazioni/importa" element={
+          <ProtectedRoute feature="prenotazioni" requireEdit>
+            <ImportPrenotazioniPage />
           </ProtectedRoute>
         } />
 
