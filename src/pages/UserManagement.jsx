@@ -68,6 +68,7 @@ export default function UserManagement() {
   var [permError, setPermError] = useState(null);
   var [permSuccess, setPermSuccess] = useState(null);
   var [selectedProfileId, setSelectedProfileId] = useState('');
+  var [selectedSourceUserId, setSelectedSourceUserId] = useState('');
   var [newProfileName, setNewProfileName] = useState('');
   var [saveProfileLoading, setSaveProfileLoading] = useState(false);
 
@@ -328,6 +329,7 @@ export default function UserManagement() {
     setPermError(null);
     setPermSuccess(null);
     setSelectedProfileId('');
+    setSelectedSourceUserId('');
     setNewProfileName('');
 
     // Parte dai permessi attuali; se mancano, dai default del ruolo.
@@ -377,6 +379,26 @@ export default function UserManagement() {
     var found = profiles.find(function(p) { return p.id === profileId; });
     if (!found) return;
     var src = found.permissions || {};
+    var matrix = {};
+    FEATURES.forEach(function(f) {
+      matrix[f.key] = src[f.key] || 'none';
+    });
+    setPermMatrix(matrix);
+  }
+
+  // Copia esattamente i permessi di un altro utente nella matrice corrente.
+  // Se l'utente sorgente non ha ancora un jsonb permessi, usa i default del suo ruolo.
+  function copyFromUser(userId) {
+    setSelectedSourceUserId(userId);
+    if (!userId) return;
+    var found = users.find(function(u) { return u.id === userId; });
+    if (!found) return;
+    var src;
+    if (found.permissions && typeof found.permissions === 'object') {
+      src = found.permissions;
+    } else {
+      src = defaultPermissionsForRole(found.role);
+    }
     var matrix = {};
     FEATURES.forEach(function(f) {
       matrix[f.key] = src[f.key] || 'none';
@@ -700,6 +722,22 @@ export default function UserManagement() {
                   })}
                 </select>
                 <p className="text-xs text-gray-400 mt-1">Applicare un profilo riempie la matrice qui sotto; puoi comunque modificarla voce per voce prima di salvare.</p>
+              </div>
+
+              {/* Copia i permessi da un altro utente */}
+              <div className="mb-4">
+                <label className="block text-xs font-medium text-gray-700 mb-1">Oppure copia i permessi da un altro utente</label>
+                <select
+                  value={selectedSourceUserId}
+                  onChange={function(e) { copyFromUser(e.target.value); }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
+                >
+                  <option value="">— Scegli un utente da cui copiare —</option>
+                  {users.filter(function(u) { return u.id !== permTarget.id; }).map(function(u) {
+                    return <option key={u.id} value={u.id}>{u.display_name || (u.first_name + ' ' + u.last_name)}</option>;
+                  })}
+                </select>
+                <p className="text-xs text-gray-400 mt-1">Copia esattamente i permessi di quell'utente nella matrice qui sotto; puoi poi ritoccarli voce per voce prima di salvare.</p>
               </div>
 
               {/* Scorciatoie */}

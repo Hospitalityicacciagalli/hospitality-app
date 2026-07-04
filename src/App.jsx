@@ -125,9 +125,9 @@ function AppRoutes() {
           </ProtectedRoute>
         } />
 
-        {/* Import prenotazioni storiche da file (richiede modifica prenotazioni) */}
+        {/* Import prenotazioni storiche da file — permesso dedicato */}
         <Route path="/prenotazioni/importa" element={
-          <ProtectedRoute feature="prenotazioni" requireEdit>
+          <ProtectedRoute feature="importa_prenotazioni">
             <ImportPrenotazioniPage />
           </ProtectedRoute>
         } />
@@ -182,26 +182,24 @@ function AppRoutes() {
           </ProtectedRoute>
         } />
         <Route path="/listino-bordo" element={
-          <ProtectedRoute feature="ordini_bordo" requireEdit>
+          <ProtectedRoute feature="listino_bordo">
             <ListinoBordoPage />
           </ProtectedRoute>
         } />
 
-        {/* Gift Card ed esperienze collegate.
-            NB: agganciate temporaneamente alla feature 'prenotazioni'.
-            Da rivedere in futuro con una feature dedicata. */}
+        {/* Gift Card ed esperienze collegate — ognuna con permesso dedicato. */}
         <Route path="/gift-card" element={
-          <ProtectedRoute feature="prenotazioni">
+          <ProtectedRoute feature="gift_card">
             <GiftCardPage />
           </ProtectedRoute>
         } />
         <Route path="/wine-tour" element={
-          <ProtectedRoute feature="prenotazioni">
+          <ProtectedRoute feature="wine_tour">
             <WineTourPage />
           </ProtectedRoute>
         } />
         <Route path="/cooking-class" element={
-          <ProtectedRoute feature="prenotazioni">
+          <ProtectedRoute feature="cooking_class">
             <CookingClassPage />
           </ProtectedRoute>
         } />

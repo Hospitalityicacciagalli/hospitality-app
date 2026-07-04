@@ -63,7 +63,7 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
-        {canEdit('prenotazioni') && (
+        {canView('importa_prenotazioni') && (
           <NavLink
             to="/prenotazioni/importa"
             className={function(p) { return navClass(p.isActive); }}
@@ -133,7 +133,7 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
-        {canEdit('ordini_bordo') && (
+        {canView('listino_bordo') && (
           <NavLink
             to="/listino-bordo"
             className={function(p) { return navClass(p.isActive); }}
@@ -143,9 +143,8 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
-        {/* Gift Card ed esperienze. Agganciate a 'prenotazioni'
-            in attesa di una feature dedicata (revisione permessi futura). */}
-        {canView('prenotazioni') && (
+        {/* Gift Card ed esperienze — ognuna con permesso dedicato. */}
+        {canView('gift_card') && (
           <NavLink
             to="/gift-card"
             className={function(p) { return navClass(p.isActive); }}
@@ -155,7 +154,7 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
-        {canView('prenotazioni') && (
+        {canView('wine_tour') && (
           <NavLink
             to="/wine-tour"
             className={function(p) { return navClass(p.isActive); }}
@@ -165,7 +164,7 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
-        {canView('prenotazioni') && (
+        {canView('cooking_class') && (
           <NavLink
             to="/cooking-class"
             className={function(p) { return navClass(p.isActive); }}
