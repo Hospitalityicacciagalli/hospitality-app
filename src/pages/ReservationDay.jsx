@@ -784,6 +784,7 @@ function ReservationDay() {
   var [tavoliAssegnati, setTavoliAssegnati] = useState({})
   var [sale, setSale] = useState([])
   var [tipologieGift, setTipologieGift] = useState({})
+  var [limiteEffettivo, setLimiteEffettivo] = useState(null)
 
   useEffect(function() {
     loadSettings()
@@ -792,7 +793,7 @@ function ReservationDay() {
     loadTipologieGift()
   }, [])
 
-  useEffect(function() { loadReservations() }, [dateStr, selectedMeal])
+  useEffect(function() { loadReservations(); caricaLimite() }, [dateStr, selectedMeal])
 
   function loadTipologieGift() {
     supabase.from('gift_card_tipologie').select('*')
@@ -813,6 +814,17 @@ function ReservationDay() {
   function loadSettings() {
     supabase.from('restaurant_settings').select('*').limit(1).single()
       .then(function(result) { if (!result.error && result.data) setSettings(result.data) })
+  }
+
+  // Limite effettivo del giorno/turno: override da limiti_coperti se
+  // presente, altrimenti default globale. Se la RPC non risponde,
+  // si usa il fallback dai settings (vedi maxCovers sotto).
+  function caricaLimite() {
+    supabase.rpc('limite_effettivo', { p_data: dateStr, p_fascia: selectedMeal })
+      .then(function(result) {
+        if (!result.error && result.data != null) setLimiteEffettivo(result.data)
+        else setLimiteEffettivo(null)
+      })
   }
 
   function loadEventi() {
@@ -903,7 +915,8 @@ function ReservationDay() {
     if (aggiornato) caricaBadgeTavoli(selectedMeal)
   }
 
-  var maxCovers = selectedMeal === 'lunch' ? settings.max_covers_lunch : settings.max_covers_dinner
+  var maxCoversDefault = selectedMeal === 'lunch' ? settings.max_covers_lunch : settings.max_covers_dinner
+  var maxCovers = (limiteEffettivo != null) ? limiteEffettivo : maxCoversDefault
   var remainingCovers = maxCovers - summary.total
   var statusLabels = { confirmed: 'Confermata', arrived: 'Arrivato', seated: 'Accomodato', completed: 'Completato', cancelled: 'Cancellata', no_show: 'No Show' }
   var statusColors = { confirmed: 'bg-blue-100 text-blue-800', arrived: 'bg-yellow-100 text-yellow-800', seated: 'bg-green-100 text-green-800', completed: 'bg-gray-100 text-gray-600', cancelled: 'bg-red-100 text-red-800', no_show: 'bg-orange-100 text-orange-800' }
