@@ -41,8 +41,10 @@ function pct(h) {
 }
 
 export default function ShiftsPage() {
-  var { hasRole } = useAuth();
-  var canManage = hasRole(["super_admin", "direttore"]);
+  // canManage guarda il PERMESSO granulare "turni" (scrittura), non il ruolo:
+  // cosi' funziona per chiunque abbia turni=write e anche con l'elevazione PIN.
+  var { canEdit } = useAuth();
+  var canManage = canEdit("turni");
 
   var [weekStart, setWeekStart] = useState(mondayOf(toISO(new Date())));
   var [departments, setDepartments] = useState([]);
