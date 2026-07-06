@@ -14,7 +14,12 @@ export default function ConfermaPin(props) {
   //   title       (string)      titolo opzionale
   //   message     (string)      testo opzionale
   //   onCancel    (function)    chiamata su Annulla / chiusura
-  //   onConfirmed (function)    chiamata con { user_id, nome } su PIN valido
+  //   onConfirmed (function)    chiamata con { user_id, nome, role, permissions }
+  //                             su PIN valido per l'utente scelto
+
+  var [utenti, setUtenti] = useState([])
+  var [loadingList, setLoadingList] = useState(false)
+  var [selectedUserId, setSelectedUserId] = useState('')
 
   var [pin, setPin] = useState('')
   var [loading, setLoading] = useState(false)
@@ -22,13 +27,15 @@ export default function ConfermaPin(props) {
   var [lockUntil, setLockUntil] = useState(0)
   var [, setTick] = useState(0)
 
-  // All'apertura: azzera campo ed eventuale errore, rilegge il blocco salvato.
+  // All'apertura: azzera i campi, rilegge il blocco salvato, carica i nick.
   useEffect(function() {
     if (props.open) {
       setPin('')
+      setSelectedUserId('')
       setError(null)
       var stored = parseInt(localStorage.getItem('icg_pin_lock_until') || '0', 10)
       setLockUntil(isNaN(stored) ? 0 : stored)
+      caricaUtenti()
     }
   }, [props.open])
 
@@ -39,6 +46,22 @@ export default function ConfermaPin(props) {
       return function() { clearInterval(iv) }
     }
   }, [lockUntil])
+
+  function caricaUtenti() {
+    setLoadingList(true)
+    supabase.rpc('lista_utenti_pin').then(function(result) {
+      setLoadingList(false)
+      if (result.error) {
+        setError('Errore nel caricamento degli utenti: ' + result.error.message)
+        setUtenti([])
+        return
+      }
+      var rows = result.data || []
+      setUtenti(rows)
+      // Se c'e' un solo utente con PIN, lo preseleziono per comodita'.
+      if (rows.length === 1) setSelectedUserId(rows[0].id)
+    })
+  }
 
   function getFails() {
     var f = parseInt(localStorage.getItem('icg_pin_fail_count') || '0', 10)
@@ -66,12 +89,16 @@ export default function ConfermaPin(props) {
     if (e) e.preventDefault()
     setError(null)
     if (isLocked()) return
+    if (!selectedUserId) {
+      setError('Seleziona il tuo nome dall\'elenco.')
+      return
+    }
     if (!/^[0-9]{6}$/.test(pin)) {
       setError('Inserisci il PIN a 6 cifre.')
       return
     }
     setLoading(true)
-    supabase.rpc('verify_pin', { p_pin: pin }).then(function(result) {
+    supabase.rpc('verify_pin_utente', { p_user_id: selectedUserId, p_pin: pin }).then(function(result) {
       setLoading(false)
       if (result.error) {
         setError('Errore di verifica: ' + result.error.message)
@@ -91,7 +118,7 @@ export default function ConfermaPin(props) {
           setLockUntil(until)
           setError('Troppi tentativi errati. Inserimento bloccato su questo dispositivo.')
         } else {
-          setError('PIN non valido. Tentativi rimasti: ' + (MAX_FAILS - f) + '.')
+          setError('Nome o PIN non corretti. Tentativi rimasti: ' + (MAX_FAILS - f) + '.')
         }
         setPin('')
       }
@@ -101,6 +128,7 @@ export default function ConfermaPin(props) {
   if (!props.open) return null
 
   var locked = isLocked()
+  var nessunUtente = !loadingList && utenti.length === 0
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
@@ -110,7 +138,7 @@ export default function ConfermaPin(props) {
         </div>
         <div className="p-6">
           <p className="text-sm text-gray-600 mb-4">
-            {props.message || 'Inserisci il tuo PIN personale a 6 cifre per confermare e firmare l\'operazione.'}
+            {props.message || 'Scegli il tuo nome e inserisci il tuo PIN personale a 6 cifre per confermare l\'operazione a tuo nome.'}
           </p>
 
           {error && (
@@ -123,15 +151,34 @@ export default function ConfermaPin(props) {
             </div>
           )}
 
+          {nessunUtente && !error && (
+            <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+              Nessun utente con PIN impostato. Ogni persona deve prima impostare il proprio PIN dal proprio profilo.
+            </div>
+          )}
+
           <form onSubmit={handleVerify}>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Chi sei</label>
+            <select
+              value={selectedUserId}
+              onChange={function(e) { setSelectedUserId(e.target.value) }}
+              disabled={locked || loading || loadingList || nessunUtente}
+              className="w-full px-3 py-2.5 mb-4 border border-gray-300 rounded-lg text-base bg-white focus:outline-none focus:ring-2 focus:ring-wine-500 disabled:bg-gray-100"
+            >
+              <option value="">{loadingList ? 'Caricamento...' : 'Seleziona il tuo nome'}</option>
+              {utenti.map(function(u) {
+                return <option key={u.id} value={u.id}>{u.nome}</option>
+              })}
+            </select>
+
+            <label className="block text-xs font-medium text-gray-700 mb-1">PIN</label>
             <input
               type="password"
               inputMode="numeric"
               value={pin}
               onChange={function(e) { setPin(e.target.value.replace(/[^0-9]/g, '').slice(0, 6)) }}
               maxLength={6}
-              autoFocus
-              disabled={locked || loading}
+              disabled={locked || loading || nessunUtente}
               placeholder="••••••"
               className="w-full px-3 py-3 border border-gray-300 rounded-lg text-center text-2xl tracking-widest focus:outline-none focus:ring-2 focus:ring-wine-500 disabled:bg-gray-100"
             />
@@ -145,7 +192,7 @@ export default function ConfermaPin(props) {
               </button>
               <button
                 type="submit"
-                disabled={locked || loading}
+                disabled={locked || loading || nessunUtente}
                 className="flex-1 bg-wine-700 hover:bg-wine-800 disabled:bg-wine-300 text-white px-4 py-2 rounded-lg text-sm font-medium"
               >
                 {loading ? 'Verifica...' : 'Conferma'}

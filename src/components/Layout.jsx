@@ -1,17 +1,74 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
+import { supabase } from '../lib/supabase';
+import ConfermaPin from './ConfermaPin';
 
 export default function Layout({ children }) {
-  var { profile, signOut, canView, canEdit } = useAuth();
+  var {
+    profile, signOut, canView, canEdit,
+    elevato, elevazione, secondiResidui,
+    attivaElevazione, terminaElevazione
+  } = useAuth();
   var navigate = useNavigate();
   var location = useLocation();
   var [mobileOpen, setMobileOpen] = useState(false);
+
+  // Dispositivo condiviso: letto dal localStorage (impostato in ProfilePage).
+  var [sharedDevice, setSharedDevice] = useState(function() {
+    try { return localStorage.getItem('icg_shared_device') === '1'; } catch (e) { return false; }
+  });
+
+  // Minuti di elevazione, letti da restaurant_settings (default 5).
+  var [minutiElevazione, setMinutiElevazione] = useState(5);
+
+  // Modale PIN per elevazione / rinnovo.
+  var [showPinModal, setShowPinModal] = useState(false);
+
+  useEffect(function() {
+    // Rileggo il flag "dispositivo condiviso" a ogni cambio pagina:
+    // cosi' se lo attivi/disattivi nel profilo, il pulsante compare/sparisce.
+    try { setSharedDevice(localStorage.getItem('icg_shared_device') === '1'); } catch (e) {}
+  }, [location.pathname]);
+
+  useEffect(function() {
+    supabase.from('restaurant_settings')
+      .select('elevazione_minuti')
+      .limit(1)
+      .then(function(result) {
+        if (!result.error && result.data && result.data.length > 0) {
+          var m = result.data[0].elevazione_minuti;
+          if (m && m > 0) setMinutiElevazione(m);
+        }
+      });
+  }, []);
 
   function handleSignOut() {
     signOut().then(function() {
       navigate('/login');
     });
+  }
+
+  function openEleva() {
+    setShowPinModal(true);
+  }
+
+  function onPinConfirmed(info) {
+    setShowPinModal(false);
+    // Chiunque confermi con nick + PIN ottiene una finestra fresca
+    // con i propri rami. Vale sia per l'ingresso sia per l'estensione.
+    attivaElevazione(info, minutiElevazione);
+  }
+
+  function tornaAlBase() {
+    terminaElevazione();
+  }
+
+  function formatTempo(sec) {
+    if (sec < 0) sec = 0;
+    var m = Math.floor(sec / 60);
+    var s = sec % 60;
+    return m + ':' + (s < 10 ? '0' + s : s);
   }
 
   function getRoleLabel(role) {
@@ -38,6 +95,11 @@ export default function Layout({ children }) {
   var stipendiActive = location.pathname.indexOf('/stipendi') === 0;
 
   var showAdminSection = canView('impostazioni');
+
+  // Percentuale della barra del timer (residuo su totale).
+  var totaleSec = minutiElevazione * 60;
+  var pct = (elevato && totaleSec > 0) ? Math.max(0, Math.min(100, Math.round(secondiResidui / totaleSec * 100))) : 0;
+  var inScadenza = elevato && secondiResidui <= 20;
 
   var sidebarContent = (
     <div className="flex flex-col h-full">
@@ -253,6 +315,23 @@ export default function Layout({ children }) {
       {/* Sezione profilo utente in fondo */}
       <div className="px-3 py-3 border-t border-wine-800">
 
+        {/* Elevazione: entra / torna al base (solo su dispositivo condiviso) */}
+        {elevato ? (
+          <button
+            onClick={function() { tornaAlBase(); setMobileOpen(false); }}
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 transition-colors mb-1">
+            <span className="text-base">🔒</span>
+            Torna al base
+          </button>
+        ) : (sharedDevice && (
+          <button
+            onClick={function() { openEleva(); setMobileOpen(false); }}
+            className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium bg-wine-700 text-white hover:bg-wine-600 transition-colors mb-1">
+            <span className="text-base">🔓</span>
+            Entra con PIN
+          </button>
+        ))}
+
         <NavLink
           to="/profilo"
           className={function(p) { return navClass(p.isActive); }}
@@ -308,6 +387,49 @@ export default function Layout({ children }) {
       {/* Contenuto principale */}
       <div className="flex-1 lg:ml-60 flex flex-col min-h-screen">
 
+        {/* Fascia ELEVAZIONE attiva */}
+        {elevato && (
+          <div className={'text-white ' + (inScadenza ? 'bg-red-700' : 'bg-wine-800')}>
+            <div className="px-4 py-2 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="text-base">🔓</span>
+                <span className="text-sm font-medium truncate">
+                  Attivo come {elevazione ? elevazione.nome : ''}
+                </span>
+                <span className="text-sm font-mono tabular-nums bg-black bg-opacity-20 px-2 py-0.5 rounded ml-1">
+                  {formatTempo(secondiResidui)}
+                </span>
+              </div>
+              <div className="flex items-center gap-2 flex-shrink-0">
+                {inScadenza && (
+                  <button
+                    onClick={openEleva}
+                    className="text-sm font-medium bg-white text-red-700 px-3 py-1 rounded-lg hover:bg-red-50">
+                    Estendi
+                  </button>
+                )}
+                <button
+                  onClick={tornaAlBase}
+                  className="text-sm font-medium bg-black bg-opacity-25 text-white px-3 py-1 rounded-lg hover:bg-opacity-40">
+                  Torna al base
+                </button>
+              </div>
+            </div>
+            {/* Barra che si accorcia */}
+            <div className="h-1 bg-black bg-opacity-20">
+              <div
+                className={'h-full transition-all duration-1000 ease-linear ' + (inScadenza ? 'bg-white' : 'bg-amber-400')}
+                style={{ width: pct + '%' }}
+              />
+            </div>
+            {inScadenza && (
+              <div className="px-4 py-1.5 text-xs bg-black bg-opacity-20">
+                La sessione sta per scadere. Premi <span className="font-semibold">Estendi</span> e reinserisci il PIN per continuare.
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Header mobile */}
         <header className="lg:hidden bg-wine-900 px-4 py-3 flex items-center justify-between">
           <button
@@ -327,6 +449,18 @@ export default function Layout({ children }) {
         </main>
 
       </div>
+
+      {/* Modale PIN: ingresso ed estensione dell'elevazione */}
+      <ConfermaPin
+        open={showPinModal}
+        title={elevato ? 'Estendi la sessione' : 'Entra con PIN'}
+        message={elevato
+          ? 'Scegli il tuo nome e reinserisci il PIN per estendere la sessione.'
+          : 'Scegli il tuo nome e inserisci il tuo PIN a 6 cifre per accedere ai tuoi rami su questo dispositivo condiviso.'}
+        onCancel={function() { setShowPinModal(false); }}
+        onConfirmed={onPinConfirmed}
+      />
+
     </div>
   );
 }

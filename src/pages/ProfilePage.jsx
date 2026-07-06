@@ -114,9 +114,7 @@ export default function ProfilePage() {
       setPinLoading(false);
       if (result.error) {
         var msg = result.error.message || 'Errore impostazione PIN.';
-        if (msg.indexOf('in uso') !== -1) {
-          setPinError('Questo PIN è già in uso da un altro utente. Scegline un altro.');
-        } else if (msg.indexOf('6 cifre') !== -1) {
+        if (msg.indexOf('6 cifre') !== -1) {
           setPinError('Il PIN deve essere di 6 cifre numeriche.');
         } else {
           setPinError('Errore impostazione PIN: ' + msg);
@@ -225,7 +223,7 @@ export default function ProfilePage() {
           )}
         </div>
         <p className="text-xs text-gray-500 mb-4">
-          Il PIN di 6 cifre ti identifica quando confermi un'operazione su una postazione condivisa. Deve essere diverso da quello di ogni altra persona. Non condividerlo con nessuno.
+          Il PIN di 6 cifre ti identifica quando confermi un'operazione o accedi ai tuoi rami su una postazione condivisa. Insieme al tuo nome, è ciò che dice al sistema che sei tu. Non condividerlo con nessuno.
         </p>
         <form onSubmit={handleSetPin} className="space-y-4">
           {pinError && (

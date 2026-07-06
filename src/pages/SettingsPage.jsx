@@ -797,6 +797,106 @@ function DepartmentSection() {
   );
 }
 
+// ============================================================
+// Sezione autonoma: durata dell'elevazione permessi (Funzione C).
+// Salva su restaurant_settings.elevazione_minuti.
+// ============================================================
+function ElevazioneSection() {
+  var [rowId, setRowId] = useState(null);
+  var [minuti, setMinuti] = useState(5);
+  var [loading, setLoading] = useState(true);
+  var [saving, setSaving] = useState(false);
+  var [savedMsg, setSavedMsg] = useState(false);
+  var [errorMsg, setErrorMsg] = useState(null);
+
+  useEffect(function() { load(); }, []);
+
+  function load() {
+    setLoading(true);
+    supabase.from("restaurant_settings")
+      .select("id, elevazione_minuti")
+      .limit(1)
+      .then(function(result) {
+        setLoading(false);
+        if (result.error) { setErrorMsg("Errore nel caricamento: " + result.error.message); return; }
+        var rows = result.data || [];
+        if (rows.length > 0) {
+          setRowId(rows[0].id);
+          var m = rows[0].elevazione_minuti;
+          setMinuti(m && m > 0 ? m : 5);
+        }
+      });
+  }
+
+  function save() {
+    setErrorMsg(null);
+    setSavedMsg(false);
+    var val = parseInt(minuti, 10);
+    if (isNaN(val) || val < 1 || val > 120) {
+      setErrorMsg("Inserisci un numero di minuti tra 1 e 120.");
+      return;
+    }
+    if (!rowId) {
+      setErrorMsg("Impostazioni ristorante non trovate: impossibile salvare.");
+      return;
+    }
+    setSaving(true);
+    supabase.from("restaurant_settings")
+      .update({ elevazione_minuti: val })
+      .eq("id", rowId)
+      .then(function(result) {
+        setSaving(false);
+        if (result.error) { setErrorMsg("Errore nel salvataggio: " + result.error.message); return; }
+        setSavedMsg(true);
+      });
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-5">
+      <div className="flex items-center gap-2 mb-1">
+        <Clock className="text-wine-700" size={18} />
+        <h2 className="font-semibold text-gray-800">Elevazione permessi (PIN)</h2>
+      </div>
+      <p className="text-sm text-gray-500 mb-4">
+        Durata della finestra in cui, su un dispositivo condiviso, chi entra con il PIN
+        accede ai propri rami prima di tornare automaticamente al profilo base.
+        A 20 secondi dalla scadenza viene proposto il rinnovo.
+      </p>
+
+      {errorMsg && (
+        <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{errorMsg}</div>
+      )}
+      {savedMsg && (
+        <div className="mb-3 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">&#10003; Durata salvata.</div>
+      )}
+
+      {loading ? (
+        <div className="text-sm text-gray-400">Caricamento...</div>
+      ) : (
+        <div className="flex items-end gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Minuti di elevazione</label>
+            <input
+              type="number"
+              min={1}
+              max={120}
+              value={minuti}
+              onChange={function(e) { setMinuti(e.target.value.replace(/[^0-9]/g, "")); setSavedMsg(false); }}
+              className="w-28 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
+            />
+          </div>
+          <button
+            onClick={save}
+            disabled={saving}
+            className="bg-wine-700 hover:bg-wine-800 disabled:bg-wine-300 text-white px-4 py-2 rounded-lg text-sm font-medium">
+            {saving ? "Salvataggio..." : "Salva"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsPage() {
   var { hasRole } = useAuth();
   var [options, setOptions] = useState({});
@@ -877,6 +977,8 @@ export default function SettingsPage() {
         })}
 
         <DepartmentSection />
+
+        <ElevazioneSection />
       </div>
 
     </div>

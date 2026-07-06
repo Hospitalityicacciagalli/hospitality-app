@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect } from 'react'
+import { createContext, useContext, useState, useEffect, useRef } from 'react'
 import { supabase } from './supabase'
 
 var AuthContext = createContext(null)
@@ -7,6 +7,10 @@ var AuthContext = createContext(null)
 // Elenco delle funzioni/menu' del sistema.
 // type 'standard' = livelli none/read/write
 // type 'cassa'    = livelli none/light/full
+// loginReale true = ramo che il PIN NON puo' sbloccare: richiede
+//                   il login vero (il database ricontrolla chi sei).
+//                   Nella matrice permessi viene mostrato con un
+//                   colore diverso.
 // Unica fonte di verita': importata anche da UserManagement.
 // ============================================================
 export var FEATURES = [
@@ -24,8 +28,18 @@ export var FEATURES = [
   { key: 'cooking_class',        label: 'Cooking Class',        type: 'standard' },
   { key: 'stipendi',             label: 'Stipendi',             type: 'standard' },
   { key: 'impostazioni',         label: 'Impostazioni',         type: 'standard' },
-  { key: 'utenti',               label: 'Utenti App',           type: 'standard' }
+  { key: 'utenti',               label: 'Utenti App',           type: 'standard', loginReale: true }
 ]
+
+// Rami che il PIN non puo' sbloccare (richiedono login reale).
+// Per ora solo "utenti"; se in futuro se ne aggiungono, basta
+// mettere loginReale:true nella riga di FEATURES qui sopra.
+export function featureRichiedeLoginReale(feature) {
+  for (var i = 0; i < FEATURES.length; i++) {
+    if (FEATURES[i].key === feature) return FEATURES[i].loginReale === true
+  }
+  return false
+}
 
 // ============================================================
 // Permessi predefiniti per ruolo.
@@ -48,6 +62,9 @@ export function defaultPermissionsForRole(role) {
   return DEFAULT_PERMS_BY_ROLE[role] || BASE_FALLBACK
 }
 
+// Durata di default dell'elevazione se Impostazioni non fornisce un valore.
+var ELEVAZIONE_DEFAULT_MINUTI = 5
+
 export function AuthProvider(props) {
   var sessionState = useState(null)
   var session = sessionState[0]
@@ -60,6 +77,23 @@ export function AuthProvider(props) {
   var loadingState = useState(true)
   var loading = loadingState[0]
   var setLoading = loadingState[1]
+
+  // ----------------------------------------------------------
+  // Stato ELEVAZIONE (Funzione C)
+  //   elevazione = null quando si e' al base.
+  //   Quando attiva: { user_id, nome, role, permissions, scadenza }
+  //   scadenza e' un timestamp (ms) oltre il quale si torna al base.
+  // ----------------------------------------------------------
+  var elevazioneState = useState(null)
+  var elevazione = elevazioneState[0]
+  var setElevazione = elevazioneState[1]
+
+  // Secondi residui prima della scadenza (per la barra/timer nel Layout).
+  var secondiResiduiState = useState(0)
+  var secondiResidui = secondiResiduiState[0]
+  var setSecondiResidui = secondiResiduiState[1]
+
+  var elevazioneTimerRef = useRef(null)
 
   useEffect(function() {
     supabase.auth.getSession().then(function(result) {
@@ -79,10 +113,13 @@ export function AuthProvider(props) {
         setProfile(null)
         setLoading(false)
       }
+      // Qualsiasi cambio di sessione (login/logout) annulla l'elevazione.
+      terminaElevazione()
     })
 
     return function() {
       listener.data.subscription.unsubscribe()
+      if (elevazioneTimerRef.current) clearInterval(elevazioneTimerRef.current)
     }
   }, [])
 
@@ -105,6 +142,7 @@ export function AuthProvider(props) {
   }
 
   function signOut() {
+    terminaElevazione()
     return supabase.auth.signOut().then(function() {
       setSession(null)
       setProfile(null)
@@ -112,10 +150,85 @@ export function AuthProvider(props) {
   }
 
   // ----------------------------------------------------------
-  // NUOVO SISTEMA — permessi per funzione
+  // ELEVAZIONE — avvio, rinnovo, termine, tic del timer
   // ----------------------------------------------------------
 
-  function currentPermissions() {
+  // Fa partire (o rinnova) il tic al secondo che aggiorna i secondi
+  // residui e, alla scadenza, riporta automaticamente al base.
+  function avviaTimer(scadenza) {
+    if (elevazioneTimerRef.current) clearInterval(elevazioneTimerRef.current)
+    function aggiorna() {
+      var ms = scadenza - Date.now()
+      if (ms <= 0) {
+        setSecondiResidui(0)
+        terminaElevazione()
+      } else {
+        setSecondiResidui(Math.ceil(ms / 1000))
+      }
+    }
+    aggiorna()
+    elevazioneTimerRef.current = setInterval(aggiorna, 1000)
+  }
+
+  // Attiva l'elevazione con i dati verificati (info) e la durata in minuti.
+  // info = { user_id, nome, role, permissions } (da verify_pin_utente).
+  function attivaElevazione(info, minuti) {
+    var durata = (minuti && minuti > 0) ? minuti : ELEVAZIONE_DEFAULT_MINUTI
+    var scadenza = Date.now() + durata * 60 * 1000
+    var dato = {
+      user_id: info.user_id,
+      nome: info.nome,
+      role: info.role,
+      permissions: (info.permissions && typeof info.permissions === 'object') ? info.permissions : null,
+      scadenza: scadenza
+    }
+    setElevazione(dato)
+    avviaTimer(scadenza)
+  }
+
+  // Estende la finestra ripartendo da adesso (usato al rinnovo col PIN).
+  function rinnovaElevazione(minuti) {
+    if (!elevazione) return
+    var durata = (minuti && minuti > 0) ? minuti : ELEVAZIONE_DEFAULT_MINUTI
+    var scadenza = Date.now() + durata * 60 * 1000
+    setElevazione(function(prev) {
+      if (!prev) return prev
+      var u = {}; for (var k in prev) { u[k] = prev[k] }
+      u.scadenza = scadenza
+      return u
+    })
+    avviaTimer(scadenza)
+  }
+
+  // Torna al base: spegne l'elevazione e ferma il timer.
+  function terminaElevazione() {
+    if (elevazioneTimerRef.current) {
+      clearInterval(elevazioneTimerRef.current)
+      elevazioneTimerRef.current = null
+    }
+    setSecondiResidui(0)
+    setElevazione(null)
+  }
+
+  var elevato = elevazione !== null
+
+  // ----------------------------------------------------------
+  // PERMESSI per funzione.
+  // Se elevati, si guardano ruolo/permessi dell'utente elevato;
+  // altrimenti quelli del profilo base loggato.
+  // ----------------------------------------------------------
+
+  // Ruolo/permessi "efficaci": elevazione se attiva, altrimenti base.
+  function ruoloEfficace() {
+    if (elevato) return elevazione.role
+    return profile ? profile.role : null
+  }
+
+  function permessiEfficaci() {
+    if (elevato) {
+      if (elevazione.permissions) return elevazione.permissions
+      return defaultPermissionsForRole(elevazione.role)
+    }
     if (!profile) return {}
     if (profile.permissions && typeof profile.permissions === 'object') {
       return profile.permissions
@@ -123,12 +236,18 @@ export function AuthProvider(props) {
     return defaultPermissionsForRole(profile.role)
   }
 
+  // Mantengo currentPermissions per compatibilita' con chi la usa gia'.
+  function currentPermissions() {
+    return permessiEfficaci()
+  }
+
   function permissionLevel(feature) {
-    if (!profile) return 'none'
-    if (profile.role === 'super_admin') {
+    var role = ruoloEfficace()
+    if (!role) return 'none'
+    if (role === 'super_admin') {
       return feature === 'cassa' ? 'full' : 'write'
     }
-    var perms = currentPermissions()
+    var perms = permessiEfficaci()
     return perms[feature] || 'none'
   }
 
@@ -144,6 +263,10 @@ export function AuthProvider(props) {
 
   // ----------------------------------------------------------
   // RETROCOMPATIBILITA' — vecchio sistema a ruoli (pagine non migrate)
+  // Nota: hasRole/canWrite guardano SEMPRE il profilo base loggato,
+  // non l'elevazione. I rami che dipendono da questi controlli sono
+  // quelli "login reale" (es. utenti): il PIN non li sblocca, ed e'
+  // esattamente il comportamento voluto.
   // ----------------------------------------------------------
   function hasRole(roles) {
     if (!profile) return false
@@ -194,7 +317,14 @@ export function AuthProvider(props) {
     canEdit: canEdit,
     currentPermissions: currentPermissions,
     hasRole: hasRole,
-    canWrite: canWrite
+    canWrite: canWrite,
+    // --- Elevazione (Funzione C) ---
+    elevazione: elevazione,
+    elevato: elevato,
+    secondiResidui: secondiResidui,
+    attivaElevazione: attivaElevazione,
+    rinnovaElevazione: rinnovaElevazione,
+    terminaElevazione: terminaElevazione
   }
 
   return (
