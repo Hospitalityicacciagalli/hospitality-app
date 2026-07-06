@@ -135,6 +135,16 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
+        {canView('limiti') && (
+          <NavLink
+            to="/limiti"
+            className={function(p) { return navClass(p.isActive); }}
+            onClick={function() { setMobileOpen(false); }}>
+            <span className="text-base">🪑</span>
+            Limiti coperti
+          </NavLink>
+        )}
+
         {canView('clienti') && (
           <NavLink
             to="/clienti"

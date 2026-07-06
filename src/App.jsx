@@ -28,6 +28,7 @@ import GiftCardPage from './pages/GiftCardPage';
 import WineTourPage from './pages/WineTourPage';
 import CookingClassPage from './pages/CookingClassPage';
 import ImportPrenotazioniPage from './pages/ImportPrenotazioniPage';
+import LimitiPage from './pages/LimitiPage';
 
 function ProtectedRoute({ children, feature, requireEdit }) {
   var { session, loading, canView, canEdit } = useAuth();
@@ -129,6 +130,13 @@ function AppRoutes() {
         <Route path="/prenotazioni/importa" element={
           <ProtectedRoute feature="importa_prenotazioni">
             <ImportPrenotazioniPage />
+          </ProtectedRoute>
+        } />
+
+        {/* Limiti coperti per giorno/fascia — permesso dedicato */}
+        <Route path="/limiti" element={
+          <ProtectedRoute feature="limiti">
+            <LimitiPage />
           </ProtectedRoute>
         } />
 
