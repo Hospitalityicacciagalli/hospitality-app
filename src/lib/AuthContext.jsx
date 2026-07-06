@@ -113,8 +113,12 @@ export function AuthProvider(props) {
         setProfile(null)
         setLoading(false)
       }
-      // Qualsiasi cambio di sessione (login/logout) annulla l'elevazione.
-      terminaElevazione()
+      // Solo un vero logout (o assenza di sessione) annulla l'elevazione.
+      // Gli eventi di routine (rinnovo del token, ritorno in primo piano)
+      // NON devono spegnerla, altrimenti la finestra cade da sola.
+      if (event === 'SIGNED_OUT' || !newSession) {
+        terminaElevazione()
+      }
     })
 
     return function() {
