@@ -23,6 +23,14 @@ function dataBreve(iso) {
   return p[2] + '/' + p[1] + '/' + p[0]
 }
 
+function due(n) { return n < 10 ? '0' + n : '' + n }
+
+function fmtLogData(ts) {
+  if (!ts) return ''
+  var d = new Date(ts)
+  return due(d.getDate()) + '/' + due(d.getMonth() + 1) + ' ' + due(d.getHours()) + ':' + due(d.getMinutes())
+}
+
 var HOURS = []
 for (var h = 7; h <= 23; h++) { HOURS.push(h) }
 var MINUTES = ['00', '15', '30', '45']
@@ -56,7 +64,7 @@ function ReservationForm() {
   var navigate = useNavigate()
   var isEditing = Boolean(id)
 
-  var { user, profile } = useAuth()
+  var { user, profile, elevato, elevazione, attivaElevazione } = useAuth()
 
   var [showPinModal, setShowPinModal] = useState(false)
   var [pendingData, setPendingData] = useState(null)
@@ -68,7 +76,12 @@ function ReservationForm() {
   var [copertiAltri, setCopertiAltri] = useState(0)
   var [alertManuale, setAlertManuale] = useState(null)
   var [okDirettore, setOkDirettore] = useState(false)
-  var [okDirettoreOriginale, setOkDirettoreOriginale] = useState(false)
+
+  // Coperti prima della modifica (per il log), storia della prenotazione,
+  // e minuti di durata della sessione "Entra con PIN".
+  var [copertiPrima, setCopertiPrima] = useState(null)
+  var [storia, setStoria] = useState([])
+  var [minutiElevazione, setMinutiElevazione] = useState(5)
 
   var [customerSearch, setCustomerSearch] = useState('')
   var [searchResults, setSearchResults] = useState([])
@@ -121,6 +134,22 @@ function ReservationForm() {
   }, [formData.reservation_date, formData.meal_type])
 
   useEffect(function() {
+    supabase.from('restaurant_settings')
+      .select('elevazione_minuti')
+      .limit(1)
+      .then(function(result) {
+        if (!result.error && result.data && result.data.length > 0) {
+          var m = result.data[0].elevazione_minuti
+          if (m && m > 0) setMinutiElevazione(m)
+        }
+      })
+  }, [])
+
+  useEffect(function() {
+    if (isEditing) caricaStoria()
+  }, [id])
+
+  useEffect(function() {
     if (selectedHour !== '') {
       var h = parseInt(selectedHour)
       var detected = h >= 11 && h <= 15 ? 'lunch' : (h >= 19 && h <= 23 ? 'dinner' : null)
@@ -165,8 +194,13 @@ function ReservationForm() {
         }
         setSelectedCustomer(res.customers)
         setShowSearch(false)
-        setOkDirettore(res.ok_direttore === true)
-        setOkDirettoreOriginale(res.ok_direttore === true)
+        // In modifica la spunta "Ok direttore" parte SEMPRE vuota: e' una
+        // decisione fresca a ogni salvataggio. Qui memorizzo solo i coperti
+        // di partenza, che servono al log (da X a Y).
+        var prima = (typeof res.guests_count === 'number')
+          ? res.guests_count
+          : ((res.adults_count || 0) + (res.children_count || 0))
+        setCopertiPrima(prima)
         loadCustomerAllergens(res.customers.id)
         setLoading(false)
       })
@@ -340,21 +374,61 @@ function ReservationForm() {
     }
   }
 
-  function eseguiSalvataggio(payload) {
-    setSaving(true)
-    var promise = isEditing
-      ? supabase.from('reservations').update(payload).eq('id', id)
-      : supabase.from('reservations').insert(payload)
-
-    promise.then(function(result) {
-      setSaving(false)
-      if (result.error) { alert('Errore nel salvataggio. Riprova.'); return }
-      navigate('/prenotazioni/giorno/' + formData.reservation_date)
-    })
+  // Chi firma il salvataggio, adesso:
+  //  - se sei "entrato con PIN" (sessione attiva) -> l'utente elevato;
+  //  - altrimenti l'utente loggato (postazione personale).
+  function firmaCorrente() {
+    if (elevato && elevazione) {
+      return { user_id: elevazione.user_id, nome: elevazione.nome }
+    }
+    return {
+      user_id: user ? user.id : null,
+      nome: profile ? (profile.display_name || (profile.first_name + ' ' + profile.last_name)) : null
+    }
   }
 
-  // Applica al payload la firma (autore in creazione, modificatore in modifica)
-  // e lo stato della spunta "Ok direttore".
+  // Serve il PIN? Solo su postazione condivisa quando NON c'e' gia' una
+  // sessione attiva. Il PIN, oltre a firmare, apre la sessione: i
+  // salvataggi successivi non lo richiederanno finche' la sessione dura.
+  function servePin() {
+    return isSharedDevice() && !elevato
+  }
+
+  // Carica la storia (log) della prenotazione in modifica.
+  function caricaStoria() {
+    if (!id) return
+    supabase.from('prenotazioni_log')
+      .select('*')
+      .eq('prenotazione_id', id)
+      .order('created_at', { ascending: true })
+      .then(function(result) {
+        if (!result.error && result.data) setStoria(result.data)
+      })
+  }
+
+  // Scrive una riga nel log. Non blocca l'operazione se fallisce:
+  // la prenotazione e' gia' salvata.
+  function scriviLog(prenotazioneId, firma) {
+    var clienteNome = selectedCustomer
+      ? (selectedCustomer.first_name + ' ' + selectedCustomer.last_name)
+      : (formData.nome_libero || null)
+    var riga = {
+      prenotazione_id: prenotazioneId,
+      azione: isEditing ? 'modifica' : 'creazione',
+      coperti_prima: isEditing ? copertiPrima : null,
+      coperti_dopo: totalGuests,
+      ok_direttore: okDirettore === true,
+      cliente_nome: clienteNome,
+      data_prenotazione: formData.reservation_date,
+      fascia: formData.meal_type,
+      autore_id: firma.user_id,
+      autore_nome: firma.nome || null
+    }
+    return supabase.from('prenotazioni_log').insert(riga)
+  }
+
+  // Applica al payload la firma (autore in creazione, modificatore in
+  // modifica) e lo stato della spunta "Ok direttore" di QUESTO salvataggio.
   function applicaFirmaEOk(base, firma) {
     var out = {}; for (var k in base) { out[k] = base[k] }
 
@@ -369,13 +443,9 @@ function ReservationForm() {
 
     if (okDirettore) {
       out.ok_direttore = true
-      // La firma dell'ok si scrive solo quando viene concesso adesso;
-      // se era gia' approvata, non sovrascrivo chi lo aveva dato.
-      if (!okDirettoreOriginale) {
-        out.ok_direttore_da = firma.user_id
-        out.ok_direttore_da_nome = firma.nome || null
-        out.ok_direttore_at = new Date().toISOString()
-      }
+      out.ok_direttore_da = firma.user_id
+      out.ok_direttore_da_nome = firma.nome || null
+      out.ok_direttore_at = new Date().toISOString()
     } else {
       out.ok_direttore = false
       out.ok_direttore_da = null
@@ -386,8 +456,22 @@ function ReservationForm() {
     return out
   }
 
-  function salvaConFirma(base, firma) {
-    eseguiSalvataggio(applicaFirmaEOk(base, firma))
+  // Salva la prenotazione e poi scrive il log, sempre con la stessa firma.
+  function eseguiSalvataggio(base, firma) {
+    setSaving(true)
+    var payload = applicaFirmaEOk(base, firma)
+    var promise = isEditing
+      ? supabase.from('reservations').update(payload).eq('id', id).select('id').single()
+      : supabase.from('reservations').insert(payload).select('id').single()
+
+    promise.then(function(result) {
+      if (result.error) { setSaving(false); alert('Errore nel salvataggio. Riprova.'); return }
+      var savedId = (result.data && result.data.id) ? result.data.id : id
+      scriviLog(savedId, firma).then(function() {
+        setSaving(false)
+        navigate('/prenotazioni/giorno/' + formData.reservation_date)
+      })
+    })
   }
 
   function handleSubmit(e) {
@@ -399,32 +483,26 @@ function ReservationForm() {
 
     var base = buildReservationData()
 
-    // Modifica su fascia NON in alert: comportamento classico, update semplice.
-    if (isEditing && !fasciaInAlert) {
-      eseguiSalvataggio(base)
-      return
-    }
-
-    // Da qui: nuova prenotazione (sempre firmata) oppure modifica in fascia in alert.
-    // Su postazione condivisa il PIN identifica e firma; su personale e' l'utente loggato.
-    if (isSharedDevice()) {
+    // Postazione condivisa senza sessione attiva: chiedo il PIN, che firma
+    // e apre la sessione. Il salvataggio prosegue dentro handlePinConfirmed.
+    if (servePin()) {
       setPendingData(base)
       setShowPinModal(true)
       return
     }
 
-    var autore = {
-      user_id: user ? user.id : null,
-      nome: profile ? (profile.display_name || (profile.first_name + ' ' + profile.last_name)) : null
-    }
-    salvaConFirma(base, autore)
+    // Sessione attiva o postazione personale: firma automatica.
+    eseguiSalvataggio(base, firmaCorrente())
   }
 
   function handlePinConfirmed(info) {
     setShowPinModal(false)
+    // Il PIN apre la sessione: i prossimi salvataggi non lo richiederanno
+    // finche' la sessione dura.
+    attivaElevazione(info, minutiElevazione)
     var base = pendingData
     setPendingData(null)
-    salvaConFirma(base, { user_id: info.user_id, nome: info.nome })
+    eseguiSalvataggio(base, { user_id: info.user_id, nome: info.nome })
   }
 
   var clientiFiltrati = listaClienti.filter(function(c) {
@@ -745,6 +823,27 @@ function ReservationForm() {
           </div>
         </div>
 
+        {/* Storia della prenotazione (log, sola lettura) */}
+        {isEditing && storia.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+            <h2 className="text-lg font-semibold text-gray-900 mb-4">Storia</h2>
+            <ul className="space-y-2">
+              {storia.map(function(ev) {
+                var chi = ev.autore_nome || 'Qualcuno'
+                var frase = ev.azione === 'creazione'
+                  ? chi + ' ha creato la prenotazione' + (ev.cliente_nome ? ' per ' + ev.cliente_nome : '') + ' di ' + (ev.coperti_dopo != null ? ev.coperti_dopo : '?') + ' coperti' + (ev.ok_direttore ? ' con ok del direttore' : '')
+                  : chi + ' ha modificato' + (ev.cliente_nome ? ' la prenotazione di ' + ev.cliente_nome : ' la prenotazione') + ' da ' + (ev.coperti_prima != null ? ev.coperti_prima : '?') + ' a ' + (ev.coperti_dopo != null ? ev.coperti_dopo : '?') + ' coperti' + (ev.ok_direttore ? ' con ok del direttore' : '')
+                return (
+                  <li key={ev.id} className="flex items-start gap-2 text-sm">
+                    <span className="text-gray-400 font-mono text-xs mt-0.5 flex-shrink-0 whitespace-nowrap">{fmtLogData(ev.created_at)}</span>
+                    <span className="text-gray-700">{frase}</span>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        )}
+
         {/* Pulsanti */}
         <div className="flex flex-col sm:flex-row gap-3 pb-8">
           <button type="submit" disabled={saving || !selectedCustomer || bloccato}
@@ -889,8 +988,8 @@ function ReservationForm() {
         open={showPinModal}
         title={isEditing ? 'Conferma modifica' : 'Conferma prenotazione'}
         message={isEditing
-          ? 'Postazione condivisa: inserisci il tuo PIN a 6 cifre per registrare la modifica a tuo nome.'
-          : 'Postazione condivisa: inserisci il tuo PIN a 6 cifre per formalizzare la prenotazione a tuo nome.'}
+          ? 'Inserisci il tuo PIN a 6 cifre per registrare la modifica a tuo nome. Resterai attivo per qualche minuto senza doverlo reinserire.'
+          : 'Inserisci il tuo PIN a 6 cifre per formalizzare la prenotazione a tuo nome. Resterai attivo per qualche minuto senza doverlo reinserire.'}
         onCancel={function() { setShowPinModal(false); setPendingData(null) }}
         onConfirmed={handlePinConfirmed}
       />
