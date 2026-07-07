@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Upload, FileJson, AlertTriangle, Gift, Bed, Clock, Trash2,
-  ChevronLeft, ChevronRight, CheckCircle2, Calendar, List, Ban, X, Star
+  ChevronLeft, ChevronRight, CheckCircle2, Calendar, List, Ban, X, Star, Bell
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
@@ -22,7 +22,20 @@ import { useAuth } from '../lib/AuthContext'
 //
 // La pagina NON scrive nulla finche' non si preme "Conferma e inserisci".
 // Prenotazioni -> reservations (con cliente per telefono, dedup).
-// Eventi -> event_dates. Alert -> non inseriti.
+// Eventi -> event_dates SOLO se l'interruttore "Reinserisci eventi" e' acceso
+//           (di default SPENTO: sul reimport gli eventi restano quelli gia'
+//           presenti, perche' event_dates e' protetta e non ha un marcatore
+//           che distingua gli eventi importati da quelli inseriti a mano).
+// Alert -> alert_prenotazioni, ma SOLO se non ne esiste gia' uno su quel
+//          giorno+fascia (non calpesta gli alert manuali). Firma "Import Excel".
+//
+// REIMPORT PULITO (azzeramento):
+// Nella schermata di caricamento c'e' un'azione separata "Azzera dati importati"
+// che cancella TUTTE le prenotazioni con source='import_excel' e poi i clienti
+// import_excel rimasti ORFANI (non piu' referenziati da nessuna prenotazione).
+// Cosi' le prenotazioni/clienti inseriti a mano restano intatti e non si
+// rompono foreign key. L'inserimento vero e proprio NON cancella nulla, cosi'
+// caricando piu' mesi di fila non si cancellano a vicenda.
 // ============================================================
 
 function pad(n) {
@@ -51,9 +64,15 @@ export default function ImportPrenotazioniPage() {
   var [modalita, setModalita] = useState('giorno')
   var [giornoIdx, setGiornoIdx] = useState(0)
 
+  var [reinserisciEventi, setReinserisciEventi] = useState(false)
+
   var [inserimento, setInserimento] = useState(false)
   var [progresso, setProgresso] = useState(null)
   var [risultato, setRisultato] = useState(null)
+
+  var [confermaAzzera, setConfermaAzzera] = useState(false)
+  var [azzeramento, setAzzeramento] = useState(false)
+  var [esitoAzzera, setEsitoAzzera] = useState(null)
 
   var puoScrivere = canEdit('prenotazioni')
 
@@ -162,6 +181,73 @@ export default function ImportPrenotazioniPage() {
     return voci.filter(function(v) { return v.data === data && (pasto ? v.pasto === pasto : true) })
   }
 
+  // ----------------------------------------------------------
+  // AZZERAMENTO (reimport pulito)
+  // 1) cancella tutte le reservations con source='import_excel'
+  // 2) cancella i customers import_excel rimasti ORFANI
+  //    (non referenziati da nessuna reservation). Cosi' un cliente
+  //    importato ma agganciato a una prenotazione MANUALE non viene
+  //    toccato -> nessuna FK rotta.
+  // ----------------------------------------------------------
+  function cancellaClientiABatch(ids) {
+    var chunks = []
+    var i = 0
+    for (i = 0; i < ids.length; i += 200) {
+      chunks.push(ids.slice(i, i + 200))
+    }
+    var totale = 0
+    var chain = Promise.resolve()
+    chunks.forEach(function(slice) {
+      chain = chain.then(function() {
+        return supabase.from('customers').delete().in('id', slice).select('id').then(function(r) {
+          if (r.error) throw r.error
+          totale += r.data ? r.data.length : 0
+        })
+      })
+    })
+    return chain.then(function() { return totale })
+  }
+
+  function azzeraImportati() {
+    if (!puoScrivere) { setErrore('Non hai i permessi per cancellare le prenotazioni.'); return }
+    setConfermaAzzera(false)
+    setAzzeramento(true)
+    setErrore(null)
+    setEsitoAzzera(null)
+
+    var esito = { prenotazioni: 0, clienti: 0 }
+
+    supabase.from('reservations').delete().eq('source', 'import_excel').select('id')
+      .then(function(rDel) {
+        if (rDel.error) throw rDel.error
+        esito.prenotazioni = rDel.data ? rDel.data.length : 0
+        return supabase.from('customers').select('id').eq('source', 'import_excel')
+      })
+      .then(function(rCust) {
+        if (rCust.error) throw rCust.error
+        var idsImport = (rCust.data || []).map(function(c) { return c.id })
+        if (idsImport.length === 0) { esito.clienti = 0; return null }
+        return supabase.from('reservations').select('customer_id').not('customer_id', 'is', null)
+          .then(function(rRef) {
+            if (rRef.error) throw rRef.error
+            var referenced = {}
+            ;(rRef.data || []).forEach(function(row) { if (row.customer_id) referenced[row.customer_id] = true })
+            var orfani = idsImport.filter(function(id) { return !referenced[id] })
+            if (orfani.length === 0) { esito.clienti = 0; return null }
+            return cancellaClientiABatch(orfani).then(function(n) { esito.clienti = n })
+          })
+      })
+      .then(function() {
+        setAzzeramento(false)
+        setEsitoAzzera(esito)
+      })
+      .catch(function(err) {
+        setAzzeramento(false)
+        setEsitoAzzera(null)
+        setErrore('Azzeramento non riuscito: ' + (err.message || 'errore'))
+      })
+  }
+
   function trovaOCreaCliente(p, cacheTelefoni) {
     var tel = p.telefono ? String(p.telefono).trim() : null
     if (tel && cacheTelefoni[tel]) return Promise.resolve(cacheTelefoni[tel])
@@ -210,11 +296,60 @@ export default function ImportPrenotazioniPage() {
     return parti.length ? parti.join(' | ') : null
   }
 
+  // ----------------------------------------------------------
+  // INSERIMENTO ALERT in alert_prenotazioni
+  // Inserisce solo se non esiste gia' un alert su quel giorno+fascia
+  // (evita di calpestare gli alert manuali). Firma "Import Excel".
+  // ----------------------------------------------------------
+  function inserisciAlert() {
+    var res = { inseriti: 0, saltati: 0, errori: [] }
+    if (!alert || alert.length === 0) return Promise.resolve(res)
+
+    var vociAlert = alert.map(function(a) {
+      var fascia = (a.meal_type === 'lunch' || a.pasto === 'Pranzo') ? 'lunch' : 'dinner'
+      return { data: a.data, fascia: fascia, testo: a.testo || null }
+    }).filter(function(v) { return v.data })
+
+    if (vociAlert.length === 0) return Promise.resolve(res)
+
+    var setDate = {}
+    vociAlert.forEach(function(v) { setDate[v.data] = true })
+    var listaDate = Object.keys(setDate)
+
+    return supabase.from('alert_prenotazioni').select('data, fascia').in('data', listaDate)
+      .then(function(r) {
+        var esistenti = {}
+        if (!r.error && r.data) {
+          r.data.forEach(function(row) { esistenti[row.data + '|' + row.fascia] = true })
+        }
+        var daInserire = vociAlert.filter(function(v) {
+          var k = v.data + '|' + v.fascia
+          if (esistenti[k]) { res.saltati += 1; return false }
+          esistenti[k] = true
+          return true
+        })
+        if (daInserire.length === 0) return res
+        var payloads = daInserire.map(function(v) {
+          return { data: v.data, fascia: v.fascia, testo: v.testo, attivo: true, creato_da_nome: 'Import Excel' }
+        })
+        return supabase.from('alert_prenotazioni').insert(payloads).select('id').then(function(ins) {
+          if (ins.error) { res.errori.push('Alert: ' + ins.error.message); return res }
+          res.inseriti = ins.data ? ins.data.length : daInserire.length
+          return res
+        })
+      })
+  }
+
   function inserisciTutto() {
     if (!puoScrivere) { setErrore('Non hai i permessi per inserire prenotazioni.'); return }
+
     var attive = voci.filter(function(v) { return !v._scartata })
-    var totale = attive.length
-    if (totale === 0) { setErrore('Non c\'e\' nulla da inserire.'); return }
+    var daInserire = attive.filter(function(v) { return v._tipo === 'prenotazione' || reinserisciEventi })
+    var eventiSaltati = attive.filter(function(v) { return v._tipo === 'evento' && !reinserisciEventi }).length
+    var totale = daInserire.length
+    var haAlert = alert && alert.length > 0
+
+    if (totale === 0 && !haAlert) { setErrore('Non c\'e\' nulla da inserire.'); return }
 
     setInserimento(true)
     setErrore(null)
@@ -225,7 +360,7 @@ export default function ImportPrenotazioniPage() {
     var fatte = 0
     var chain = Promise.resolve()
 
-    attive.forEach(function(v) {
+    daInserire.forEach(function(v) {
       chain = chain.then(function() {
         if (v._tipo === 'evento') {
           var ad = v.adulti == null ? 0 : v.adulti
@@ -279,8 +414,16 @@ export default function ImportPrenotazioniPage() {
     })
 
     chain.then(function() {
+      return inserisciAlert()
+    }).then(function(esitoAlert) {
       setInserimento(false)
-      setRisultato({ inserite: fatte - errori.length, errori: errori, totale: totale })
+      setRisultato({
+        inserite: fatte - errori.length,
+        errori: errori,
+        totale: totale,
+        eventiSaltati: eventiSaltati,
+        alert: esitoAlert
+      })
     })
   }
 
@@ -308,11 +451,57 @@ export default function ImportPrenotazioniPage() {
             Puoi visualizzare l'anteprima, ma non hai il permesso di inserire le prenotazioni.
           </div>
         )}
+
+        <div className="mt-8 border-t border-gray-200 pt-6">
+          <div className="text-sm font-semibold text-gray-800 mb-1">Reimport pulito</div>
+          <p className="text-xs text-gray-500 mb-3">
+            Cancella tutte le prenotazioni e le schede cliente importate da Excel. Le prenotazioni e i clienti
+            inseriti a mano NON vengono toccati. Utile prima di ricaricare i mesi corretti.
+          </p>
+
+          {esitoAzzera && (
+            <div className="mb-3 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">
+              Azzeramento completato: rimosse <span className="font-semibold">{esitoAzzera.prenotazioni}</span> prenotazioni
+              e <span className="font-semibold">{esitoAzzera.clienti}</span> schede cliente importate.
+            </div>
+          )}
+
+          {azzeramento ? (
+            <div className="inline-flex items-center gap-2 text-sm text-gray-600">
+              <Trash2 size={16} /> Azzeramento in corso...
+            </div>
+          ) : confermaAzzera ? (
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm text-red-700 font-medium">Sei sicuro? Cancello tutti i dati importati da Excel.</span>
+              <button
+                onClick={azzeraImportati}
+                className="inline-flex items-center gap-2 bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 text-sm font-medium"
+              >
+                <Trash2 size={16} /> Sì, azzera
+              </button>
+              <button
+                onClick={function() { setConfermaAzzera(false) }}
+                className="border border-gray-300 px-4 py-2 rounded-lg hover:bg-gray-50 text-sm font-medium text-gray-700"
+              >
+                Annulla
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={function() { setEsitoAzzera(null); setConfermaAzzera(true) }}
+              disabled={!puoScrivere}
+              className="inline-flex items-center gap-2 border border-red-300 text-red-700 px-4 py-2 rounded-lg hover:bg-red-50 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Trash2 size={16} /> Azzera dati importati
+            </button>
+          )}
+        </div>
       </div>
     )
   }
 
   if (risultato) {
+    var alr = risultato.alert || { inseriti: 0, saltati: 0, errori: [] }
     return (
       <div className="max-w-2xl mx-auto p-6">
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 text-center">
@@ -322,11 +511,34 @@ export default function ImportPrenotazioniPage() {
             Inserite <span className="font-bold text-green-600">{risultato.inserite}</span> voci su {risultato.totale}.
           </p>
 
+          <div className="text-left text-sm text-gray-600 space-y-1 mb-2">
+            <div className="flex items-center gap-2">
+              <Bell size={14} className="text-amber-500" />
+              Alert: inseriti <span className="font-semibold">{alr.inseriti}</span>
+              {alr.saltati > 0 ? (', gia presenti (saltati) ' + alr.saltati) : ''}
+            </div>
+            {risultato.eventiSaltati > 0 && (
+              <div className="flex items-center gap-2">
+                <Star size={14} className="text-amber-500" />
+                Eventi non reinseriti: <span className="font-semibold">{risultato.eventiSaltati}</span> (restano quelli gia presenti)
+              </div>
+            )}
+          </div>
+
           {risultato.errori.length > 0 && (
             <div className="text-left mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
               <div className="font-medium text-red-700 mb-2 text-sm">{risultato.errori.length} righe non inserite:</div>
               <ul className="text-xs text-red-600 space-y-1 max-h-48 overflow-auto">
                 {risultato.errori.map(function(e, i) { return <li key={i}>• {e}</li> })}
+              </ul>
+            </div>
+          )}
+
+          {alr.errori && alr.errori.length > 0 && (
+            <div className="text-left mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+              <div className="font-medium text-red-700 mb-2 text-sm">Problemi con gli alert:</div>
+              <ul className="text-xs text-red-600 space-y-1">
+                {alr.errori.map(function(e, i) { return <li key={i}>• {e}</li> })}
               </ul>
             </div>
           )}
@@ -354,6 +566,8 @@ export default function ImportPrenotazioniPage() {
   var attive = voci.filter(function(v) { return !v._scartata })
   var nPren = attive.filter(function(v) { return v._tipo === 'prenotazione' }).length
   var nEventi = attive.filter(function(v) { return v._tipo === 'evento' }).length
+  var nAlert = alert.length
+  var nDaInserire = nPren + (reinserisciEventi ? nEventi : 0)
 
   return (
     <div className="max-w-4xl mx-auto p-4 lg:p-6">
@@ -377,6 +591,30 @@ export default function ImportPrenotazioniPage() {
       {errore && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{errore}</div>
       )}
+
+      <div className="bg-white rounded-xl border border-gray-200 p-3 mb-4 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-medium text-gray-800 flex items-center gap-1.5">
+            <Star size={14} className="text-amber-500" /> Eventi
+          </div>
+          <div className="text-xs text-gray-500">
+            {reinserisciEventi
+              ? 'Verranno reinseriti in event_dates (attenzione ai doppioni).'
+              : 'Non vengono reinseriti: restano quelli gia presenti dal primo import.'}
+          </div>
+        </div>
+        <button
+          onClick={function() { setReinserisciEventi(!reinserisciEventi) }}
+          className={
+            'flex-shrink-0 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ' +
+            (reinserisciEventi
+              ? 'bg-amber-500 text-white border-amber-500'
+              : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50')
+          }
+        >
+          {reinserisciEventi ? 'Reinserisco eventi: SÌ' : 'Reinserisco eventi: NO'}
+        </button>
+      </div>
 
       <div className="flex gap-2 mb-4">
         <button
@@ -423,7 +661,7 @@ export default function ImportPrenotazioniPage() {
       {alert.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mt-4">
           <div className="flex items-center gap-2 text-amber-800 font-medium text-sm mb-2">
-            <Ban size={16} /> Avvisi dal file (NON verranno importati)
+            <Bell size={16} /> Avvisi dal file (verranno inseriti come alert, solo se non gia presenti)
           </div>
           <ul className="text-xs text-amber-700 space-y-1">
             {alert.map(function(a, i) {
@@ -450,10 +688,12 @@ export default function ImportPrenotazioniPage() {
         ) : (
           <button
             onClick={inserisciTutto}
-            disabled={!puoScrivere || nPren + nEventi === 0}
+            disabled={!puoScrivere || (nDaInserire + nAlert === 0)}
             className="w-full bg-wine-700 text-white py-3 rounded-lg hover:bg-wine-800 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            Conferma e inserisci {nPren} prenotazioni{nEventi > 0 ? ' + ' + nEventi + ' eventi' : ''}
+            Conferma e inserisci {nPren} prenotazioni
+            {reinserisciEventi && nEventi > 0 ? ' + ' + nEventi + ' eventi' : ''}
+            {nAlert > 0 ? ' + ' + nAlert + ' avvisi' : ''}
           </button>
         )}
       </div>
