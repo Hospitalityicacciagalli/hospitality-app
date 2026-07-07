@@ -16,6 +16,13 @@ function formatDateISO(date) {
   return y + '-' + m + '-' + d
 }
 
+function dataBreve(iso) {
+  if (!iso) return ''
+  var p = ('' + iso).split('-')
+  if (p.length !== 3) return iso
+  return p[2] + '/' + p[1] + '/' + p[0]
+}
+
 var HOURS = []
 for (var h = 7; h <= 23; h++) { HOURS.push(h) }
 var MINUTES = ['00', '15', '30', '45']
@@ -56,6 +63,12 @@ function ReservationForm() {
 
   var [loading, setLoading] = useState(false)
   var [saving, setSaving] = useState(false)
+
+  // Stato alert della fascia (coperti degli altri, alert manuale, spunta ok direttore)
+  var [copertiAltri, setCopertiAltri] = useState(0)
+  var [alertManuale, setAlertManuale] = useState(null)
+  var [okDirettore, setOkDirettore] = useState(false)
+  var [okDirettoreOriginale, setOkDirettoreOriginale] = useState(false)
 
   var [customerSearch, setCustomerSearch] = useState('')
   var [searchResults, setSearchResults] = useState([])
@@ -104,6 +117,10 @@ function ReservationForm() {
   }, [formData.reservation_date, formData.meal_type, totalGuests])
 
   useEffect(function() {
+    refreshAlertState()
+  }, [formData.reservation_date, formData.meal_type])
+
+  useEffect(function() {
     if (selectedHour !== '') {
       var h = parseInt(selectedHour)
       var detected = h >= 11 && h <= 15 ? 'lunch' : (h >= 19 && h <= 23 ? 'dinner' : null)
@@ -148,6 +165,8 @@ function ReservationForm() {
         }
         setSelectedCustomer(res.customers)
         setShowSearch(false)
+        setOkDirettore(res.ok_direttore === true)
+        setOkDirettoreOriginale(res.ok_direttore === true)
         loadCustomerAllergens(res.customers.id)
         setLoading(false)
       })
@@ -207,6 +226,42 @@ function ReservationForm() {
     }).then(function(result) {
       if (!result.error && result.data && result.data.length > 0) setAvailability(result.data[0])
     })
+  }
+
+  // Carica i coperti gia' presenti nella fascia (esclusa questa prenotazione
+  // se siamo in modifica) e l'eventuale alert manuale attivo su quella fascia.
+  function refreshAlertState() {
+    var d = formData.reservation_date
+    var m = formData.meal_type
+    if (!d || !m) { setCopertiAltri(0); setAlertManuale(null); return }
+
+    supabase.from('reservations')
+      .select('id, guests_count')
+      .eq('reservation_date', d)
+      .eq('meal_type', m)
+      .not('status', 'eq', 'cancelled')
+      .then(function(result) {
+        var somma = 0
+        if (!result.error && result.data) {
+          for (var i = 0; i < result.data.length; i++) {
+            var row = result.data[i]
+            if (isEditing && row.id === id) continue
+            somma += (row.guests_count || 0)
+          }
+        }
+        setCopertiAltri(somma)
+      })
+
+    supabase.from('alert_prenotazioni')
+      .select('testo, attivo')
+      .eq('data', d)
+      .eq('fascia', m)
+      .eq('attivo', true)
+      .maybeSingle()
+      .then(function(result) {
+        if (!result.error && result.data) setAlertManuale(result.data)
+        else setAlertManuale(null)
+      })
   }
 
   function handleInputChange(e) {
@@ -285,18 +340,10 @@ function ReservationForm() {
     }
   }
 
-  function doSave(reservationData, autore) {
+  function eseguiSalvataggio(payload) {
     setSaving(true)
-    var payload = reservationData
-    if (autore && autore.user_id) {
-      payload = Object.assign({}, reservationData, {
-        creata_da: autore.user_id,
-        creata_da_nome: autore.nome || null
-      })
-    }
-
     var promise = isEditing
-      ? supabase.from('reservations').update(reservationData).eq('id', id)
+      ? supabase.from('reservations').update(payload).eq('id', id)
       : supabase.from('reservations').insert(payload)
 
     promise.then(function(result) {
@@ -306,43 +353,78 @@ function ReservationForm() {
     })
   }
 
+  // Applica al payload la firma (autore in creazione, modificatore in modifica)
+  // e lo stato della spunta "Ok direttore".
+  function applicaFirmaEOk(base, firma) {
+    var out = {}; for (var k in base) { out[k] = base[k] }
+
+    if (isEditing) {
+      out.modificata_da = firma.user_id
+      out.modificata_da_nome = firma.nome || null
+      out.modificata_at = new Date().toISOString()
+    } else {
+      out.creata_da = firma.user_id
+      out.creata_da_nome = firma.nome || null
+    }
+
+    if (okDirettore) {
+      out.ok_direttore = true
+      // La firma dell'ok si scrive solo quando viene concesso adesso;
+      // se era gia' approvata, non sovrascrivo chi lo aveva dato.
+      if (!okDirettoreOriginale) {
+        out.ok_direttore_da = firma.user_id
+        out.ok_direttore_da_nome = firma.nome || null
+        out.ok_direttore_at = new Date().toISOString()
+      }
+    } else {
+      out.ok_direttore = false
+      out.ok_direttore_da = null
+      out.ok_direttore_da_nome = null
+      out.ok_direttore_at = null
+    }
+
+    return out
+  }
+
+  function salvaConFirma(base, firma) {
+    eseguiSalvataggio(applicaFirmaEOk(base, firma))
+  }
+
   function handleSubmit(e) {
     e.preventDefault()
     if (!selectedCustomer) { alert('Seleziona un cliente per la prenotazione.'); return }
     if (!formData.reservation_date) { alert('Seleziona una data.'); return }
     if (formData.adults_count < 1) { alert('Il numero di adulti deve essere almeno 1.'); return }
-    if (availability && !availability.is_available) {
-      if (!window.confirm('Attenzione: i coperti disponibili (' + availability.remaining_covers + ') non sono sufficienti per ' + totalGuests + ' ospiti. Vuoi procedere comunque?')) return
-    }
+    if (bloccato) { alert('Questa fascia e in alert: spunta "Ok direttore" per poter salvare.'); return }
 
-    var reservationData = buildReservationData()
+    var base = buildReservationData()
 
-    // In modifica: comportamento invariato (nessun PIN, autore non toccato).
-    if (isEditing) {
-      doSave(reservationData, null)
+    // Modifica su fascia NON in alert: comportamento classico, update semplice.
+    if (isEditing && !fasciaInAlert) {
+      eseguiSalvataggio(base)
       return
     }
 
-    // Nuova prenotazione su postazione condivisa: il PIN identifica e firma.
+    // Da qui: nuova prenotazione (sempre firmata) oppure modifica in fascia in alert.
+    // Su postazione condivisa il PIN identifica e firma; su personale e' l'utente loggato.
     if (isSharedDevice()) {
-      setPendingData(reservationData)
+      setPendingData(base)
       setShowPinModal(true)
       return
     }
 
-    // Postazione personale: autore = utente loggato, nessun PIN.
     var autore = {
       user_id: user ? user.id : null,
       nome: profile ? (profile.display_name || (profile.first_name + ' ' + profile.last_name)) : null
     }
-    doSave(reservationData, autore)
+    salvaConFirma(base, autore)
   }
 
   function handlePinConfirmed(info) {
     setShowPinModal(false)
-    var data = pendingData
+    var base = pendingData
     setPendingData(null)
-    doSave(data, { user_id: info.user_id, nome: info.nome })
+    salvaConFirma(base, { user_id: info.user_id, nome: info.nome })
   }
 
   var clientiFiltrati = listaClienti.filter(function(c) {
@@ -352,6 +434,17 @@ function ReservationForm() {
   })
 
   var mealLabel = formData.meal_type === 'lunch' ? 'Pranzo' : 'Cena'
+
+  // --- Calcolo stato alert della fascia ---
+  var limite = (availability && typeof availability.max_covers === 'number') ? availability.max_covers : null
+  var copertiDopo = copertiAltri + totalGuests
+  var overLimit = (limite !== null) && (copertiDopo > limite)
+  var fasciaInAlert = overLimit || Boolean(alertManuale)
+  // L'avviso manuale rende obbligatorio l'ok solo in creazione; l'oltre-limite
+  // lo rende obbligatorio sia in creazione sia in modifica.
+  var serveOk = overLimit || (Boolean(alertManuale) && !isEditing)
+  var bloccato = serveOk && !okDirettore
+  var mostraSpunta = fasciaInAlert
 
   if (loading) {
     return (
@@ -563,16 +656,54 @@ function ReservationForm() {
             </div>
           </div>
 
-          {/* Disponibilita */}
-          {availability && (
-            <div className={"mt-4 p-3 rounded-lg border " + (availability.is_available ? "bg-green-50 border-green-200" : "bg-red-50 border-red-200")}>
-              <p className={"text-sm font-medium " + (availability.is_available ? "text-green-800" : "text-red-800")}>
-                {availability.is_available
-                  ? mealLabel + ": " + availability.remaining_covers + " coperti ancora disponibili su " + availability.max_covers
-                  : "Attenzione: solo " + availability.remaining_covers + " coperti disponibili su " + availability.max_covers + " per " + totalGuests + " ospiti richiesti"}
+          {/* Alert fascia / disponibilita */}
+          {fasciaInAlert ? (
+            <div className="mt-4 p-4 rounded-lg border bg-amber-50 border-amber-300">
+              <div className="flex items-start gap-2">
+                <AlertTriangle size={18} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-amber-900">
+                    {mealLabel + " del " + dataBreve(formData.reservation_date) + " \u2014 fascia in alert"}
+                  </p>
+                  {overLimit && (
+                    <p className="text-sm text-amber-800 mt-0.5">
+                      {"Con questa prenotazione: " + copertiDopo + " coperti" + (limite !== null ? " su un limite di " + limite : "") + "."}
+                    </p>
+                  )}
+                  {alertManuale && (
+                    <p className="text-sm text-amber-800 mt-0.5">
+                      {"Avviso del direttore: " + (alertManuale.testo || "\u2014")}
+                    </p>
+                  )}
+
+                  {mostraSpunta && (
+                    <label className="flex items-center gap-2 mt-3 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={okDirettore}
+                        onChange={function(e) { setOkDirettore(e.target.checked) }}
+                        className="w-5 h-5 rounded border-gray-300 text-wine-700 focus:ring-wine-500"
+                      />
+                      <span className={"text-sm font-medium " + (serveOk && !okDirettore ? "text-red-700" : "text-amber-900")}>
+                        {serveOk ? "Ok direttore (obbligatorio per salvare)" : "Ok direttore (facoltativo)"}
+                      </span>
+                    </label>
+                  )}
+                  {bloccato && (
+                    <p className="text-xs text-red-600 mt-1">
+                      {"Spunta \u201cOk direttore\u201d per poter salvare la prenotazione."}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          ) : (limite !== null && (
+            <div className="mt-4 p-3 rounded-lg border bg-green-50 border-green-200">
+              <p className="text-sm font-medium text-green-800">
+                {mealLabel + ": ancora " + Math.max(0, limite - copertiDopo) + " coperti disponibili su " + limite}
               </p>
             </div>
-          )}
+          ))}
 
           {/* Allergeni prenotazione */}
           <div className="mt-4">
@@ -616,7 +747,7 @@ function ReservationForm() {
 
         {/* Pulsanti */}
         <div className="flex flex-col sm:flex-row gap-3 pb-8">
-          <button type="submit" disabled={saving || !selectedCustomer}
+          <button type="submit" disabled={saving || !selectedCustomer || bloccato}
             className="flex-1 flex items-center justify-center gap-2 bg-wine-700 text-white px-6 py-4 rounded-xl hover:bg-wine-800 transition-colors font-medium shadow-sm disabled:opacity-50 disabled:cursor-not-allowed text-base">
             <Save size={20} />
             <span>{saving ? 'Salvataggio...' : (isEditing ? 'Salva Modifiche' : 'Conferma Prenotazione')}</span>
@@ -756,8 +887,10 @@ function ReservationForm() {
 
       <ConfermaPin
         open={showPinModal}
-        title="Conferma prenotazione"
-        message="Postazione condivisa: inserisci il tuo PIN a 6 cifre per formalizzare la prenotazione a tuo nome."
+        title={isEditing ? 'Conferma modifica' : 'Conferma prenotazione'}
+        message={isEditing
+          ? 'Postazione condivisa: inserisci il tuo PIN a 6 cifre per registrare la modifica a tuo nome.'
+          : 'Postazione condivisa: inserisci il tuo PIN a 6 cifre per formalizzare la prenotazione a tuo nome.'}
         onCancel={function() { setShowPinModal(false); setPendingData(null) }}
         onConfirmed={handlePinConfirmed}
       />
