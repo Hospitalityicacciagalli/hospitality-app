@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Plus, ArrowLeft, Users, Clock, Phone, AlertTriangle, CalendarDays, Baby, User, Star, Calendar, TableProperties, X, Check, Printer, ChevronDown } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../lib/AuthContext'
 
 function formatDateDisplay(dateStr) {
   var parts = dateStr.split('-')
@@ -786,6 +787,14 @@ function ReservationDay() {
   var [tipologieGift, setTipologieGift] = useState({})
   var [limiteEffettivo, setLimiteEffettivo] = useState(null)
 
+  var { canEdit, user, profile, elevato, elevazione } = useAuth()
+
+  // Avviso manuale del direttore su questo giorno/turno (riga o null)
+  var [alertManuale, setAlertManuale] = useState(null)
+  var [showAvvisoModal, setShowAvvisoModal] = useState(false)
+  var [avvisoTesto, setAvvisoTesto] = useState('')
+  var [savingAvviso, setSavingAvviso] = useState(false)
+
   useEffect(function() {
     loadSettings()
     loadEventi()
@@ -793,7 +802,7 @@ function ReservationDay() {
     loadTipologieGift()
   }, [])
 
-  useEffect(function() { loadReservations(); caricaLimite() }, [dateStr, selectedMeal])
+  useEffect(function() { loadReservations(); caricaLimite(); caricaAlertManuale() }, [dateStr, selectedMeal])
 
   function loadTipologieGift() {
     supabase.from('gift_card_tipologie').select('*')
@@ -824,6 +833,66 @@ function ReservationDay() {
       .then(function(result) {
         if (!result.error && result.data != null) setLimiteEffettivo(result.data)
         else setLimiteEffettivo(null)
+      })
+  }
+
+  function caricaAlertManuale() {
+    supabase.from('alert_prenotazioni')
+      .select('*')
+      .eq('data', dateStr).eq('fascia', selectedMeal).eq('attivo', true)
+      .maybeSingle()
+      .then(function(result) {
+        if (!result.error && result.data) setAlertManuale(result.data)
+        else setAlertManuale(null)
+      })
+  }
+
+  // Chi firma l'avviso: l'utente elevato (se "entrato con PIN") o quello loggato.
+  function firmaAvviso() {
+    if (elevato && elevazione) {
+      return { user_id: elevazione.user_id, nome: elevazione.nome }
+    }
+    return {
+      user_id: user ? user.id : null,
+      nome: profile ? (profile.display_name || (profile.first_name + ' ' + profile.last_name)) : null
+    }
+  }
+
+  function salvaAvviso() {
+    var firma = firmaAvviso()
+    setSavingAvviso(true)
+    var row = {
+      data: dateStr,
+      fascia: selectedMeal,
+      testo: avvisoTesto.trim() || null,
+      attivo: true,
+      creato_da: firma.user_id,
+      creato_da_nome: firma.nome || null,
+      spento_da: null,
+      spento_da_nome: null,
+      spento_at: null
+    }
+    supabase.from('alert_prenotazioni')
+      .upsert(row, { onConflict: 'data,fascia' })
+      .select()
+      .single()
+      .then(function(result) {
+        setSavingAvviso(false)
+        if (result.error) { alert('Errore nel salvataggio avviso: ' + result.error.message); return }
+        setAlertManuale(result.data || null)
+        setShowAvvisoModal(false)
+      })
+  }
+
+  function spegniAvviso() {
+    if (!confirm('Spegnere questo avviso del direttore?')) return
+    var firma = firmaAvviso()
+    supabase.from('alert_prenotazioni')
+      .update({ attivo: false, spento_da: firma.user_id, spento_da_nome: firma.nome || null, spento_at: new Date().toISOString() })
+      .eq('data', dateStr).eq('fascia', selectedMeal)
+      .then(function(result) {
+        if (result.error) { alert('Errore: ' + result.error.message); return }
+        setAlertManuale(null)
       })
   }
 
@@ -917,7 +986,20 @@ function ReservationDay() {
 
   var maxCoversDefault = selectedMeal === 'lunch' ? settings.max_covers_lunch : settings.max_covers_dinner
   var maxCovers = (limiteEffettivo != null) ? limiteEffettivo : maxCoversDefault
-  var remainingCovers = maxCovers - summary.total
+  // Coperti degli eventi del giorno sul turno selezionato (un evento "both"
+  // vale su entrambi i turni). Se un evento non ha il numero, il totale del
+  // turno resta parziale e lo segnaliamo.
+  var eventiFascia = eventi.filter(function(ev) { return ev.meal_type === selectedMeal || ev.meal_type === 'both' })
+  var copertiEvento = 0
+  var eventoSenzaNumero = false
+  eventiFascia.forEach(function(ev) {
+    if (ev.covers_reserved == null || ev.covers_reserved === '') eventoSenzaNumero = true
+    else copertiEvento += (parseInt(ev.covers_reserved, 10) || 0)
+  })
+  var totaleTurno = summary.total + copertiEvento
+  var remainingCovers = maxCovers - totaleTurno
+  var inAlertAuto = totaleTurno >= maxCovers
+  var fasciaInAlert = inAlertAuto || Boolean(alertManuale)
   var statusLabels = { confirmed: 'Confermata', arrived: 'Arrivato', seated: 'Accomodato', completed: 'Completato', cancelled: 'Cancellata', no_show: 'No Show' }
   var statusColors = { confirmed: 'bg-blue-100 text-blue-800', arrived: 'bg-yellow-100 text-yellow-800', seated: 'bg-green-100 text-green-800', completed: 'bg-gray-100 text-gray-600', cancelled: 'bg-red-100 text-red-800', no_show: 'bg-orange-100 text-orange-800' }
   var categoryColors = { standard: 'bg-gray-100 text-gray-700', vip: 'bg-amber-100 text-amber-800', press: 'bg-purple-100 text-purple-800', business: 'bg-blue-100 text-blue-800', hotel_guest: 'bg-green-100 text-green-800' }
@@ -1003,13 +1085,58 @@ function ReservationDay() {
           <div><p className="text-sm text-gray-500">Ospiti</p><p className="text-2xl font-bold text-gray-900">{summary.total}</p></div>
           <div><p className="text-sm text-gray-500 flex items-center gap-1"><User size={12} />Adulti</p><p className="text-xl font-bold text-gray-700">{summary.adults}</p></div>
           <div><p className="text-sm text-gray-500 flex items-center gap-1"><Baby size={12} />Bambini</p><p className="text-xl font-bold text-gray-700">{summary.children}</p></div>
+          <div><p className="text-sm text-gray-500 flex items-center gap-1"><Star size={12} />Evento</p><p className="text-xl font-bold text-gray-700">{copertiEvento + (eventoSenzaNumero ? ' +?' : '')}</p></div>
+          <div><p className="text-sm text-gray-500">Totale turno</p><p className="text-2xl font-bold text-gray-900">{totaleTurno + (eventoSenzaNumero ? ' +?' : '')}</p></div>
           <div><p className="text-sm text-gray-500">Disponibili</p><p className={"text-2xl font-bold " + (remainingCovers < 10 ? 'text-red-600' : 'text-green-600')}>{remainingCovers}</p></div>
         </div>
         <div className="mt-3 w-full bg-gray-200 rounded-full h-2">
           <div className={"h-2 rounded-full transition-all " + (remainingCovers < 10 ? 'bg-red-500' : 'bg-wine-600')}
-            style={{ width: Math.min((summary.total / maxCovers) * 100, 100) + '%' }} />
+            style={{ width: Math.min((totaleTurno / maxCovers) * 100, 100) + '%' }} />
         </div>
       </div>
+
+      {(fasciaInAlert || eventoSenzaNumero || canEdit('alert_prenotazioni')) && (
+        <div className={"rounded-xl border p-4 mb-6 " + (fasciaInAlert ? "bg-amber-50 border-amber-300" : (eventoSenzaNumero ? "bg-indigo-50 border-indigo-200" : "bg-white border-gray-200"))}>
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div className="flex items-start gap-2 min-w-0">
+              <AlertTriangle size={18} className={(fasciaInAlert ? "text-amber-600" : (eventoSenzaNumero ? "text-indigo-500" : "text-gray-400")) + " mt-0.5 flex-shrink-0"} />
+              <div className="min-w-0">
+                {inAlertAuto && (
+                  <p className="text-sm font-semibold text-amber-900">
+                    {(selectedMeal === 'lunch' ? 'Pranzo' : 'Cena') + " al limite: " + totaleTurno + (eventoSenzaNumero ? "+? " : " ") + "coperti su " + maxCovers}
+                  </p>
+                )}
+                {eventoSenzaNumero && (
+                  <p className="text-sm font-medium text-indigo-800">
+                    Evento senza numero ospiti: il totale del turno e incompleto.
+                  </p>
+                )}
+                {alertManuale ? (
+                  <p className="text-sm text-amber-800">
+                    {"Avviso del direttore" + (alertManuale.testo ? ": " + alertManuale.testo : "")}
+                  </p>
+                ) : (!inAlertAuto && !eventoSenzaNumero && (
+                  <p className="text-sm text-gray-500">Nessun avviso del direttore su questo turno.</p>
+                ))}
+              </div>
+            </div>
+            {canEdit('alert_prenotazioni') && (
+              <div className="flex gap-2 flex-shrink-0">
+                <button type="button" onClick={function() { setAvvisoTesto(alertManuale ? (alertManuale.testo || '') : ''); setShowAvvisoModal(true) }}
+                  className="text-xs px-3 py-1.5 rounded-lg border border-amber-300 text-amber-800 bg-white hover:bg-amber-100 font-medium">
+                  {alertManuale ? 'Modifica avviso' : 'Aggiungi avviso'}
+                </button>
+                {alertManuale && (
+                  <button type="button" onClick={spegniAvviso}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-gray-300 text-gray-600 bg-white hover:bg-gray-100 font-medium">
+                    Spegni
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <div className="flex items-center justify-center h-32"><p className="text-gray-500">Caricamento prenotazioni...</p></div>
@@ -1037,6 +1164,12 @@ function ReservationDay() {
                       {hasAnyAllergen && (
                         <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
                           <AlertTriangle size={12} />Allergeni
+                        </span>
+                      )}
+                      {res.ok_direttore && (
+                        <span className="flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800"
+                          title={res.ok_direttore_da_nome ? ('Ok direttore - ' + res.ok_direttore_da_nome) : 'Ok direttore'}>
+                          <Check size={12} />Ok direttore
                         </span>
                       )}
                       {res.gift_card && (
@@ -1120,6 +1253,33 @@ function ReservationDay() {
 
       {pannelloTavoli && (
         <PannelloTavoli prenotazione={pannelloTavoli} dateStr={dateStr} turno={selectedMeal} onClose={handleChiudiPannelloTavoli} />
+      )}
+
+      {showAvvisoModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
+            <div className="flex items-center justify-between p-6 border-b border-gray-100">
+              <h2 className="text-lg font-bold text-gray-900">{alertManuale ? 'Modifica avviso' : 'Avviso del direttore'}</h2>
+              <button type="button" onClick={function() { setShowAvvisoModal(false) }} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-500">
+                {"Comparira su " + (selectedMeal === 'lunch' ? 'pranzo' : 'cena') + " di " + formatDateDisplay(dateStr) + " e sara visibile a tutto lo staff."}
+              </p>
+              <textarea value={avvisoTesto} onChange={function(e) { setAvvisoTesto(e.target.value) }} rows={3} autoFocus
+                placeholder="es. Chiedere al direttore prima di accettare tavoli grandi"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+              <div className="flex gap-3">
+                <button type="button" onClick={function() { setShowAvvisoModal(false) }}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">Annulla</button>
+                <button type="button" onClick={salvaAvviso} disabled={savingAvviso}
+                  className="flex-1 bg-wine-700 hover:bg-wine-800 disabled:bg-wine-300 text-white px-4 py-2 rounded-lg text-sm font-medium">
+                  {savingAvviso ? 'Salvataggio...' : (alertManuale ? 'Salva' : 'Accendi avviso')}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

@@ -75,6 +75,8 @@ function ReservationForm() {
   // Stato alert della fascia (coperti degli altri, alert manuale, spunta ok direttore)
   var [copertiAltri, setCopertiAltri] = useState(0)
   var [alertManuale, setAlertManuale] = useState(null)
+  var [copertiEvento, setCopertiEvento] = useState(0)
+  var [eventoSenzaNumero, setEventoSenzaNumero] = useState(false)
   var [okDirettore, setOkDirettore] = useState(false)
 
   // Coperti prima della modifica (per il log), storia della prenotazione,
@@ -267,7 +269,7 @@ function ReservationForm() {
   function refreshAlertState() {
     var d = formData.reservation_date
     var m = formData.meal_type
-    if (!d || !m) { setCopertiAltri(0); setAlertManuale(null); return }
+    if (!d || !m) { setCopertiAltri(0); setAlertManuale(null); setCopertiEvento(0); setEventoSenzaNumero(false); return }
 
     supabase.from('reservations')
       .select('id, guests_count')
@@ -295,6 +297,26 @@ function ReservationForm() {
       .then(function(result) {
         if (!result.error && result.data) setAlertManuale(result.data)
         else setAlertManuale(null)
+      })
+
+    // Coperti degli eventi del giorno sul turno (un evento "both" vale su
+    // entrambi i turni). Se un evento non ha il numero, lo segnaliamo.
+    supabase.from('event_dates')
+      .select('covers_reserved, meal_type')
+      .eq('event_date', d)
+      .then(function(result) {
+        var somma = 0
+        var senza = false
+        if (!result.error && result.data) {
+          for (var i = 0; i < result.data.length; i++) {
+            var ev = result.data[i]
+            if (ev.meal_type !== m && ev.meal_type !== 'both') continue
+            if (ev.covers_reserved == null || ev.covers_reserved === '') senza = true
+            else somma += (parseInt(ev.covers_reserved, 10) || 0)
+          }
+        }
+        setCopertiEvento(somma)
+        setEventoSenzaNumero(senza)
       })
   }
 
@@ -515,7 +537,7 @@ function ReservationForm() {
 
   // --- Calcolo stato alert della fascia ---
   var limite = (availability && typeof availability.max_covers === 'number') ? availability.max_covers : null
-  var copertiDopo = copertiAltri + totalGuests
+  var copertiDopo = copertiAltri + totalGuests + copertiEvento
   var overLimit = (limite !== null) && (copertiDopo > limite)
   var fasciaInAlert = overLimit || Boolean(alertManuale)
   // L'avviso manuale rende obbligatorio l'ok solo in creazione; l'oltre-limite
@@ -753,6 +775,11 @@ function ReservationForm() {
                       {"Avviso del direttore: " + (alertManuale.testo || "\u2014")}
                     </p>
                   )}
+                  {eventoSenzaNumero && (
+                    <p className="text-sm text-amber-800 mt-0.5">
+                      Un evento su questo turno non ha il numero ospiti: il totale potrebbe essere piu alto.
+                    </p>
+                  )}
 
                   {mostraSpunta && (
                     <label className="flex items-center gap-2 mt-3 cursor-pointer select-none">
@@ -774,6 +801,12 @@ function ReservationForm() {
                   )}
                 </div>
               </div>
+            </div>
+          ) : eventoSenzaNumero ? (
+            <div className="mt-4 p-3 rounded-lg border bg-indigo-50 border-indigo-200">
+              <p className="text-sm font-medium text-indigo-800">
+                Un evento su questo turno non ha il numero ospiti: il totale potrebbe essere piu alto del previsto.
+              </p>
             </div>
           ) : (limite !== null && (
             <div className="mt-4 p-3 rounded-lg border bg-green-50 border-green-200">

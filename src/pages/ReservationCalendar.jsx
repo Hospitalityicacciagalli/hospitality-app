@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, Plus, CalendarDays, Star, Clock } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, CalendarDays, Star, Clock, AlertTriangle, HelpCircle } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 function pad(n) {
@@ -35,6 +35,10 @@ function ReservationCalendar() {
   var eventDataState = useState({})
   var eventData = eventDataState[0]
   var setEventData = eventDataState[1]
+
+  var alertDataState = useState({})
+  var alertData = alertDataState[0]
+  var setAlertData = alertDataState[1]
 
   var loadingState = useState(true)
   var loading = loadingState[0]
@@ -99,6 +103,24 @@ function ReservationCalendar() {
             events[key].push(ev)
           }
           setEventData(events)
+        }
+        // Riepilogo alert del mese (una sola chiamata) per i badge
+        return supabase.rpc('riepilogo_alert', { p_dal: firstDay, p_al: lastDay })
+      })
+      .then(function(result) {
+        if (result && !result.error && result.data) {
+          var alerts = {}
+          for (var i = 0; i < result.data.length; i++) {
+            var row = result.data[i]
+            var k = row.data
+            if (!alerts[k]) alerts[k] = { auto: false, manual: false, missing: false }
+            if (row.in_alert_auto) alerts[k].auto = true
+            if (row.alert_manuale) alerts[k].manual = true
+            if (row.evento_senza_numero) alerts[k].missing = true
+          }
+          setAlertData(alerts)
+        } else {
+          setAlertData({})
         }
         setLoading(false)
       })
@@ -223,6 +245,12 @@ function ReservationCalendar() {
         <span className="flex items-center gap-1">
           <Clock size={12} className="text-blue-500" /> Opzione evento
         </span>
+        <span className="flex items-center gap-1">
+          <AlertTriangle size={12} className="text-amber-500" /> Turno in alert
+        </span>
+        <span className="flex items-center gap-1">
+          <HelpCircle size={12} className="text-indigo-500" /> Evento senza numero
+        </span>
       </div>
 
       {/* Griglia calendario */}
@@ -256,6 +284,9 @@ function ReservationCalendar() {
               var lunchData = coverData[lunchKey]
               var dinnerData = coverData[dinnerKey]
               var dayEvents = eventData[dateStr] || []
+              var dayAlert = alertData[dateStr]
+              var hasAlert = Boolean(dayAlert && (dayAlert.auto || dayAlert.manual))
+              var hasMissing = Boolean(dayAlert && dayAlert.missing)
 
               var hasData = lunchData || dinnerData || dayEvents.length > 0
 
@@ -270,6 +301,7 @@ function ReservationCalendar() {
                   className={
                     "border-b border-r border-gray-100 p-1 min-h-[100px] lg:min-h-[120px] transition-colors " +
                     (inMonth ? "cursor-pointer hover:bg-gray-50 " : "bg-gray-50 opacity-40 ") +
+                    (inMonth && hasAlert ? "bg-amber-50 " : (inMonth && hasMissing ? "bg-indigo-50 " : "")) +
                     (isToday ? "ring-2 ring-inset ring-wine-500 " : "")
                   }
                 >
@@ -282,17 +314,17 @@ function ReservationCalendar() {
                     }>
                       {d.getDate()}
                     </span>
-                    {/* Indicatori eventi */}
-                    {dayEvents.length > 0 && (
-                      <div className="flex gap-0.5">
-                        {dayEvents.map(function(ev, evIdx) {
-                          if (ev.event_type === 'confirmed') {
-                            return <Star key={evIdx} size={12} className="text-amber-500 fill-amber-500" />
-                          }
-                          return <Clock key={evIdx} size={12} className="text-blue-500" />
-                        })}
-                      </div>
-                    )}
+                    {/* Indicatori alert ed eventi */}
+                    <div className="flex items-center gap-0.5">
+                      {hasAlert && <AlertTriangle size={12} className="text-amber-500" />}
+                      {hasMissing && <HelpCircle size={12} className="text-indigo-500" />}
+                      {dayEvents.length > 0 && dayEvents.map(function(ev, evIdx) {
+                        if (ev.event_type === 'confirmed') {
+                          return <Star key={evIdx} size={12} className="text-amber-500 fill-amber-500" />
+                        }
+                        return <Clock key={evIdx} size={12} className="text-blue-500" />
+                      })}
+                    </div>
                   </div>
 
                   {/* Dati pranzo */}
