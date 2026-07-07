@@ -993,8 +993,11 @@ function ReservationDay() {
   var copertiEvento = 0
   var eventoSenzaNumero = false
   eventiFascia.forEach(function(ev) {
-    if (ev.covers_reserved == null || ev.covers_reserved === '') eventoSenzaNumero = true
-    else copertiEvento += (parseInt(ev.covers_reserved, 10) || 0)
+    var cr = ev.covers_reserved
+    // Un evento senza il numero ospiti (vuoto, nullo o 0) non va sommato
+    // e va segnalato: un evento reale non ha mai 0 ospiti.
+    if (cr == null || cr === '' || Number(cr) === 0) eventoSenzaNumero = true
+    else copertiEvento += (parseInt(cr, 10) || 0)
   })
   var totaleTurno = summary.total + copertiEvento
   var remainingCovers = maxCovers - totaleTurno

@@ -311,8 +311,9 @@ function ReservationForm() {
           for (var i = 0; i < result.data.length; i++) {
             var ev = result.data[i]
             if (ev.meal_type !== m && ev.meal_type !== 'both') continue
-            if (ev.covers_reserved == null || ev.covers_reserved === '') senza = true
-            else somma += (parseInt(ev.covers_reserved, 10) || 0)
+            var cr = ev.covers_reserved
+            if (cr == null || cr === '' || Number(cr) === 0) senza = true
+            else somma += (parseInt(cr, 10) || 0)
           }
         }
         setCopertiEvento(somma)
