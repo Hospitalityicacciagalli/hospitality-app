@@ -94,6 +94,9 @@ export default function Layout({ children }) {
   // Per il menu Stipendi: e' attivo se siamo su una qualunque sotto-pagina
   var stipendiActive = location.pathname.indexOf('/stipendi') === 0;
 
+  // Per il menu Campagna: attivo su qualunque sotto-pagina campagna.
+  var campagnaActive = location.pathname.indexOf('/campagna') === 0;
+
   var showAdminSection = canView('impostazioni');
 
   // Percentuale della barra del timer (residuo su totale).
@@ -289,6 +292,46 @@ export default function Layout({ children }) {
                   onClick={function() { setMobileOpen(false); }}>
                   Dipendenti
                 </NavLink>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Campagna: voce principale + sotto-voci se attivo */}
+        {canView('campagna') && (
+          <>
+            <NavLink
+              to="/campagna/riepilogo"
+              className={function(p) {
+                var isActive = p.isActive || location.pathname === '/campagna';
+                return navClass(isActive);
+              }}
+              onClick={function() { setMobileOpen(false); }}>
+              <span className="text-base">🌾</span>
+              Campagna
+            </NavLink>
+            {campagnaActive && (
+              <div className="ml-3 pl-3 border-l border-wine-700 space-y-1">
+                <NavLink
+                  to="/campagna/riepilogo"
+                  className={function(p) {
+                    var base = 'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ';
+                    return base + (p.isActive ? 'bg-wine-800 text-white' : 'text-wine-300 hover:text-white');
+                  }}
+                  onClick={function() { setMobileOpen(false); }}>
+                  Riepilogo
+                </NavLink>
+                {canEdit('campagna') && (
+                  <NavLink
+                    to="/campagna/importa"
+                    className={function(p) {
+                      var base = 'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ';
+                      return base + (p.isActive ? 'bg-wine-800 text-white' : 'text-wine-300 hover:text-white');
+                    }}
+                    onClick={function() { setMobileOpen(false); }}>
+                    Importa
+                  </NavLink>
+                )}
               </div>
             )}
           </>
