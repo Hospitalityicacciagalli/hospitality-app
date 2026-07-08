@@ -19,6 +19,7 @@ import CassaPage from './pages/CassaPage';
 import CassaNuovaPage from './pages/CassaNuovaPage';
 import CassafortePage from './pages/CassafortePage';
 import GestioneVariabiliCassa from './pages/GestioneVariabiliCassa';
+import CentriCostoPage from './pages/CentriCostoPage';
 import SalePage from './pages/SalePage';
 import OrdiniBordoPage from './pages/OrdiniBordoPage';
 import ListinoBordoPage from './pages/ListinoBordoPage';
@@ -202,6 +203,13 @@ function AppRoutes() {
         <Route path="/variabili-cassa" element={
           <ProtectedRoute feature="variabili_cassa">
             <GestioneVariabiliCassa />
+          </ProtectedRoute>
+        } />
+
+        {/* Dashboard centri di costo + revisore */}
+        <Route path="/centri-costo" element={
+          <ProtectedRoute feature="centri_costo">
+            <CentriCostoPage />
           </ProtectedRoute>
         } />
 

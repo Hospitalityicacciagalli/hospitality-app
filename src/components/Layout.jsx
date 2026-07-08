@@ -238,6 +238,17 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
+        {/* Centri di costo: dashboard + revisore */}
+        {canView('centri_costo') && (
+          <NavLink
+            to="/centri-costo"
+            className={function(p) { return navClass(p.isActive); }}
+            onClick={function() { setMobileOpen(false); }}>
+            <span className="text-base">📊</span>
+            Centri di costo
+          </NavLink>
+        )}
+
         {canView('ordini_bordo') && (
           <NavLink
             to="/ordini-bordo"
