@@ -198,6 +198,19 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
+        {canView('cassa') && (
+          <NavLink
+            to="/cassa-old"
+            className={function(p) {
+              var base = 'flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium transition-colors ';
+              return base + (p.isActive ? 'bg-wine-800 text-white' : 'text-wine-400 hover:bg-wine-800 hover:text-wine-200');
+            }}
+            onClick={function() { setMobileOpen(false); }}>
+            <span className="text-base">🗄️</span>
+            Cassa OLD
+          </NavLink>
+        )}
+
         {canView('ordini_bordo') && (
           <NavLink
             to="/ordini-bordo"

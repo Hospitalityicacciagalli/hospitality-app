@@ -1,0 +1,856 @@
+import { useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../lib/AuthContext';
+
+// ─────────────────────────────────────────────────────────────
+// CASSA (nuovo modulo, tabelle cassa2_*). Vive dentro il Layout.
+// Logica: ogni movimento e' ENTRATA / SPESA / GIRO.
+//   ENTRATA -> natura (scontrino/fattura/fattoria) + pagamento
+//   SPESA   -> pagamento + centro di costo (ristorante)
+//   GIRO    -> versa/preleva cassaforte (contanti)
+// I tagli si contano SOLO in chiusura.
+// ─────────────────────────────────────────────────────────────
+
+var ID_RECEPTION = 'd375c1de-04b9-490e-ab8f-5f11a6cb969f';
+var ID_RISTORANTE = '4805dd45-da57-4442-9a09-a0141804cc9a';
+
+var CASSE = [
+  { id: ID_RECEPTION, nome: 'Reception' },
+  { id: ID_RISTORANTE, nome: 'Ristorante' }
+];
+
+var NATURE = [
+  { v: 'scontrino', label: 'Scontrino' },
+  { v: 'fattura', label: 'Fattura' },
+  { v: 'fattoria', label: 'Fattoria' }
+];
+
+var PAGAMENTI = [
+  { v: 'contanti', label: 'Contanti' },
+  { v: 'carta', label: 'Carta' },
+  { v: 'bonifico', label: 'Bonifico' },
+  { v: 'assegno', label: 'Assegno' }
+];
+
+var GIRI = [
+  { v: 'versa_cassaforte', label: 'Versa in cassaforte' },
+  { v: 'preleva_cassaforte', label: 'Preleva da cassaforte' }
+];
+
+var TAGLI = [500, 200, 100, 50, 20, 10, 5];
+
+function oggiISO() { return new Date().toISOString().split('T')[0]; }
+function arrotonda(n) { return Math.round((n || 0) * 100) / 100; }
+function formatEuro(n) { return arrotonda(n).toLocaleString('it-IT', { style: 'currency', currency: 'EUR' }); }
+
+function labelNatura(v) { for (var i = 0; i < NATURE.length; i++) { if (NATURE[i].v === v) return NATURE[i].label; } return v || ''; }
+function labelPagamento(v) { for (var i = 0; i < PAGAMENTI.length; i++) { if (PAGAMENTI[i].v === v) return PAGAMENTI[i].label; } return v || ''; }
+function labelGiro(v) { for (var i = 0; i < GIRI.length; i++) { if (GIRI[i].v === v) return GIRI[i].label; } return v || ''; }
+
+function spostaData(iso, giorni) {
+  var d = new Date(iso + 'T00:00:00');
+  d.setDate(d.getDate() + giorni);
+  return d.toISOString().split('T')[0];
+}
+
+function dataLeggibile(iso) {
+  var d = new Date(iso + 'T00:00:00');
+  return d.toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+// ── gruppo di pulsanti tappabili (sostituisce i menu' nativi) ──
+function Pills(props) {
+  var opzioni = props.opzioni;
+  var value = props.value;
+  var onChange = props.onChange;
+  var disabled = props.disabled;
+  return (
+    <div className="flex flex-wrap gap-2">
+      {opzioni.map(function(o) {
+        var sel = o.v === value;
+        var cls = sel
+          ? 'px-4 py-2 rounded-full text-sm font-medium border-2 border-wine-700 bg-wine-700 text-white'
+          : 'px-4 py-2 rounded-full text-sm font-medium border-2 border-gray-300 bg-white text-gray-600 hover:border-wine-400';
+        if (disabled && !sel) cls = 'px-4 py-2 rounded-full text-sm font-medium border-2 border-gray-200 bg-gray-100 text-gray-400';
+        return (
+          <button key={o.v} type="button" disabled={disabled && !sel}
+            onClick={function() { if (!disabled) onChange(o.v); }}
+            className={cls}>{o.label}</button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── lista tappabile con "nessuno" (per evento) ──
+function ListaTappabile(props) {
+  var opzioni = props.opzioni;
+  var value = props.value;
+  var onChange = props.onChange;
+  return (
+    <div className="max-h-44 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+      <button type="button" onClick={function() { onChange(''); }}
+        className={'w-full text-left px-3 py-2 text-sm ' + (value === '' ? 'bg-wine-50 text-wine-800 font-medium' : 'bg-white text-gray-700 hover:bg-gray-50')}>
+        nessuno
+      </button>
+      {opzioni.map(function(o) {
+        var sel = o.id === value;
+        return (
+          <button key={o.id} type="button" onClick={function() { onChange(o.id); }}
+            className={'w-full text-left px-3 py-2 text-sm ' + (sel ? 'bg-wine-50 text-wine-800 font-medium' : 'bg-white text-gray-700 hover:bg-gray-50')}>
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── etichetta evento leggibile ──
+function labelEvento(ev) {
+  var pasto = ev.meal_type === 'lunch' ? 'Pranzo' : (ev.meal_type === 'dinner' ? 'Cena' : 'Giornata');
+  return ev.event_date + ' · ' + ev.title + ' (' + pasto + ')';
+}
+
+// ═════════════════════════════════════════════════════════════
+// MODALE NUOVO / MODIFICA MOVIMENTO
+// ═════════════════════════════════════════════════════════════
+function ModaleMovimento(props) {
+  var cassaId = props.cassaId;
+  var centri = props.centri;
+  var tavoli = props.tavoli;
+  var eventi = props.eventi;
+  var userId = props.userId;
+  var esistente = props.movimento || null;
+  var onSalvato = props.onSalvato;
+  var onChiudi = props.onChiudi;
+
+  var isRistorante = cassaId === ID_RISTORANTE;
+  var isReception = cassaId === ID_RECEPTION;
+  var isModifica = esistente !== null;
+
+  var [tipo, setTipo] = useState(isModifica ? esistente.tipo : 'entrata');
+  var [natura, setNatura] = useState(isModifica ? (esistente.natura || 'scontrino') : 'scontrino');
+  var [pagamento, setPagamento] = useState(isModifica ? (esistente.pagamento || 'contanti') : 'contanti');
+  var [giroTipo, setGiroTipo] = useState(isModifica ? (esistente.giro_tipo || 'versa_cassaforte') : 'versa_cassaforte');
+  var [importoStr, setImportoStr] = useState(isModifica ? String(esistente.importo) : '');
+  var [isHotelCloud, setIsHotelCloud] = useState(isModifica ? !!esistente.is_hotel_cloud : false);
+  var [centroId, setCentroId] = useState(isModifica ? (esistente.centro_di_costo_id || '') : '');
+  var [tavoloId, setTavoloId] = useState(isModifica ? (esistente.tavolo_id || '') : '');
+  var [eventoId, setEventoId] = useState(isModifica ? (esistente.event_id || '') : '');
+  var [daCausale, setDaCausale] = useState(isModifica ? (esistente.da_causale || '') : '');
+  var [nota, setNota] = useState(isModifica ? (esistente.nota || '') : '');
+  var [salvando, setSalvando] = useState(false);
+  var [errore, setErrore] = useState('');
+
+  // La fattoria e' sempre in contanti: blocca il pagamento.
+  var pagamentoBloccato = tipo === 'entrata' && natura === 'fattoria';
+  useEffect(function() {
+    if (pagamentoBloccato && pagamento !== 'contanti') setPagamento('contanti');
+  }, [natura, tipo]);
+
+  var importo = parseFloat(importoStr) || 0;
+
+  function handleSalva() {
+    if (importo <= 0) { setErrore('Inserisci un importo maggiore di zero.'); return; }
+    setErrore('');
+    setSalvando(true);
+
+    var riga = {
+      cassa_id: cassaId,
+      data: props.data,
+      tipo: tipo,
+      natura: tipo === 'entrata' ? natura : null,
+      pagamento: tipo === 'giro' ? null : pagamento,
+      importo: importo,
+      is_hotel_cloud: (tipo === 'entrata' && isReception) ? isHotelCloud : false,
+      centro_di_costo_id: (tipo === 'spesa' && centroId) ? centroId : null,
+      giro_tipo: tipo === 'giro' ? giroTipo : null,
+      cassa_collegata_id: null,
+      tavolo_id: (tipo === 'entrata' && isRistorante && tavoloId) ? tavoloId : null,
+      event_id: (tipo === 'entrata' && eventoId) ? eventoId : null,
+      da_causale: daCausale || null,
+      nota: nota || null,
+      inserito_da: userId || null
+    };
+
+    var q;
+    if (isModifica) {
+      q = supabase.from('cassa2_movimenti').update(riga).eq('id', esistente.id).select();
+    } else {
+      q = supabase.from('cassa2_movimenti').insert([riga]).select();
+    }
+    q.then(function(r) {
+      setSalvando(false);
+      if (r.error) { setErrore('Errore: ' + r.error.message); return; }
+      onSalvato(r.data[0], isModifica);
+    });
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[94vh] overflow-y-auto">
+        <div className="px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+          <h2 className="text-lg font-semibold text-gray-900">{isModifica ? 'Modifica movimento' : 'Nuovo movimento'}</h2>
+          <button onClick={onChiudi} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+        </div>
+
+        <div className="p-6 space-y-5">
+
+          {/* Tipo */}
+          <div>
+            <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Tipo</div>
+            <Pills
+              opzioni={[{ v: 'entrata', label: 'Entrata' }, { v: 'spesa', label: 'Spesa' }, { v: 'giro', label: 'Giro' }]}
+              value={tipo} onChange={setTipo} />
+          </div>
+
+          {/* ENTRATA: natura */}
+          {tipo === 'entrata' && (
+            <div>
+              <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Natura del documento</div>
+              <Pills opzioni={NATURE} value={natura} onChange={setNatura} />
+            </div>
+          )}
+
+          {/* GIRO: tipo di giro */}
+          {tipo === 'giro' && (
+            <div>
+              <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Giro di contanti</div>
+              <Pills opzioni={GIRI} value={giroTipo} onChange={setGiroTipo} />
+              <div className="text-xs text-gray-400 mt-2">Il giro sposta contanti fra cassa e cassaforte: non e' un incasso.</div>
+            </div>
+          )}
+
+          {/* Pagamento (non per il giro) */}
+          {tipo !== 'giro' && (
+            <div>
+              <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                Pagamento{pagamentoBloccato && <span className="text-wine-600 normal-case font-normal ml-2">la fattoria e' sempre in contanti</span>}
+              </div>
+              <Pills opzioni={PAGAMENTI} value={pagamento} onChange={setPagamento} disabled={pagamentoBloccato} />
+            </div>
+          )}
+
+          {/* Importo */}
+          <div>
+            <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Importo</div>
+            <input type="number" step="0.01" min="0" placeholder="0,00" value={importoStr}
+              onChange={function(e) { setImportoStr(e.target.value); }}
+              className="w-full border border-gray-300 rounded-lg px-4 py-3 text-2xl font-semibold text-right text-gray-900 focus:outline-none focus:ring-2 focus:ring-wine-500" />
+          </div>
+
+          {/* Hotel in Cloud (solo reception, solo entrata) */}
+          {tipo === 'entrata' && isReception && (
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" checked={isHotelCloud}
+                onChange={function(e) { setIsHotelCloud(e.target.checked); }}
+                className="w-5 h-5 accent-wine-700" />
+              <span className="text-sm text-gray-700">Passato da Hotel in Cloud</span>
+            </label>
+          )}
+
+          {/* Centro di costo (solo spesa, ristorante) */}
+          {tipo === 'spesa' && isRistorante && (
+            <div>
+              <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Centro di costo</div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={function() { setCentroId(''); }}
+                  className={'px-3 py-1.5 rounded-full text-sm border-2 ' + (centroId === '' ? 'border-wine-700 bg-wine-700 text-white' : 'border-gray-300 bg-white text-gray-600 hover:border-wine-400')}>
+                  nessuno
+                </button>
+                {centri.map(function(c) {
+                  var sel = c.id === centroId;
+                  return (
+                    <button key={c.id} type="button" onClick={function() { setCentroId(c.id); }}
+                      className={'px-3 py-1.5 rounded-full text-sm border-2 ' + (sel ? 'border-wine-700 bg-wine-700 text-white' : 'border-gray-300 bg-white text-gray-600 hover:border-wine-400')}>
+                      {c.nome}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Tavolo (solo entrata, ristorante) */}
+          {tipo === 'entrata' && isRistorante && tavoli.length > 0 && (
+            <div>
+              <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Tavolo (opzionale)</div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={function() { setTavoloId(''); }}
+                  className={'px-3 py-1.5 rounded-full text-sm border-2 ' + (tavoloId === '' ? 'border-wine-700 bg-wine-700 text-white' : 'border-gray-300 bg-white text-gray-600 hover:border-wine-400')}>
+                  nessuno
+                </button>
+                {tavoli.map(function(t) {
+                  var sel = t.id === tavoloId;
+                  return (
+                    <button key={t.id} type="button" onClick={function() { setTavoloId(t.id); }}
+                      className={'px-3 py-1.5 rounded-full text-sm border-2 ' + (sel ? 'border-wine-700 bg-wine-700 text-white' : 'border-gray-300 bg-white text-gray-600 hover:border-wine-400')}>
+                      {t.nome}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Evento (solo entrata, opzionale) */}
+          {tipo === 'entrata' && (
+            <div>
+              <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Evento collegato (opzionale)</div>
+              {eventi.length > 0 ? (
+                <ListaTappabile
+                  opzioni={eventi.map(function(ev) { return { id: ev.id, label: labelEvento(ev) }; })}
+                  value={eventoId} onChange={setEventoId} />
+              ) : (
+                <div className="text-xs text-gray-400">Nessun evento in agenda.</div>
+              )}
+            </div>
+          )}
+
+          {/* Da / causale */}
+          <div>
+            <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+              {tipo === 'spesa' ? 'Da / causale' : 'Provenienza / note brevi'}
+            </div>
+            <input type="text" placeholder="es. Tavolo 5, Direttore, Rossi..." value={daCausale}
+              onChange={function(e) { setDaCausale(e.target.value); }}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-wine-500" />
+          </div>
+
+          {/* Nota */}
+          <div>
+            <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Nota</div>
+            <textarea rows={2} placeholder="Nota libera..." value={nota}
+              onChange={function(e) { setNota(e.target.value); }}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-wine-500" />
+          </div>
+
+          {errore && <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{errore}</div>}
+
+          <div className="flex gap-3 pt-2">
+            <button onClick={onChiudi} className="flex-1 px-4 py-3 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">Annulla</button>
+            <button onClick={handleSalva} disabled={salvando}
+              className="flex-1 px-4 py-3 bg-wine-700 hover:bg-wine-800 disabled:bg-wine-300 text-white rounded-lg text-sm font-medium">
+              {salvando ? 'Salvataggio...' : (isModifica ? 'Aggiorna' : 'Salva')}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── card numero ──
+function CardNum(props) {
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-4">
+      <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">{props.titolo}</div>
+      <div className={'font-semibold ' + (props.grande ? 'text-2xl' : 'text-xl') + ' ' + (props.colore || 'text-gray-900')}>
+        {formatEuro(props.valore)}
+      </div>
+      {props.sub && <div className="text-xs text-gray-400 mt-1">{props.sub}</div>}
+    </div>
+  );
+}
+
+// ── riga movimento nella lista ──
+function RigaMovimento(props) {
+  var m = props.movimento;
+  var puoScrivere = props.puoScrivere;
+  var onModifica = props.onModifica;
+  var onAnnulla = props.onAnnulla;
+
+  var isEntrata = m.tipo === 'entrata';
+  var isSpesa = m.tipo === 'spesa';
+  var isGiroPreleva = m.tipo === 'giro' && m.giro_tipo === 'preleva_cassaforte';
+  var positivo = isEntrata || isGiroPreleva;
+
+  var titolo;
+  if (isEntrata) titolo = 'Entrata · ' + labelNatura(m.natura) + ' · ' + labelPagamento(m.pagamento);
+  else if (isSpesa) titolo = 'Spesa · ' + labelPagamento(m.pagamento);
+  else titolo = 'Giro · ' + labelGiro(m.giro_tipo);
+
+  var dettagli = [];
+  if (m.is_hotel_cloud) dettagli.push('Hotel in Cloud');
+  if (m._centro_nome) dettagli.push(m._centro_nome);
+  if (m._tavolo_nome) dettagli.push('Tav. ' + m._tavolo_nome);
+  if (m._evento_titolo) dettagli.push('Evento: ' + m._evento_titolo);
+  if (m.da_causale) dettagli.push(m.da_causale);
+  if (m.nota) dettagli.push(m.nota);
+
+  var bordo = m.annullato ? 'border-gray-200 bg-gray-50 opacity-60' : (positivo ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50');
+  var coloreImporto = m.annullato ? 'text-gray-400' : (positivo ? 'text-green-700' : 'text-red-700');
+
+  return (
+    <div className={'flex items-center gap-3 p-3 rounded-lg border ' + bordo}>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-medium text-gray-800">{titolo}</span>
+          {m.annullato && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-200 text-gray-500">Annullato</span>}
+        </div>
+        {dettagli.length > 0 && <div className="text-xs text-gray-500 mt-0.5 truncate">{dettagli.join(' · ')}</div>}
+      </div>
+      <div className={'font-semibold text-lg ' + coloreImporto}>{positivo ? '+' : '-'}{formatEuro(m.importo)}</div>
+      {puoScrivere && !m.annullato && (
+        <div className="flex flex-col gap-1 flex-shrink-0">
+          <button onClick={function() { onModifica(m); }} className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-white">Modifica</button>
+          <button onClick={function() { onAnnulla(m.id); }} className="text-xs px-2 py-1 rounded border border-red-200 text-red-600 hover:bg-white">Annulla</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════
+// PAGINA PRINCIPALE
+// ═════════════════════════════════════════════════════════════
+export default function CassaNuovaPage() {
+  var auth = useAuth();
+  var profile = auth.profile;
+  var userId = profile ? profile.id : null;
+  var ruolo = profile ? profile.role : '';
+  var puoScrivere = auth.canEdit('cassa');
+  var puoVedereCassaforte = ruolo === 'super_admin' || ruolo === 'direttore' || ruolo === 'proprieta';
+
+  var [cassaId, setCassaId] = useState(ID_RECEPTION);
+  var [data, setData] = useState(oggiISO());
+  var [sezione, setSezione] = useState('movimenti');
+  var [movimenti, setMovimenti] = useState([]);
+  var [centri, setCentri] = useState([]);
+  var [tavoli, setTavoli] = useState([]);
+  var [eventi, setEventi] = useState([]);
+  var [fondoApertura, setFondoApertura] = useState(0);
+  var [loading, setLoading] = useState(false);
+  var [showForm, setShowForm] = useState(false);
+  var [movimentoDaModificare, setMovimentoDaModificare] = useState(null);
+  var [filtroTavoloId, setFiltroTavoloId] = useState('');
+
+  var isRistorante = cassaId === ID_RISTORANTE;
+  var cassaNome = cassaId === ID_RISTORANTE ? 'Ristorante' : 'Reception';
+
+  // riferimenti (riusa le tabelle esistenti)
+  useEffect(function() {
+    supabase.from('centri_di_costo').select('id, nome').eq('attivo', true).order('nome').then(function(r) {
+      if (r.data) setCentri(r.data);
+    });
+    supabase.from('tavoli_sala').select('id, nome, ordine').eq('attivo', true).order('ordine').then(function(r) {
+      if (r.data) setTavoli(r.data);
+    });
+    var treMesiFa = spostaData(oggiISO(), -90);
+    supabase.from('event_dates').select('id, event_date, title, event_type, meal_type')
+      .gte('event_date', treMesiFa).order('event_date', { ascending: false }).then(function(r) {
+        if (r.data) setEventi(r.data);
+      });
+  }, []);
+
+  // fondo di apertura = contato dell'ultima chiusura bloccata precedente
+  useEffect(function() {
+    supabase.from('cassa2_chiusure').select('contato_contanti, data')
+      .eq('cassa_id', cassaId).eq('bloccata', true).lt('data', data)
+      .order('data', { ascending: false }).limit(1)
+      .then(function(r) {
+        if (r.data && r.data.length > 0) setFondoApertura(arrotonda(r.data[0].contato_contanti));
+        else setFondoApertura(0);
+      });
+  }, [cassaId, data]);
+
+  // movimenti del giorno
+  useEffect(function() {
+    setLoading(true);
+    setFiltroTavoloId('');
+    supabase.from('cassa2_movimenti').select('*')
+      .eq('cassa_id', cassaId).eq('data', data).order('creato_il', { ascending: true })
+      .then(function(r) {
+        setLoading(false);
+        if (r.data) setMovimenti(r.data);
+        else setMovimenti([]);
+      });
+  }, [cassaId, data]);
+
+  // arricchisce i movimenti con i nomi (centro / tavolo / evento)
+  function arricchisci(m) {
+    var copia = Object.assign({}, m);
+    if (m.centro_di_costo_id) {
+      for (var i = 0; i < centri.length; i++) { if (centri[i].id === m.centro_di_costo_id) { copia._centro_nome = centri[i].nome; break; } }
+    }
+    if (m.tavolo_id) {
+      for (var j = 0; j < tavoli.length; j++) { if (tavoli[j].id === m.tavolo_id) { copia._tavolo_nome = tavoli[j].nome; break; } }
+    }
+    if (m.event_id) {
+      for (var k = 0; k < eventi.length; k++) { if (eventi[k].id === m.event_id) { copia._evento_titolo = eventi[k].title; break; } }
+    }
+    return copia;
+  }
+
+  var movimentiRicchi = movimenti.map(arricchisci);
+  var attivi = movimentiRicchi.filter(function(m) { return !m.annullato; });
+
+  // ── calcoli di giornata ──
+  var ufficiale = 0, fattoria = 0, spese = 0;
+  var entrateContanti = 0, speseContanti = 0, versaCassaforte = 0, prelevaCassaforte = 0;
+  attivi.forEach(function(m) {
+    if (m.tipo === 'entrata') {
+      if (m.natura === 'fattoria') fattoria += m.importo;
+      else ufficiale += m.importo;
+      if (m.pagamento === 'contanti') entrateContanti += m.importo;
+    } else if (m.tipo === 'spesa') {
+      spese += m.importo;
+      if (m.pagamento === 'contanti') speseContanti += m.importo;
+    } else if (m.tipo === 'giro') {
+      if (m.giro_tipo === 'versa_cassaforte') versaCassaforte += m.importo;
+      if (m.giro_tipo === 'preleva_cassaforte') prelevaCassaforte += m.importo;
+    }
+  });
+  ufficiale = arrotonda(ufficiale);
+  fattoria = arrotonda(fattoria);
+  var reale = arrotonda(ufficiale + fattoria);
+  spese = arrotonda(spese);
+  var contantiOggi = arrotonda(entrateContanti - speseContanti - versaCassaforte + prelevaCassaforte);
+  var contantiInCassa = arrotonda(fondoApertura + contantiOggi);
+
+  var listaVisibile = filtroTavoloId
+    ? movimentiRicchi.filter(function(m) { return m.tavolo_id === filtroTavoloId; })
+    : movimentiRicchi;
+
+  // ── azioni ──
+  function handleSalvato(salvato, isModifica) {
+    if (isModifica) {
+      setMovimenti(function(prev) { return prev.map(function(m) { return m.id === salvato.id ? salvato : m; }); });
+    } else {
+      setMovimenti(function(prev) { return prev.concat([salvato]); });
+    }
+    setShowForm(false);
+    setMovimentoDaModificare(null);
+  }
+
+  function handleAnnulla(id) {
+    supabase.from('cassa2_movimenti')
+      .update({ annullato: true, annullato_da: userId, annullato_il: new Date().toISOString() })
+      .eq('id', id).then(function(r) {
+        if (!r.error) setMovimenti(function(prev) { return prev.map(function(m) { return m.id === id ? Object.assign({}, m, { annullato: true }) : m; }); });
+      });
+  }
+
+  function apriNuovo() { setMovimentoDaModificare(null); setShowForm(true); }
+  function apriModifica(m) { setMovimentoDaModificare(m); setShowForm(true); }
+
+  var tabs = [{ id: 'movimenti', label: 'Movimenti' }, { id: 'chiusura', label: 'Chiusura' }];
+  if (puoVedereCassaforte) tabs.push({ id: 'cassaforte', label: 'Cassaforte' });
+
+  return (
+    <div className="p-4 lg:p-6 max-w-5xl mx-auto">
+
+      {/* Intestazione: cassa + data + tabs */}
+      <div className="flex flex-wrap items-center gap-3 mb-5">
+        <h1 className="text-xl font-semibold text-gray-900 mr-2">Cassa</h1>
+        <div className="flex gap-1">
+          {CASSE.map(function(c) {
+            var sel = c.id === cassaId;
+            return (
+              <button key={c.id} onClick={function() { setCassaId(c.id); setSezione('movimenti'); }}
+                className={'px-4 py-1.5 rounded-lg text-sm font-medium ' + (sel ? 'bg-wine-700 text-white' : 'bg-white border border-gray-300 text-gray-600 hover:bg-gray-50')}>
+                {c.nome}
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-1 ml-auto">
+          <button onClick={function() { setData(spostaData(data, -1)); }} className="px-2 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">&lsaquo;</button>
+          <input type="date" value={data} onChange={function(e) { setData(e.target.value); }}
+            className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-700" />
+          <button onClick={function() { setData(spostaData(data, 1)); }} className="px-2 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">&rsaquo;</button>
+        </div>
+      </div>
+
+      <div className="flex gap-1 border-b border-gray-200 mb-5">
+        {tabs.map(function(t) {
+          var sel = t.id === sezione;
+          return (
+            <button key={t.id} onClick={function() { setSezione(t.id); }}
+              className={'px-4 py-2 text-sm font-medium border-b-2 ' + (sel ? 'border-wine-700 text-wine-800' : 'border-transparent text-gray-500 hover:text-gray-700')}>
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* ── MOVIMENTI ── */}
+      {sezione === 'movimenti' && (
+        <div>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+            <CardNum titolo="Incasso ufficiale" valore={ufficiale} colore="text-green-700" grande={true} sub="scontrini + fatture" />
+            <CardNum titolo="Incasso reale" valore={reale} colore="text-wine-700" grande={true} sub="ufficiale + fattoria" />
+            <CardNum titolo="Spese" valore={spese} colore="text-red-600" />
+            <CardNum titolo="Contanti in cassa" valore={contantiInCassa} colore="text-gray-900" sub={'fondo ' + formatEuro(fondoApertura)} />
+          </div>
+
+          <div className="flex items-center justify-between mb-3 gap-3 flex-wrap">
+            <div className="text-sm text-gray-500">
+              {loading ? 'Caricamento...' : (attivi.length + ' movimenti attivi' + (filtroTavoloId ? ' (filtrati per tavolo)' : ''))}
+            </div>
+            <div className="flex items-center gap-2">
+              {isRistorante && tavoli.length > 0 && (
+                <div className="flex items-center gap-1">
+                  <button onClick={function() { setFiltroTavoloId(''); }}
+                    className={'px-2.5 py-1 rounded-full text-xs border ' + (filtroTavoloId === '' ? 'border-wine-700 bg-wine-700 text-white' : 'border-gray-300 text-gray-500')}>
+                    tutti
+                  </button>
+                  {tavoli.map(function(t) {
+                    var sel = t.id === filtroTavoloId;
+                    return (
+                      <button key={t.id} onClick={function() { setFiltroTavoloId(t.id); }}
+                        className={'px-2.5 py-1 rounded-full text-xs border ' + (sel ? 'border-wine-700 bg-wine-700 text-white' : 'border-gray-300 text-gray-500')}>
+                        {t.nome}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+              {puoScrivere && (
+                <button onClick={apriNuovo} className="px-4 py-2 bg-wine-700 hover:bg-wine-800 text-white rounded-lg text-sm font-medium">+ Nuovo movimento</button>
+              )}
+            </div>
+          </div>
+
+          {!loading && listaVisibile.length === 0 ? (
+            <div className="bg-white border border-dashed border-gray-300 rounded-xl p-10 text-center text-gray-400 text-sm">
+              Nessun movimento per {cassaNome} · {dataLeggibile(data)}
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {listaVisibile.map(function(m) {
+                return <RigaMovimento key={m.id} movimento={m} puoScrivere={puoScrivere} onModifica={apriModifica} onAnnulla={handleAnnulla} />;
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── CHIUSURA ── */}
+      {sezione === 'chiusura' && (
+        <ChiusuraTab
+          cassaId={cassaId} cassaNome={cassaNome} data={data} userId={userId}
+          puoScrivere={puoScrivere}
+          fondoApertura={fondoApertura}
+          contantiInCassa={contantiInCassa}
+          ufficiale={ufficiale} fattoria={fattoria} spese={spese}
+          attivi={attivi} />
+      )}
+
+      {/* ── CASSAFORTE ── */}
+      {sezione === 'cassaforte' && puoVedereCassaforte && (
+        <CassaforteTab />
+      )}
+
+      {showForm && (
+        <ModaleMovimento
+          cassaId={cassaId} data={data} centri={centri} tavoli={tavoli} eventi={eventi} userId={userId}
+          movimento={movimentoDaModificare}
+          onSalvato={handleSalvato}
+          onChiudi={function() { setShowForm(false); setMovimentoDaModificare(null); }} />
+      )}
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════
+// SCHEDA CHIUSURA
+// ═════════════════════════════════════════════════════════════
+function ChiusuraTab(props) {
+  var teorico = props.contantiInCassa;
+  var [tagli, setTagli] = useState(function() {
+    var t = { monete: '' };
+    for (var i = 0; i < TAGLI.length; i++) { t['t' + TAGLI[i]] = ''; }
+    return t;
+  });
+  var [notaDiff, setNotaDiff] = useState('');
+  var [salvando, setSalvando] = useState(false);
+  var [msg, setMsg] = useState('');
+  var [giaChiusa, setGiaChiusa] = useState(null);
+
+  useEffect(function() {
+    supabase.from('cassa2_chiusure').select('*').eq('cassa_id', props.cassaId).eq('data', props.data).limit(1)
+      .then(function(r) {
+        if (r.data && r.data.length > 0) setGiaChiusa(r.data[0]);
+        else setGiaChiusa(null);
+      });
+  }, [props.cassaId, props.data]);
+
+  function setTaglio(campo, val) {
+    setTagli(function(prev) { var n = Object.assign({}, prev); n[campo] = val; return n; });
+  }
+
+  var contato = 0;
+  for (var i = 0; i < TAGLI.length; i++) { contato += (parseInt(tagli['t' + TAGLI[i]], 10) || 0) * TAGLI[i]; }
+  contato += parseFloat(tagli.monete || 0);
+  contato = arrotonda(contato);
+  var differenza = arrotonda(contato - teorico);
+
+  function costruisciRiepilogo() {
+    var perPagamento = {};
+    var perNatura = { scontrino: 0, fattura: 0, fattoria: 0 };
+    props.attivi.forEach(function(m) {
+      if (m.tipo === 'entrata') {
+        perNatura[m.natura] = arrotonda((perNatura[m.natura] || 0) + m.importo);
+        perPagamento[m.pagamento] = arrotonda((perPagamento[m.pagamento] || 0) + m.importo);
+      }
+    });
+    return { per_pagamento: perPagamento, per_natura: perNatura, spese: props.spese };
+  }
+
+  function handleChiudi() {
+    setSalvando(true);
+    var riga = {
+      cassa_id: props.cassaId, data: props.data,
+      fondo_apertura: props.fondoApertura,
+      teorico_contanti: teorico,
+      contato_contanti: contato,
+      differenza: differenza,
+      tagli: tagli,
+      riepilogo: costruisciRiepilogo(),
+      nota_differenza: notaDiff || null,
+      bloccata: true,
+      chiusa_da: props.userId
+    };
+    supabase.from('cassa2_chiusure').upsert([riga], { onConflict: 'cassa_id,data' }).select()
+      .then(function(r) {
+        setSalvando(false);
+        if (r.error) { setMsg('Errore: ' + r.error.message); return; }
+        setMsg('Chiusura registrata e bloccata. Il contato diventa il fondo di domani.');
+        if (r.data && r.data.length > 0) setGiaChiusa(r.data[0]);
+      });
+  }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-5 lg:p-6">
+      <h2 className="text-lg font-semibold text-gray-900 mb-1">Chiusura · {props.cassaNome}</h2>
+      <div className="text-sm text-gray-500 mb-5">{dataLeggibile(props.data)} · {props.attivi.length} movimenti attivi</div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <CardNum titolo="Fondo apertura" valore={props.fondoApertura} colore="text-gray-600" />
+        <CardNum titolo="Incasso ufficiale" valore={props.ufficiale} colore="text-green-700" />
+        <CardNum titolo="Spese" valore={props.spese} colore="text-red-600" />
+        <CardNum titolo="Teorico contanti" valore={teorico} colore="text-gray-900" grande={true} />
+      </div>
+
+      <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Conta fisica del cassetto</div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4">
+        {TAGLI.map(function(t) {
+          return (
+            <div key={t} className="flex items-center gap-2">
+              <span className="text-sm text-gray-500 w-10 text-right">{t}&euro;</span>
+              <input type="number" min="0" step="1" value={tagli['t' + t]}
+                onChange={function(e) { setTaglio('t' + t, e.target.value); }}
+                className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-wine-500" />
+            </div>
+          );
+        })}
+        <div className="flex items-center gap-2">
+          <span className="text-sm text-gray-500 w-10 text-right">mon.</span>
+          <input type="number" min="0" step="0.01" placeholder="0,00" value={tagli.monete}
+            onChange={function(e) { setTaglio('monete', e.target.value); }}
+            className="w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm text-center focus:outline-none focus:ring-2 focus:ring-wine-500" />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 mb-5">
+        <CardNum titolo="Contato" valore={contato} colore="text-gray-900" grande={true} />
+        <div className={'rounded-xl border p-4 ' + (Math.abs(differenza) < 0.01 ? 'border-green-200 bg-green-50' : 'border-amber-300 bg-amber-50')}>
+          <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Differenza</div>
+          <div className={'text-2xl font-semibold ' + (Math.abs(differenza) < 0.01 ? 'text-green-700' : 'text-amber-700')}>
+            {differenza > 0 ? '+' : ''}{formatEuro(differenza)}
+          </div>
+          <div className="text-xs text-gray-400 mt-1">{Math.abs(differenza) < 0.01 ? 'la cassa quadra' : 'contato - teorico'}</div>
+        </div>
+      </div>
+
+      {Math.abs(differenza) >= 0.01 && (
+        <div className="mb-5">
+          <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Nota sulla differenza</div>
+          <input type="text" placeholder="Motivo della differenza..." value={notaDiff}
+            onChange={function(e) { setNotaDiff(e.target.value); }}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+        </div>
+      )}
+
+      {giaChiusa && (
+        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+          Giornata gia' chiusa (contato {formatEuro(giaChiusa.contato_contanti)}). Confermando di nuovo la sovrascrivi.
+        </div>
+      )}
+      {msg && (
+        <div className={'mb-4 p-3 rounded-lg text-sm ' + (msg.indexOf('Errore') === 0 ? 'bg-red-50 border border-red-200 text-red-800' : 'bg-green-50 border border-green-200 text-green-800')}>
+          {msg}
+        </div>
+      )}
+
+      {props.puoScrivere && (
+        <button onClick={handleChiudi} disabled={salvando}
+          className="w-full bg-wine-700 hover:bg-wine-800 disabled:bg-wine-300 text-white rounded-lg py-3 font-medium">
+          {salvando ? 'Salvataggio...' : 'Conferma e blocca la giornata'}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ═════════════════════════════════════════════════════════════
+// SCHEDA CASSAFORTE (saldo calcolato dai giri, sola lettura)
+// ═════════════════════════════════════════════════════════════
+function CassaforteTab() {
+  var [giri, setGiri] = useState([]);
+  var [loading, setLoading] = useState(true);
+
+  useEffect(function() {
+    supabase.from('cassa2_movimenti').select('*')
+      .eq('tipo', 'giro').eq('annullato', false)
+      .order('data', { ascending: false }).order('creato_il', { ascending: false })
+      .then(function(r) {
+        setLoading(false);
+        if (r.data) setGiri(r.data);
+      });
+  }, []);
+
+  var saldo = 0;
+  giri.forEach(function(g) {
+    if (g.giro_tipo === 'versa_cassaforte') saldo += g.importo;
+    if (g.giro_tipo === 'preleva_cassaforte') saldo -= g.importo;
+  });
+  saldo = arrotonda(saldo);
+
+  function nomeCassa(id) { return id === ID_RISTORANTE ? 'Ristorante' : (id === ID_RECEPTION ? 'Reception' : ''); }
+
+  return (
+    <div className="bg-white rounded-xl border border-gray-200 p-5 lg:p-6">
+      <h2 className="text-lg font-semibold text-gray-900 mb-4">Cassaforte</h2>
+      <div className="bg-wine-50 border border-wine-200 rounded-xl p-5 mb-5">
+        <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">Saldo attuale</div>
+        <div className="text-3xl font-semibold text-wine-800">{formatEuro(saldo)}</div>
+        <div className="text-xs text-gray-400 mt-1">calcolato da versamenti e prelievi</div>
+      </div>
+
+      <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Movimenti</div>
+      {loading ? (
+        <div className="text-sm text-gray-400 py-6 text-center">Caricamento...</div>
+      ) : giri.length === 0 ? (
+        <div className="text-sm text-gray-400 py-6 text-center">Nessun movimento di cassaforte. Si registrano con un "Giro" dalla cassa.</div>
+      ) : (
+        <div className="space-y-2">
+          {giri.map(function(g) {
+            var isVersa = g.giro_tipo === 'versa_cassaforte';
+            return (
+              <div key={g.id} className={'flex items-center gap-3 p-3 rounded-lg border ' + (isVersa ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50')}>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-gray-800">{isVersa ? 'Versamento' : 'Prelievo'} · {nomeCassa(g.cassa_id)}</div>
+                  <div className="text-xs text-gray-500">{g.data}{g.nota ? ' · ' + g.nota : ''}</div>
+                </div>
+                <div className={'font-semibold ' + (isVersa ? 'text-green-700' : 'text-red-700')}>{isVersa ? '+' : '-'}{formatEuro(g.importo)}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}

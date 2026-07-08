@@ -16,6 +16,7 @@ import SettingsPage from './pages/SettingsPage';
 import UserManagement from './pages/UserManagement';
 import ProfilePage from './pages/ProfilePage';
 import CassaPage from './pages/CassaPage';
+import CassaNuovaPage from './pages/CassaNuovaPage';
 import SalePage from './pages/SalePage';
 import OrdiniBordoPage from './pages/OrdiniBordoPage';
 import ListinoBordoPage from './pages/ListinoBordoPage';
@@ -179,8 +180,15 @@ function AppRoutes() {
           </ProtectedRoute>
         } />
 
-        {/* Cassa */}
+        {/* Cassa (nuova) */}
         <Route path="/cassa" element={
+          <ProtectedRoute feature="cassa">
+            <CassaNuovaPage />
+          </ProtectedRoute>
+        } />
+
+        {/* Cassa OLD (congelata, sola consultazione) */}
+        <Route path="/cassa-old" element={
           <ProtectedRoute feature="cassa">
             <CassaPage />
           </ProtectedRoute>
