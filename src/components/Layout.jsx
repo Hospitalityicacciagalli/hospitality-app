@@ -91,11 +91,18 @@ export default function Layout({ children }) {
     return navLinkBase + (isActive ? navLinkActive : navLinkInactive);
   }
 
+  // Voce attenuata (per "Cassa OLD"): piu' piccola e spenta.
+  function navClassOld(isActive) {
+    var base = 'flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium transition-colors ';
+    return base + (isActive ? 'bg-wine-800 text-white' : 'text-wine-400 hover:bg-wine-800 hover:text-wine-200');
+  }
+
+  // Cassa attiva se siamo su una qualunque /cassa/...
+  var cassaReceptionActive = location.pathname === '/cassa/reception' || location.pathname === '/cassa';
+  var cassaRistoranteActive = location.pathname === '/cassa/ristorante';
+
   // Per il menu Stipendi: e' attivo se siamo su una qualunque sotto-pagina
   var stipendiActive = location.pathname.indexOf('/stipendi') === 0;
-
-  // Per il menu Campagna: attivo su qualunque sotto-pagina campagna.
-  var campagnaActive = location.pathname.indexOf('/campagna') === 0;
 
   var showAdminSection = canView('impostazioni');
 
@@ -188,26 +195,35 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
+        {/* Cassa: due casse separate */}
         {canView('cassa') && (
           <NavLink
-            to="/cassa"
-            className={function(p) { return navClass(p.isActive); }}
+            to="/cassa/reception"
+            className={function() { return navClass(cassaReceptionActive); }}
             onClick={function() { setMobileOpen(false); }}>
             <span className="text-base">💰</span>
-            Cassa
+            Cassa Reception
           </NavLink>
         )}
 
         {canView('cassa') && (
           <NavLink
-            to="/cassa-old"
-            className={function(p) {
-              var base = 'flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-medium transition-colors ';
-              return base + (p.isActive ? 'bg-wine-800 text-white' : 'text-wine-400 hover:bg-wine-800 hover:text-wine-200');
-            }}
+            to="/cassa/ristorante"
+            className={function() { return navClass(cassaRistoranteActive); }}
             onClick={function() { setMobileOpen(false); }}>
-            <span className="text-base">🗄️</span>
-            Cassa OLD
+            <span className="text-base">🍽️</span>
+            Cassa Ristorante
+          </NavLink>
+        )}
+
+        {/* Cassaforte: permesso dedicato */}
+        {canView('cassaforte') && (
+          <NavLink
+            to="/cassaforte"
+            className={function(p) { return navClass(p.isActive); }}
+            onClick={function() { setMobileOpen(false); }}>
+            <span className="text-base">🏦</span>
+            Cassaforte
           </NavLink>
         )}
 
@@ -310,57 +326,6 @@ export default function Layout({ children }) {
           </>
         )}
 
-        {/* Campagna: voce principale + sotto-voci se attivo */}
-        {canView('campagna') && (
-          <>
-            <NavLink
-              to="/campagna/riepilogo"
-              className={function(p) {
-                var isActive = p.isActive || location.pathname === '/campagna';
-                return navClass(isActive);
-              }}
-              onClick={function() { setMobileOpen(false); }}>
-              <span className="text-base">🌾</span>
-              Campagna
-            </NavLink>
-            {campagnaActive && (
-              <div className="ml-3 pl-3 border-l border-wine-700 space-y-1">
-                <NavLink
-                  to="/campagna/riepilogo"
-                  className={function(p) {
-                    var base = 'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ';
-                    return base + (p.isActive ? 'bg-wine-800 text-white' : 'text-wine-300 hover:text-white');
-                  }}
-                  onClick={function() { setMobileOpen(false); }}>
-                  Riepilogo
-                </NavLink>
-                {canEdit('campagna') && (
-                  <NavLink
-                    to="/campagna/importa"
-                    className={function(p) {
-                      var base = 'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ';
-                      return base + (p.isActive ? 'bg-wine-800 text-white' : 'text-wine-300 hover:text-white');
-                    }}
-                    onClick={function() { setMobileOpen(false); }}>
-                    Importa
-                  </NavLink>
-                )}
-                {canEdit('campagna') && (
-                  <NavLink
-                    to="/campagna/stipendi"
-                    className={function(p) {
-                      var base = 'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ';
-                      return base + (p.isActive ? 'bg-wine-800 text-white' : 'text-wine-300 hover:text-white');
-                    }}
-                    onClick={function() { setMobileOpen(false); }}>
-                    In stipendi
-                  </NavLink>
-                )}
-              </div>
-            )}
-          </>
-        )}
-
         {showAdminSection && (
           <>
             <div className="text-wine-400 text-xs font-semibold uppercase tracking-wider px-3 mt-4 mb-2">Amministrazione</div>
@@ -372,6 +337,17 @@ export default function Layout({ children }) {
                 onClick={function() { setMobileOpen(false); }}>
                 <span className="text-base">⚙️</span>
                 Impostazioni
+              </NavLink>
+            )}
+
+            {/* Cassa OLD: congelata, sola consultazione */}
+            {canView('cassa') && (
+              <NavLink
+                to="/cassa-old"
+                className={function(p) { return navClassOld(p.isActive); }}
+                onClick={function() { setMobileOpen(false); }}>
+                <span className="text-base">🗄️</span>
+                Cassa OLD
               </NavLink>
             )}
           </>
