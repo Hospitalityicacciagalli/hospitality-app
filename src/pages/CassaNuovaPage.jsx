@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { useAuth } from '../lib/AuthContext';
+import { useAuth, defaultPermissionsForRole } from '../lib/AuthContext';
 import ConfermaPin from '../components/ConfermaPin';
 
 // ─────────────────────────────────────────────────────────────
@@ -155,6 +155,7 @@ function ModaleMovimento(props) {
   var esistente = props.movimento || null;
   var onSalvato = props.onSalvato;
   var onChiudi = props.onChiudi;
+  var onGestisci = props.onGestisci;
 
   var isRistorante = cassaId === ID_RISTORANTE;
   var isReception = cassaId === ID_RECEPTION;
@@ -309,7 +310,10 @@ function ModaleMovimento(props) {
 
           {tipo === 'spesa' && isRistorante && (
             <div>
-              <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Centro di costo</div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-xs font-medium text-gray-500 uppercase tracking-wide">Centro di costo</div>
+                <button type="button" onClick={function() { if (onGestisci) onGestisci(); }} className="text-xs text-wine-700 hover:underline">Gestisci</button>
+              </div>
               <div className="flex flex-wrap gap-2">
                 <button type="button" onClick={function() { setCentroId(''); }}
                   className={'px-3 py-1.5 rounded-lg text-sm border-2 ' + (centroId === '' ? 'border-wine-700 bg-wine-700 text-white' : 'border-gray-300 bg-white text-gray-600 hover:border-wine-400')}>
@@ -330,7 +334,10 @@ function ModaleMovimento(props) {
 
           {tipo === 'entrata' && isRistorante && tavoli.length > 0 && (
             <div>
-              <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Tavolo (opzionale)</div>
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-xs font-medium text-gray-500 uppercase tracking-wide">Tavolo (opzionale)</div>
+                <button type="button" onClick={function() { if (onGestisci) onGestisci(); }} className="text-xs text-wine-700 hover:underline">Gestisci</button>
+              </div>
               <SelettoreTavoli sale={sale} tavoli={tavoli} value={tavoloId} onChange={setTavoloId} mode="modal" />
             </div>
           )}
@@ -459,6 +466,9 @@ export default function CassaNuovaPage() {
   var userId = profile ? profile.id : null;
   var puoScrivere = auth.canEdit('cassa');
   var puoUsareCassaforte = auth.canEdit('cassaforte');
+  // Solo chi ha il permesso "Totali cassa" (persona affidabile) vede il totale
+  // "Movimenti di denaro" (l'incasso comprensivo di fattoria e caparre).
+  var puoVedereFlusso = auth.canView('totali_cassa');
 
   var cassaId = cassaDaSlug(params.quale);
   var isRistorante = cassaId === ID_RISTORANTE;
@@ -475,6 +485,8 @@ export default function CassaNuovaPage() {
   var [showForm, setShowForm] = useState(false);
   var [movimentoDaModificare, setMovimentoDaModificare] = useState(null);
   var [filtroTavolo, setFiltroTavolo] = useState('');
+  var [showPinGestione, setShowPinGestione] = useState(false);
+  var [msgGestione, setMsgGestione] = useState('');
 
   // riferimenti
   useEffect(function() {
@@ -576,6 +588,31 @@ export default function CassaNuovaPage() {
   function apriModifica(m) { setMovimentoDaModificare(m); setShowForm(true); }
   function vaiAllaAltra() { navigate('/cassa/' + (isRistorante ? 'reception' : 'ristorante')); }
 
+  // Livello del permesso variabili_cassa dell'utente che conferma col PIN
+  // (stessa logica di AuthContext: super_admin sempre write; jsonb se c'e',
+  // altrimenti default del ruolo).
+  function livelloVariabili(info) {
+    if (info.role === 'super_admin') return 'write';
+    var perms = (info.permissions && typeof info.permissions === 'object') ? info.permissions : defaultPermissionsForRole(info.role);
+    return perms['variabili_cassa'] || 'none';
+  }
+  function chiediGestione() {
+    setMsgGestione('');
+    setShowForm(false);
+    setMovimentoDaModificare(null);
+    setShowPinGestione(true);
+  }
+  function onPinGestione(info) {
+    if (livelloVariabili(info) !== 'write') {
+      setShowPinGestione(false);
+      setMsgGestione('L\'utente scelto non ha il permesso per gestire le variabili cassa.');
+      return;
+    }
+    setShowPinGestione(false);
+    auth.attivaElevazione(info);
+    navigate('/variabili-cassa');
+  }
+
   var tabs = [{ id: 'movimenti', label: 'Movimenti' }, { id: 'chiusura', label: 'Chiusura' }];
 
   return (
@@ -587,6 +624,10 @@ export default function CassaNuovaPage() {
           className="px-3 py-1.5 rounded-lg text-sm border border-gray-300 text-gray-600 hover:bg-gray-50">
           Vai a Cassa {isRistorante ? 'Reception' : 'Ristorante'} &rarr;
         </button>
+        <button onClick={chiediGestione}
+          className="px-3 py-1.5 rounded-lg text-sm border border-gray-300 text-gray-600 hover:bg-gray-50">
+          ⚙️ Gestisci
+        </button>
         <div className="flex items-center gap-1 ml-auto">
           <button onClick={function() { setData(spostaData(data, -1)); }} className="px-2 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">&lsaquo;</button>
           <input type="date" value={data} onChange={function(e) { setData(e.target.value); }}
@@ -594,6 +635,10 @@ export default function CassaNuovaPage() {
           <button onClick={function() { setData(spostaData(data, 1)); }} className="px-2 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">&rsaquo;</button>
         </div>
       </div>
+
+      {msgGestione && (
+        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">{msgGestione}</div>
+      )}
 
       <div className="flex gap-1 border-b border-gray-200 mb-5">
         {tabs.map(function(t) {
@@ -610,8 +655,10 @@ export default function CassaNuovaPage() {
       {sezione === 'movimenti' && (
         <div>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
-            <CardNum titolo="Incasso ufficiale" valore={ufficiale} colore="text-green-700" grande={true} sub="scontrini + fatture" />
-            <CardNum titolo="Incasso reale" valore={reale} colore="text-wine-700" grande={true} sub="+ fattoria e caparre" />
+            <CardNum titolo="INCASSO" valore={ufficiale} colore="text-green-700" grande={true} sub="scontrini + fatture" />
+            {puoVedereFlusso && (
+              <CardNum titolo="Movimenti di denaro" valore={reale} colore="text-wine-700" grande={true} />
+            )}
             <CardNum titolo="Spese" valore={spese} colore="text-red-600" />
             <CardNum titolo="Contanti in cassa" valore={contantiInCassa} colore="text-gray-900" sub={'fondo ' + formatEuro(fondoApertura)} />
           </div>
@@ -658,9 +705,17 @@ export default function CassaNuovaPage() {
           cassaId={cassaId} data={data} centri={centri} sale={sale} tavoli={tavoli} eventi={eventi}
           userId={userId} puoUsareCassaforte={puoUsareCassaforte}
           movimento={movimentoDaModificare}
+          onGestisci={chiediGestione}
           onSalvato={handleSalvato}
           onChiudi={function() { setShowForm(false); setMovimentoDaModificare(null); }} />
       )}
+
+      <ConfermaPin
+        open={showPinGestione}
+        title="Gestione variabili cassa"
+        message="Scegli il tuo nome e inserisci il PIN per aprire la gestione di sale, tavoli e centri di costo."
+        onCancel={function() { setShowPinGestione(false); }}
+        onConfirmed={onPinGestione} />
     </div>
   );
 }
@@ -741,7 +796,7 @@ function ChiusuraTab(props) {
 
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
           <CardNum titolo="Fondo apertura" valore={props.fondoApertura} colore="text-gray-600" />
-          <CardNum titolo="Incasso ufficiale" valore={props.ufficiale} colore="text-green-700" />
+          <CardNum titolo="INCASSO" valore={props.ufficiale} colore="text-green-700" />
           <CardNum titolo="Spese" valore={props.spese} colore="text-red-600" />
           <CardNum titolo="Teorico contanti" valore={teorico} colore="text-gray-900" grande={true} />
         </div>

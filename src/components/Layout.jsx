@@ -227,6 +227,17 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
+        {/* Variabili cassa: sale, tavoli, centri di costo */}
+        {canView('variabili_cassa') && (
+          <NavLink
+            to="/variabili-cassa"
+            className={function(p) { return navClass(p.isActive); }}
+            onClick={function() { setMobileOpen(false); }}>
+            <span className="text-base">🧩</span>
+            Variabili cassa
+          </NavLink>
+        )}
+
         {canView('ordini_bordo') && (
           <NavLink
             to="/ordini-bordo"
@@ -337,17 +348,6 @@ export default function Layout({ children }) {
                 onClick={function() { setMobileOpen(false); }}>
                 <span className="text-base">⚙️</span>
                 Impostazioni
-              </NavLink>
-            )}
-
-            {/* Cassa OLD: congelata, sola consultazione */}
-            {canView('cassa') && (
-              <NavLink
-                to="/cassa-old"
-                className={function(p) { return navClassOld(p.isActive); }}
-                onClick={function() { setMobileOpen(false); }}>
-                <span className="text-base">🗄️</span>
-                Cassa OLD
               </NavLink>
             )}
           </>
