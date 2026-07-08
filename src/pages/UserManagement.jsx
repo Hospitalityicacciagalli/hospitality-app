@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useAuth, FEATURES, defaultPermissionsForRole } from '../lib/AuthContext';
+import { useAuth, FEATURES, defaultPermissionsForRole, featureRichiedeLoginReale } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase';
 
 var EDGE_FUNCTION_URL = 'https://ddarqzyymrgqmdwiyzde.supabase.co/functions/v1/admin-user-management';
@@ -759,16 +759,37 @@ export default function UserManagement() {
               </div>
 
               {/* Matrice funzioni */}
+              <p className="text-xs text-gray-500 mb-2">
+                Le voci evidenziate in <span className="text-amber-700 font-medium">ambra</span> richiedono il <strong>login reale</strong>:
+                il PIN (Funzione C) non le sblocca, servono le credenziali dell'utente.
+              </p>
               <div className="space-y-2">
                 {FEATURES.map(function(f) {
                   var opts = f.type === 'cassa' ? LEVEL_OPTIONS_CASSA : LEVEL_OPTIONS_STANDARD;
+                  var loginReale = featureRichiedeLoginReale(f.key);
                   return (
-                    <div key={f.key} className="flex items-center justify-between gap-3 py-1.5 border-b border-gray-100">
-                      <span className="text-sm text-gray-800">{f.label}</span>
+                    <div key={f.key} className={
+                      'flex items-center justify-between gap-3 py-1.5 px-2 rounded-lg ' +
+                      (loginReale
+                        ? 'bg-amber-50 border border-amber-200'
+                        : 'border-b border-gray-100')
+                    }>
+                      <span className={'text-sm flex items-center gap-1.5 ' + (loginReale ? 'text-amber-900 font-medium' : 'text-gray-800')}>
+                        {loginReale && <span aria-hidden="true">🔒</span>}
+                        {f.label}
+                        {loginReale && (
+                          <span className="text-[10px] uppercase tracking-wide bg-amber-200 text-amber-800 px-1.5 py-0.5 rounded">
+                            solo login reale
+                          </span>
+                        )}
+                      </span>
                       <select
                         value={permMatrix[f.key] || 'none'}
                         onChange={function(e) { setFeatureLevel(f.key, e.target.value); }}
-                        className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 min-w-[170px]"
+                        className={
+                          'px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 min-w-[170px] ' +
+                          (loginReale ? 'border-amber-300 bg-white' : 'border-gray-300')
+                        }
                       >
                         {opts.map(function(o) {
                           return <option key={o.value} value={o.value}>{o.label}</option>;
