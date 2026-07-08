@@ -713,7 +713,7 @@ export default function CampagnaRiepilogoPage() {
         </>
       )}
 
-      {/* Modale salva vista */}
+      {/* Modale salva vista_ */}
       {showSalva && (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm">
