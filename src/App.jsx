@@ -31,6 +31,7 @@ import ImportPrenotazioniPage from './pages/ImportPrenotazioniPage';
 import LimitiPage from './pages/LimitiPage';
 import CampagnaImportaPage from './pages/CampagnaImportaPage';
 import CampagnaRiepilogoPage from './pages/CampagnaRiepilogoPage';
+import CampagnaStipendiPage from './pages/CampagnaStipendiPage';
 
 function ProtectedRoute({ children, feature, requireEdit }) {
   var { session, loading, canView, canEdit } = useAuth();
@@ -255,6 +256,11 @@ function AppRoutes() {
         <Route path="/campagna/importa" element={
           <ProtectedRoute feature="campagna" requireEdit>
             <CampagnaImportaPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/campagna/stipendi" element={
+          <ProtectedRoute feature="campagna" requireEdit>
+            <CampagnaStipendiPage />
           </ProtectedRoute>
         } />
 
