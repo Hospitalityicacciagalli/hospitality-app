@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { ChevronLeft, ChevronRight, Plus, Trash2, X, Banknote, Coins, Calendar, RefreshCw, AlertCircle, ArrowDown, ArrowUp, Save } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Trash2, X, Banknote, Coins, Calendar, RefreshCw, AlertCircle, ArrowDown, ArrowUp, Save, Search } from 'lucide-react';
 
 // ============================================================
 // PAGINA STIPENDI -> MESE
@@ -45,6 +45,12 @@ export default function StipendiMesePage() {
   var oggi = new Date();
   var [anno, setAnno] = useState(oggi.getFullYear());
   var [mese, setMese] = useState(oggi.getMonth() + 1);
+
+  // Filtro di sola visualizzazione per nominativo.
+  // Quando valorizzato mostra soltanto le righe il cui nome contiene il testo,
+  // cosi' pagando una persona non si vedono gli stipendi altrui.
+  // Non e' una barriera di sicurezza: chi accede alla pagina puo' azzerarlo.
+  var [filtroNome, setFiltroNome] = useState('');
 
   var [loading, setLoading] = useState(true);
   var [members, setMembers] = useState([]);          // anagrafica staff con profilo
@@ -283,6 +289,20 @@ export default function StipendiMesePage() {
     return members.find(function(m) { return m.staff_id === staffId; });
   }
 
+  // Il dipendente passa il filtro nominativo? (filtro vuoto = passano tutti)
+  // Confronta sia "Cognome Nome" sia "Nome Cognome" per comodita'.
+  function nomeMatch(staffId) {
+    var q = filtroNome.trim().toLowerCase();
+    if (!q) return true;
+    var p = getProfilo(staffId);
+    if (!p || !p.staff) return false;
+    var cognome = (p.staff.last_name || '').toLowerCase();
+    var nome = (p.staff.first_name || '').toLowerCase();
+    var a = (cognome + ' ' + nome).trim();
+    var b = (nome + ' ' + cognome).trim();
+    return a.indexOf(q) !== -1 || b.indexOf(q) !== -1;
+  }
+
   function totaleRiga(riga) {
     if (!riga) return 0;
     return parseNum(riga.conteggio_euro) + parseNum(riga.extra) + parseNum(riga.riporto_precedente) + parseNum(riga.tfr);
@@ -443,6 +463,7 @@ export default function StipendiMesePage() {
   function totaliColonna() {
     var tot = { conteggio: 0, extra: 0, riporto: 0, tfr: 0, totale: 0, busta: 0, bonifici: 0, contanti: 0, restanoBon: 0, restanoCnt: 0 };
     righe.forEach(function(r) {
+      if (!nomeMatch(r.staff_id)) return;
       tot.conteggio += parseNum(r.conteggio_euro);
       tot.extra += parseNum(r.extra);
       tot.riporto += parseNum(r.riporto_precedente);
@@ -475,15 +496,23 @@ export default function StipendiMesePage() {
   var tot = totaliColonna();
   var aggiungibili = dipendentiAggiungibili();
 
-  // Raggruppa righe per settore (in ordine: come da members)
+  // Conteggi "visibili" (rispettano il filtro nominativo) per la card in alto.
+  var righeVisibili = righe.filter(function(r) { return nomeMatch(r.staff_id); });
+  var membersVisibili = members.filter(function(m) { return nomeMatch(m.staff_id); });
+
+  // Raggruppa righe per settore (in ordine: come da members),
+  // includendo solo i nominativi che passano il filtro.
   var righePerSettore = {};
   members.forEach(function(p) {
+    if (!nomeMatch(p.staff_id)) return;
     var riga = getRiga(p.staff_id);
     if (!riga) return;
     var settore = p.settore_paghe || 'Altri';
     if (!righePerSettore[settore]) righePerSettore[settore] = [];
     righePerSettore[settore].push({ profilo: p, riga: riga });
   });
+
+  var filtroAttivo = filtroNome.trim() !== '';
 
   return (
     <div className="p-4 sm:p-6 max-w-full">
@@ -537,7 +566,9 @@ export default function StipendiMesePage() {
         </div>
         <div className="bg-white border border-gray-200 rounded-xl p-3">
           <div className="text-xs text-gray-500 uppercase tracking-wide">Dipendenti</div>
-          <div className="text-lg font-bold text-gray-900 mt-1">{righe.length}/{members.length}</div>
+          <div className="text-lg font-bold text-gray-900 mt-1">
+            {filtroAttivo ? (righeVisibili.length + '/' + membersVisibili.length) : (righe.length + '/' + members.length)}
+          </div>
         </div>
       </div>
 
@@ -596,6 +627,33 @@ export default function StipendiMesePage() {
         </div>
       )}
 
+      {/* Filtro per nominativo (sola visualizzazione) */}
+      <div className="mb-3 flex items-center gap-2 flex-wrap">
+        <div className="relative">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          <input
+            type="text"
+            value={filtroNome}
+            onChange={function(e) { setFiltroNome(e.target.value); }}
+            placeholder="Filtra per nominativo..."
+            className="w-72 max-w-full border border-gray-200 rounded-lg pl-9 pr-9 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-300" />
+          {filtroAttivo && (
+            <button
+              onClick={function() { setFiltroNome(''); }}
+              title="Mostra tutti"
+              className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-gray-400 hover:text-gray-700 hover:bg-gray-100 rounded">
+              <X size={15} />
+            </button>
+          )}
+        </div>
+        {filtroAttivo && (
+          <span className="text-xs text-gray-500">
+            Mostro solo chi contiene &ldquo;<span className="font-medium text-gray-700">{filtroNome}</span>&rdquo;.
+            <button onClick={function() { setFiltroNome(''); }} className="ml-1 text-wine-700 hover:underline">Mostra tutti</button>
+          </span>
+        )}
+      </div>
+
       {/* Tabella */}
       <div className="bg-white border border-gray-200 rounded-xl">
         <div className="overflow-x-auto">
@@ -619,7 +677,15 @@ export default function StipendiMesePage() {
               </tr>
             </thead>
             <tbody>
-              {Object.keys(righePerSettore).length === 0 && (
+              {Object.keys(righePerSettore).length === 0 && filtroAttivo && (
+                <tr>
+                  <td colSpan={14} className="px-3 py-8 text-center text-gray-400 italic">
+                    Nessun nominativo corrisponde a &ldquo;{filtroNome}&rdquo;.
+                    <button onClick={function() { setFiltroNome(''); }} className="ml-1 text-wine-700 hover:underline not-italic">Mostra tutti</button>
+                  </td>
+                </tr>
+              )}
+              {Object.keys(righePerSettore).length === 0 && !filtroAttivo && (
                 <tr>
                   <td colSpan={14} className="px-3 py-8 text-center text-gray-400 italic">
                     Nessun dipendente configurato. Vai su Stipendi → Dipendenti per impostare i profili paghe.
@@ -773,7 +839,7 @@ export default function StipendiMesePage() {
               })}
 
               {/* Riga totali */}
-              {righe.length > 0 && (
+              {righeVisibili.length > 0 && (
                 <tr className="bg-gray-100 border-t-2 border-gray-300 font-semibold">
                   <td className="sticky left-0 z-10 bg-gray-100 border-r border-gray-200 px-3 py-2 text-gray-700">TOTALI</td>
                   <td className="px-3 py-2"></td>
