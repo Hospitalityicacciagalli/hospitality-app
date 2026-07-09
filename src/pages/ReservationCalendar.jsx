@@ -232,7 +232,7 @@ function ReservationCalendar() {
       </div>
 
       {/* Legenda */}
-      <div className="flex items-center gap-4 mb-3 text-xs text-gray-500 px-1">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 mb-3 text-xs text-gray-500 px-1">
         <span className="flex items-center gap-1">
           <span className="w-3 h-3 rounded bg-wine-200 inline-block"></span> Pranzo
         </span>
@@ -259,7 +259,7 @@ function ReservationCalendar() {
         <div className="grid grid-cols-7 border-b border-gray-200">
           {DAY_NAMES.map(function(day) {
             return (
-              <div key={day} className="py-2 text-center text-sm font-medium text-gray-500 border-r border-gray-100 last:border-r-0">
+              <div key={day} className="min-w-0 py-2 text-center text-[11px] sm:text-sm font-medium text-gray-500 border-r border-gray-100 last:border-r-0">
                 {day}
               </div>
             )
@@ -299,7 +299,7 @@ function ReservationCalendar() {
                     }
                   }}
                   className={
-                    "border-b border-r border-gray-100 p-1 min-h-[100px] lg:min-h-[120px] transition-colors " +
+                    "min-w-0 border-b border-r border-gray-100 p-1 min-h-[68px] sm:min-h-[100px] lg:min-h-[120px] transition-colors " +
                     (inMonth ? "cursor-pointer hover:bg-gray-50 " : "bg-gray-50 opacity-40 ") +
                     (inMonth && hasAlert ? "bg-amber-50 " : (inMonth && hasMissing ? "bg-indigo-50 " : "")) +
                     (isToday ? "ring-2 ring-inset ring-wine-500 " : "")
@@ -315,18 +315,36 @@ function ReservationCalendar() {
                       {d.getDate()}
                     </span>
                     {/* Indicatori alert ed eventi */}
-                    <div className="flex items-center gap-0.5">
-                      {hasAlert && <AlertTriangle size={12} className="text-amber-500" />}
-                      {hasMissing && <HelpCircle size={12} className="text-indigo-500" />}
+                    <div className="flex items-center flex-wrap justify-end gap-0.5 min-w-0">
+                      {hasAlert && <AlertTriangle size={12} className="text-amber-500 flex-shrink-0" />}
+                      {hasMissing && <HelpCircle size={12} className="text-indigo-500 flex-shrink-0" />}
                       {dayEvents.length > 0 && dayEvents.map(function(ev, evIdx) {
                         if (ev.event_type === 'confirmed') {
-                          return <Star key={evIdx} size={12} className="text-amber-500 fill-amber-500" />
+                          return <Star key={evIdx} size={12} className="text-amber-500 fill-amber-500 flex-shrink-0" />
                         }
-                        return <Clock key={evIdx} size={12} className="text-blue-500" />
+                        return <Clock key={evIdx} size={12} className="text-blue-500 flex-shrink-0" />
                       })}
                     </div>
                   </div>
 
+                  {/* MOBILE: due numeri pranzo/cena compatti (dettaglio al tocco) */}
+                  <div className="sm:hidden space-y-0.5">
+                    {lunchData && (
+                      <div className="flex items-center gap-1 min-w-0">
+                        <span className="w-1.5 h-3 rounded-sm bg-wine-300 flex-shrink-0"></span>
+                        <span className="text-[11px] font-bold text-wine-800 leading-none truncate">{lunchData.total}</span>
+                      </div>
+                    )}
+                    {dinnerData && (
+                      <div className="flex items-center gap-1 min-w-0">
+                        <span className="w-1.5 h-3 rounded-sm bg-wine-600 flex-shrink-0"></span>
+                        <span className="text-[11px] font-bold text-wine-900 leading-none truncate">{dinnerData.total}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* DESKTOP/iPad: vista ricca */}
+                  <div className="hidden sm:block">
                   {/* Dati pranzo */}
                   {lunchData && (
                     <div className="bg-wine-50 rounded px-1.5 py-0.5 mb-0.5">
@@ -360,6 +378,7 @@ function ReservationCalendar() {
                       </div>
                     )
                   })}
+                  </div>
                 </div>
               )
             })}

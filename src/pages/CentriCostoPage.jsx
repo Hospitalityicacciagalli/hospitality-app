@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import * as XLSX from 'xlsx';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../lib/AuthContext';
 
@@ -153,27 +154,39 @@ export default function CentriCostoPage() {
     });
   }
 
-  function esportaCSV() {
+  function esportaExcel() {
+    // Foglio 1: dettaglio delle spese filtrate
     var head = ['Data', 'Cassa', 'Centro di costo', 'Importo', 'Pagamento', 'Causale', 'Nota'];
-    var lines = [head.join(';')];
+    var aoa = [head];
     speseFiltrate.forEach(function(m) {
-      var centro = m.centro_di_costo_id ? nomeCentro(m.centro_di_costo_id) : 'SENZA CENTRO';
-      var vals = [m.data, nomeCassa(m.cassa_id), centro, String(arrotonda(m.importo)).replace('.', ','), labelPagamento(m.pagamento), (m.da_causale || ''), (m.nota || '')];
-      vals = vals.map(function(v) {
-        v = (v == null ? '' : String(v));
-        if (/[";\n\r]/.test(v)) v = '"' + v.replace(/"/g, '""') + '"';
-        return v;
-      });
-      lines.push(vals.join(';'));
+      aoa.push([
+        m.data,
+        nomeCassa(m.cassa_id),
+        m.centro_di_costo_id ? nomeCentro(m.centro_di_costo_id) : 'SENZA CENTRO',
+        arrotonda(m.importo),
+        labelPagamento(m.pagamento),
+        m.da_causale || '',
+        m.nota || ''
+      ]);
     });
-    var csv = '\ufeff' + lines.join('\r\n');
-    var blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    var url = URL.createObjectURL(blob);
-    var a = document.createElement('a');
-    a.href = url;
-    a.download = 'spese_centri_' + anno + (mese ? ('_' + due(mese)) : '') + '.csv';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    var wsDett = XLSX.utils.aoa_to_sheet(aoa);
+    wsDett['!cols'] = [{ wch: 11 }, { wch: 12 }, { wch: 22 }, { wch: 11 }, { wch: 11 }, { wch: 24 }, { wch: 24 }];
+
+    // Foglio 2: totali per centro
+    var aoa2 = [['Centro di costo', 'Totale', 'N. movimenti', '% sul totale']];
+    righeAgg.forEach(function(r) {
+      var pctTot = totale > 0 ? Math.round(r.tot / totale * 100) : 0;
+      aoa2.push([r.nome, arrotonda(r.tot), r.n, pctTot + '%']);
+    });
+    aoa2.push(['TOTALE', arrotonda(totale), speseFiltrate.length, '100%']);
+    var wsAgg = XLSX.utils.aoa_to_sheet(aoa2);
+    wsAgg['!cols'] = [{ wch: 22 }, { wch: 12 }, { wch: 13 }, { wch: 12 }];
+
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, wsAgg, 'Per centro');
+    XLSX.utils.book_append_sheet(wb, wsDett, 'Dettaglio');
+    var nomeFile = 'spese_centri_' + anno + (mese ? ('_' + due(mese)) : '') + '.xlsx';
+    XLSX.writeFile(wb, nomeFile);
   }
 
   // lista per il revisore (con eventuale "solo senza centro")
@@ -270,8 +283,8 @@ export default function CentriCostoPage() {
         <div>
           <div className="flex items-center justify-between mb-3">
             <div className="text-sm text-gray-500">{loading ? 'Caricamento...' : 'Ripartizione per centro'}</div>
-            <button onClick={esportaCSV} className="px-4 py-2 border-2 border-wine-700 text-wine-700 hover:bg-wine-50 rounded-lg text-sm font-medium">
-              ⬇ Esporta CSV (Excel)
+            <button onClick={esportaExcel} className="px-4 py-2 border-2 border-wine-700 text-wine-700 hover:bg-wine-50 rounded-lg text-sm font-medium">
+              ⬇ Esporta Excel
             </button>
           </div>
 
@@ -307,8 +320,8 @@ export default function CentriCostoPage() {
               <input type="checkbox" checked={soloSenza} onChange={function(e) { setSoloSenza(e.target.checked); }} className="w-4 h-4 accent-amber-600" />
               Mostra solo le spese senza centro
             </label>
-            <button onClick={esportaCSV} className="px-4 py-2 border-2 border-wine-700 text-wine-700 hover:bg-wine-50 rounded-lg text-sm font-medium">
-              ⬇ Esporta CSV (Excel)
+            <button onClick={esportaExcel} className="px-4 py-2 border-2 border-wine-700 text-wine-700 hover:bg-wine-50 rounded-lg text-sm font-medium">
+              ⬇ Esporta Excel
             </button>
           </div>
 
