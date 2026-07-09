@@ -712,7 +712,7 @@ export default function StipendiMesePage() {
           <table className="min-w-full text-sm border-separate border-spacing-0">
             <thead className="text-xs uppercase tracking-wide text-gray-600">
               <tr>
-                <th className="sticky top-0 left-0 z-30 bg-gray-50 border-b border-r border-gray-200 px-3 py-2 text-left">Nominativo</th>
+                <th className="sticky top-0 left-0 z-30 bg-gray-50 border-b border-r-2 border-gray-200 px-3 py-2 text-left w-36 min-w-[9rem] max-w-[9rem]">Nominativo</th>
                 <th className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2 text-right">Ore</th>
                 <th className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2 text-right">Conteggio €</th>
                 <th className="sticky top-0 z-20 bg-gray-50 border-b border-gray-200 px-3 py-2 text-right">Extra</th>
@@ -756,10 +756,10 @@ export default function StipendiMesePage() {
                       className="bg-wine-50 cursor-pointer hover:bg-wine-100 select-none">
                       {isCollapsed ? (
                         <>
-                          <td className="sticky left-0 z-10 bg-wine-50 border-r border-gray-100 px-3 py-1.5 text-xs font-semibold text-wine-800 uppercase tracking-wide whitespace-nowrap">
-                            <div className="flex items-center gap-1">
+                          <td className="sticky left-0 z-10 bg-wine-50 border-r-2 border-gray-200 px-3 py-1.5 text-xs font-semibold text-wine-800 uppercase tracking-wide w-36 min-w-[9rem] max-w-[9rem]">
+                            <div className="flex items-center gap-1 min-w-0">
                               <ChevronRight size={14} className="text-wine-500 flex-shrink-0" />
-                              {settore} <span className="text-wine-500 font-normal">({lista.length})</span>
+                              <span className="truncate">{settore} <span className="text-wine-500 font-normal">({lista.length})</span></span>
                             </div>
                           </td>
                           <td className="px-3 py-1.5 text-right text-xs font-semibold text-wine-800 whitespace-nowrap">{st.ore > 0 ? st.ore : ''}</td>
@@ -798,13 +798,14 @@ export default function StipendiMesePage() {
 
                       return (
                         <tr key={r.id} className="border-b border-gray-100 hover:bg-gray-50">
-                          <td className="sticky left-0 z-10 bg-white border-r border-gray-100 px-3 py-2 whitespace-nowrap font-medium text-gray-900">
-                            <div className="flex items-center gap-1.5">
+                          <td title={p.staff.last_name + ' ' + p.staff.first_name}
+                            className="sticky left-0 z-10 bg-white border-r-2 border-gray-200 px-3 py-2 w-36 min-w-[9rem] max-w-[9rem] font-medium text-gray-900">
+                            <div className="flex items-center gap-1.5 min-w-0">
                               <span className={
-                                'w-1.5 h-1.5 rounded-full ' +
+                                'w-1.5 h-1.5 rounded-full flex-shrink-0 ' +
                                 (p.tipo === 'campagna' ? 'bg-emerald-500' : 'bg-blue-500')
                               }></span>
-                              {p.staff.last_name} {p.staff.first_name}
+                              <span className="truncate">{p.staff.last_name} {p.staff.first_name}</span>
                             </div>
                           </td>
                           <td className="px-2 py-1">
@@ -925,7 +926,7 @@ export default function StipendiMesePage() {
               {/* Riga totali */}
               {righeVisibili.length > 0 && (
                 <tr className="bg-gray-100 border-t-2 border-gray-300 font-semibold">
-                  <td className="sticky left-0 z-10 bg-gray-100 border-r border-gray-200 px-3 py-2 text-gray-700">TOTALI</td>
+                  <td className="sticky left-0 z-10 bg-gray-100 border-r-2 border-gray-200 px-3 py-2 text-gray-700 w-36 min-w-[9rem] max-w-[9rem]">TOTALI</td>
                   <td className="px-3 py-2"></td>
                   <td className="px-3 py-2 text-right text-gray-700">{fmtEuro(tot.conteggio)}</td>
                   <td className="px-3 py-2 text-right text-gray-700">{fmtEuro(tot.extra)}</td>
