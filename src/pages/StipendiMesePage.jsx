@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
-import { ChevronLeft, ChevronRight, Plus, Trash2, X, Banknote, Coins, Calendar, RefreshCw, AlertCircle, ArrowDown, ArrowUp, Save, Search } from 'lucide-react';
+import { ChevronLeft, ChevronRight, ChevronDown, Plus, Trash2, X, Banknote, Coins, Calendar, RefreshCw, AlertCircle, ArrowDown, ArrowUp, Save, Search } from 'lucide-react';
 
 // ============================================================
 // PAGINA STIPENDI -> MESE
@@ -61,6 +61,9 @@ export default function StipendiMesePage() {
   var [meseScorsoMap, setMeseScorsoMap] = useState({}); // staff_id -> restano in contanti del mese prima
 
   var [showAddDipendente, setShowAddDipendente] = useState(false);
+
+  // Settori chiusi (collassati). Chiave = nome settore, valore = true se chiuso.
+  var [collassati, setCollassati] = useState({});
 
   // Movimenti popup
   var [movPopup, setMovPopup] = useState(null);      // { staff_id, tipo } o null
@@ -478,6 +481,46 @@ export default function StipendiMesePage() {
     return tot;
   }
 
+  // Apre/chiude un settore
+  function toggleSettore(settore) {
+    setCollassati(function(prev) {
+      var next = {};
+      for (var k in prev) next[k] = prev[k];
+      next[settore] = !next[settore];
+      return next;
+    });
+  }
+
+  function chiudiTutti(settori) {
+    var next = {};
+    settori.forEach(function(s) { next[s] = true; });
+    setCollassati(next);
+  }
+
+  function apriTutti() {
+    setCollassati({});
+  }
+
+  // Subtotali di un settore (stessa forma dei totali di colonna)
+  function totaliLista(lista) {
+    var t = { ore: 0, conteggio: 0, extra: 0, riporto: 0, tfr: 0, totale: 0, busta: 0, bonifici: 0, contanti: 0, restanoBon: 0, restanoCnt: 0 };
+    lista.forEach(function(item) {
+      var r = item.riga;
+      t.ore += parseNum(r.ore);
+      t.conteggio += parseNum(r.conteggio_euro);
+      t.extra += parseNum(r.extra);
+      t.riporto += parseNum(r.riporto_precedente);
+      t.tfr += parseNum(r.tfr);
+      t.totale += totaleRiga(r);
+      t.busta += bustaDaUsare(r);
+      t.bonifici += sommaBonifici(r.staff_id);
+      t.contanti += sommaContanti(r.staff_id);
+      t.restanoBon += restanoDaBonificare(r);
+      t.restanoCnt += restanoInContanti(r);
+    });
+    return t;
+  }
+
   // Dipendenti con profilo che NON sono ancora nella lista del mese
   function dipendentiAggiungibili() {
     var inMese = {};
@@ -654,6 +697,15 @@ export default function StipendiMesePage() {
         )}
       </div>
 
+      {/* Comandi apri/chiudi settori */}
+      {Object.keys(righePerSettore).length > 0 && (
+        <div className="mb-2 flex items-center gap-3 text-xs">
+          <span className="text-gray-400">Settori:</span>
+          <button onClick={apriTutti} className="text-wine-700 hover:underline font-medium">Apri tutti</button>
+          <button onClick={function() { chiudiTutti(Object.keys(righePerSettore)); }} className="text-wine-700 hover:underline font-medium">Chiudi tutti</button>
+        </div>
+      )}
+
       {/* Tabella */}
       <div className="bg-white border border-gray-200 rounded-xl">
         <div className="overflow-x-auto">
@@ -694,14 +746,46 @@ export default function StipendiMesePage() {
               )}
               {Object.keys(righePerSettore).map(function(settore) {
                 var lista = righePerSettore[settore];
+                var isCollapsed = !!collassati[settore];
+                var st = totaliLista(lista);
+                var diffSet = st.totale - st.busta;
                 return (
-                  <>
-                    <tr key={'sett-' + settore} className="bg-wine-50">
-                      <td colSpan={14} className="sticky left-0 z-10 bg-wine-50 px-3 py-1.5 text-xs font-semibold text-wine-800 uppercase tracking-wide">
-                        {settore} <span className="text-wine-500 font-normal">({lista.length})</span>
-                      </td>
+                  <Fragment key={'sett-' + settore}>
+                    <tr
+                      onClick={function() { toggleSettore(settore); }}
+                      className="bg-wine-50 cursor-pointer hover:bg-wine-100 select-none">
+                      {isCollapsed ? (
+                        <>
+                          <td className="sticky left-0 z-10 bg-wine-50 border-r border-gray-100 px-3 py-1.5 text-xs font-semibold text-wine-800 uppercase tracking-wide whitespace-nowrap">
+                            <div className="flex items-center gap-1">
+                              <ChevronRight size={14} className="text-wine-500 flex-shrink-0" />
+                              {settore} <span className="text-wine-500 font-normal">({lista.length})</span>
+                            </div>
+                          </td>
+                          <td className="px-3 py-1.5 text-right text-xs font-semibold text-wine-800 whitespace-nowrap">{st.ore > 0 ? st.ore : ''}</td>
+                          <td className="px-3 py-1.5 text-right text-xs font-semibold text-wine-900 whitespace-nowrap">{fmtEuro(st.conteggio)}</td>
+                          <td className="px-3 py-1.5 text-right text-xs font-semibold text-wine-800 whitespace-nowrap">{fmtEuro(st.extra)}</td>
+                          <td className="px-3 py-1.5 text-right text-xs font-semibold text-wine-800 whitespace-nowrap">{fmtEuro(st.riporto)}</td>
+                          <td className="px-3 py-1.5 text-right text-xs font-semibold text-wine-800 whitespace-nowrap">{fmtEuro(st.tfr)}</td>
+                          <td className="px-3 py-1.5 text-right text-xs font-bold text-wine-900 bg-wine-100 whitespace-nowrap">{fmtEuro(st.totale)}</td>
+                          <td className="px-3 py-1.5 text-right text-xs font-semibold text-wine-800 whitespace-nowrap">{fmtEuro(st.busta)}</td>
+                          <td className="px-3 py-1.5 text-right text-xs font-semibold text-wine-800 whitespace-nowrap">{Math.abs(diffSet) < 0.01 ? '—' : (diffSet > 0 ? '+' : '') + fmtEuro(diffSet)}</td>
+                          <td className="px-3 py-1.5 text-right text-xs font-semibold text-blue-700 bg-blue-50 whitespace-nowrap">{fmtEuro(st.bonifici)}</td>
+                          <td className="px-3 py-1.5 text-right text-xs font-semibold text-blue-700 bg-blue-50 whitespace-nowrap">{fmtEuro(st.restanoBon)}</td>
+                          <td className="px-3 py-1.5 text-right text-xs font-semibold text-emerald-700 bg-emerald-50 whitespace-nowrap">{fmtEuro(st.contanti)}</td>
+                          <td className="px-3 py-1.5 text-right text-xs font-semibold text-emerald-700 bg-emerald-50 whitespace-nowrap">{fmtEuro(st.restanoCnt)}</td>
+                          <td className="px-3 py-1.5 bg-wine-50"></td>
+                        </>
+                      ) : (
+                        <td colSpan={14} className="sticky left-0 z-10 bg-wine-50 px-3 py-1.5 text-xs font-semibold text-wine-800 uppercase tracking-wide">
+                          <div className="flex items-center gap-1">
+                            <ChevronDown size={14} className="text-wine-500 flex-shrink-0" />
+                            {settore} <span className="text-wine-500 font-normal">({lista.length})</span>
+                          </div>
+                        </td>
+                      )}
                     </tr>
-                    {lista.map(function(item) {
+                    {!isCollapsed && lista.map(function(item) {
                       var p = item.profilo;
                       var r = item.riga;
                       var diff = totaleRiga(r) - bustaDaUsare(r);
@@ -834,7 +918,7 @@ export default function StipendiMesePage() {
                         </tr>
                       );
                     })}
-                  </>
+                  </Fragment>
                 );
               })}
 
