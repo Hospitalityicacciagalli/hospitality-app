@@ -449,7 +449,7 @@ export default function Layout({ children }) {
       </aside>
 
       {/* Contenuto principale */}
-      <div className="flex-1 lg:ml-60 flex flex-col min-h-screen">
+      <div className="flex-1 lg:ml-60 flex flex-col min-h-screen min-w-0">
 
         {/* Fascia ELEVAZIONE attiva */}
         {elevato && (
@@ -508,7 +508,7 @@ export default function Layout({ children }) {
         </header>
 
         {/* Contenuto pagina */}
-        <main className="flex-1 overflow-auto">
+        <main className="flex-1 overflow-auto min-w-0">
           {children}
         </main>
 
