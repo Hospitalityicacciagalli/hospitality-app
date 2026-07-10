@@ -11,6 +11,9 @@ var AuthContext = createContext(null)
 //                   il login vero (il database ricontrolla chi sei).
 //                   Nella matrice permessi viene mostrato con un
 //                   colore diverso.
+// gruppo '<key>'  = raggruppa la voce sotto un'intestazione nella
+//                   matrice permessi (vedi GRUPPI_FEATURE piu' sotto).
+//                   E' SOLO estetico: il permesso resta sulla voce.
 // Unica fonte di verita': importata anche da UserManagement.
 // ============================================================
 export var FEATURES = [
@@ -33,11 +36,32 @@ export var FEATURES = [
   { key: 'wine_tour',            label: 'Wine Tour',            type: 'standard' },
   { key: 'cooking_class',        label: 'Cooking Class',        type: 'standard' },
   { key: 'stipendi',             label: 'Stipendi',             type: 'standard' },
-  { key: 'campagna_riepilogo',   label: 'Campagna · Riepilogo', type: 'standard' },
-  { key: 'campagna_importa',     label: 'Campagna · Importa',   type: 'standard' },
-  { key: 'campagna_stipendi',    label: 'Campagna · In stipendi', type: 'standard' },
+  { key: 'campagna_riepilogo',   label: 'Riepilogo',            type: 'standard', gruppo: 'campagna' },
+  { key: 'campagna_importa',     label: 'Importa',              type: 'standard', gruppo: 'campagna' },
+  { key: 'campagna_stipendi',    label: 'In stipendi',          type: 'standard', gruppo: 'campagna' },
   { key: 'impostazioni',         label: 'Impostazioni',         type: 'standard' },
   { key: 'utenti',               label: 'Utenti App',           type: 'standard', loginReale: true }
+]
+
+// ============================================================
+// GRUPPI_FEATURE — raggruppamento VISIVO delle voci nella matrice
+// permessi (UserManagement), per rispecchiare la struttura del menu'
+// laterale (voce padre + rami). NON sono permessi: il permesso vero
+// resta sulle voci figlie di FEATURES.
+//
+// LEGGE DEL PROGETTO: ogni menu' con piu' rami deve avere il suo
+// gruppo qui e le sue voci figlie marcate con `gruppo: '<key>'` in
+// FEATURES (con etichette corte, perche' l'intestazione mostra gia'
+// il nome del gruppo). Le voci senza `gruppo` restano righe singole.
+//
+// Per aggiungere un gruppo (es. Cassa) bastano due mosse:
+//   1) aggiungere qui: { key: 'cassa', label: 'Cassa', icon: '💰' }
+//   2) mettere `gruppo: 'cassa'` sulle relative voci di FEATURES
+//      (cassa, cassaforte, totali_cassa, variabili_cassa, centri_costo).
+// Le voci di uno stesso gruppo conviene tenerle vicine in FEATURES.
+// ============================================================
+export var GRUPPI_FEATURE = [
+  { key: 'campagna', label: 'Campagna', icon: '🌾' }
 ]
 
 // Rami che il PIN non puo' sbloccare (richiedono login reale).

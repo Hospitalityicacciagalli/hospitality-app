@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useAuth, FEATURES, defaultPermissionsForRole, featureRichiedeLoginReale } from '../lib/AuthContext';
+import { useAuth, FEATURES, GRUPPI_FEATURE, defaultPermissionsForRole, featureRichiedeLoginReale } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase';
 
 var EDGE_FUNCTION_URL = 'https://ddarqzyymrgqmdwiyzde.supabase.co/functions/v1/admin-user-management';
@@ -71,6 +71,9 @@ export default function UserManagement() {
   var [selectedSourceUserId, setSelectedSourceUserId] = useState('');
   var [newProfileName, setNewProfileName] = useState('');
   var [saveProfileLoading, setSaveProfileLoading] = useState(false);
+  // Gruppi della matrice permessi aperti/chiusi. { '<gruppo>': true } = chiuso.
+  // Default: tutti aperti (nulla nascosto a sorpresa).
+  var [permCollapsedGroups, setPermCollapsedGroups] = useState({});
 
   // Modale reset PIN
   var [showPinModal, setShowPinModal] = useState(false);
@@ -331,6 +334,7 @@ export default function UserManagement() {
     setSelectedProfileId('');
     setSelectedSourceUserId('');
     setNewProfileName('');
+    setPermCollapsedGroups({});
 
     // Parte dai permessi attuali; se mancano, dai default del ruolo.
     var base;
@@ -447,6 +451,83 @@ export default function UserManagement() {
           loadProfiles();
         }
       });
+  }
+
+  // --- MATRICE PERMESSI: raggruppamento visivo (rispecchia il menu') ---
+
+  // Dati di un gruppo (etichetta + icona) dal registro; fallback prudente.
+  function infoGruppoFeature(key) {
+    for (var i = 0; i < GRUPPI_FEATURE.length; i++) {
+      if (GRUPPI_FEATURE[i].key === key) return GRUPPI_FEATURE[i];
+    }
+    return { key: key, label: key, icon: '' };
+  }
+
+  // Trasforma FEATURES in una lista di "blocchi": voci singole (senza
+  // gruppo) e gruppi (con le loro voci figlie). Cosi' la matrice si legge
+  // come il menu' laterale. Funziona anche se le figlie non sono contigue.
+  function buildBlocchiPermessi() {
+    var blocchi = [];
+    var posGruppo = {};
+    FEATURES.forEach(function(f) {
+      if (f.gruppo) {
+        if (posGruppo[f.gruppo] === undefined) {
+          blocchi.push({ tipo: 'gruppo', gruppo: infoGruppoFeature(f.gruppo), figli: [f] });
+          posGruppo[f.gruppo] = blocchi.length - 1;
+        } else {
+          blocchi[posGruppo[f.gruppo]].figli.push(f);
+        }
+      } else {
+        blocchi.push({ tipo: 'singola', feature: f });
+      }
+    });
+    return blocchi;
+  }
+
+  function togglePermGroup(key) {
+    setPermCollapsedGroups(function(prev) {
+      var next = {};
+      for (var k in prev) { next[k] = prev[k]; }
+      next[key] = !next[key];
+      return next;
+    });
+  }
+
+  // Una riga della matrice (voce singola o figlia di un gruppo, indentata).
+  function renderRigaFeature(f, dentroGruppo) {
+    var opts = f.type === 'cassa' ? LEVEL_OPTIONS_CASSA : LEVEL_OPTIONS_STANDARD;
+    var loginReale = featureRichiedeLoginReale(f.key);
+    return (
+      <div key={f.key} className={
+        'flex items-center justify-between gap-3 py-1.5 px-2 rounded-lg ' +
+        (dentroGruppo ? 'ml-5 ' : '') +
+        (loginReale
+          ? 'bg-amber-50 border border-amber-200'
+          : 'border-b border-gray-100')
+      }>
+        <span className={'text-sm flex items-center gap-1.5 ' + (loginReale ? 'text-amber-900 font-medium' : 'text-gray-800')}>
+          {loginReale && <span aria-hidden="true">🔒</span>}
+          {f.label}
+          {loginReale && (
+            <span className="text-[10px] uppercase tracking-wide bg-amber-200 text-amber-800 px-1.5 py-0.5 rounded">
+              solo login reale
+            </span>
+          )}
+        </span>
+        <select
+          value={permMatrix[f.key] || 'none'}
+          onChange={function(e) { setFeatureLevel(f.key, e.target.value); }}
+          className={
+            'px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 min-w-[170px] ' +
+            (loginReale ? 'border-amber-300 bg-white' : 'border-gray-300')
+          }
+        >
+          {opts.map(function(o) {
+            return <option key={o.value} value={o.value}>{o.label}</option>;
+          })}
+        </select>
+      </div>
+    );
   }
 
   // --- RESET PIN ---
@@ -764,37 +845,30 @@ export default function UserManagement() {
                 il PIN (Funzione C) non le sblocca, servono le credenziali dell'utente.
               </p>
               <div className="space-y-2">
-                {FEATURES.map(function(f) {
-                  var opts = f.type === 'cassa' ? LEVEL_OPTIONS_CASSA : LEVEL_OPTIONS_STANDARD;
-                  var loginReale = featureRichiedeLoginReale(f.key);
+                {buildBlocchiPermessi().map(function(b) {
+                  // Voce singola: riga piatta come prima.
+                  if (b.tipo === 'singola') {
+                    return renderRigaFeature(b.feature, false);
+                  }
+                  // Gruppo: intestazione collassabile + figlie indentate.
+                  var chiuso = permCollapsedGroups[b.gruppo.key] === true;
                   return (
-                    <div key={f.key} className={
-                      'flex items-center justify-between gap-3 py-1.5 px-2 rounded-lg ' +
-                      (loginReale
-                        ? 'bg-amber-50 border border-amber-200'
-                        : 'border-b border-gray-100')
-                    }>
-                      <span className={'text-sm flex items-center gap-1.5 ' + (loginReale ? 'text-amber-900 font-medium' : 'text-gray-800')}>
-                        {loginReale && <span aria-hidden="true">🔒</span>}
-                        {f.label}
-                        {loginReale && (
-                          <span className="text-[10px] uppercase tracking-wide bg-amber-200 text-amber-800 px-1.5 py-0.5 rounded">
-                            solo login reale
-                          </span>
-                        )}
-                      </span>
-                      <select
-                        value={permMatrix[f.key] || 'none'}
-                        onChange={function(e) { setFeatureLevel(f.key, e.target.value); }}
-                        className={
-                          'px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 min-w-[170px] ' +
-                          (loginReale ? 'border-amber-300 bg-white' : 'border-gray-300')
-                        }
+                    <div key={'gruppo-' + b.gruppo.key} className="border border-gray-200 rounded-lg overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={function() { togglePermGroup(b.gruppo.key); }}
+                        className="w-full flex items-center gap-2 px-3 py-2 bg-gray-50 hover:bg-gray-100 text-left"
                       >
-                        {opts.map(function(o) {
-                          return <option key={o.value} value={o.value}>{o.label}</option>;
-                        })}
-                      </select>
+                        <span className="text-gray-500 text-xs w-3">{chiuso ? '▸' : '▾'}</span>
+                        {b.gruppo.icon ? <span className="text-base">{b.gruppo.icon}</span> : null}
+                        <span className="text-sm font-semibold text-gray-900">{b.gruppo.label}</span>
+                        <span className="text-xs text-gray-400 ml-1">({b.figli.length} voci)</span>
+                      </button>
+                      {!chiuso && (
+                        <div className="px-2 py-2 space-y-1">
+                          {b.figli.map(function(f) { return renderRigaFeature(f, true); })}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
