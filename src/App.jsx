@@ -33,6 +33,9 @@ import WineTourPage from './pages/WineTourPage';
 import CookingClassPage from './pages/CookingClassPage';
 import ImportPrenotazioniPage from './pages/ImportPrenotazioniPage';
 import LimitiPage from './pages/LimitiPage';
+import CampagnaImportaPage from './pages/CampagnaImportaPage';
+import CampagnaRiepilogoPage from './pages/CampagnaRiepilogoPage';
+import CampagnaStipendiPage from './pages/CampagnaStipendiPage';
 
 function ProtectedRoute({ children, feature, requireEdit }) {
   var { session, loading, canView, canEdit } = useAuth();
@@ -273,6 +276,28 @@ function AppRoutes() {
         <Route path="/stipendi/dipendenti/:id" element={
           <ProtectedRoute feature="stipendi">
             <StipendioDipendenteDetail />
+          </ProtectedRoute>
+        } />
+
+        {/* Campagna: pagina principale e' il riepilogo (dashboard) */}
+        <Route path="/campagna" element={
+          <ProtectedRoute feature="campagna">
+            <Navigate to="/campagna/riepilogo" replace />
+          </ProtectedRoute>
+        } />
+        <Route path="/campagna/riepilogo" element={
+          <ProtectedRoute feature="campagna">
+            <CampagnaRiepilogoPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/campagna/importa" element={
+          <ProtectedRoute feature="campagna" requireEdit>
+            <CampagnaImportaPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/campagna/stipendi" element={
+          <ProtectedRoute feature="campagna" requireEdit>
+            <CampagnaStipendiPage />
           </ProtectedRoute>
         } />
 
