@@ -279,24 +279,26 @@ function AppRoutes() {
           </ProtectedRoute>
         } />
 
-        {/* Campagna: pagina principale e' il riepilogo (dashboard) */}
+        {/* Campagna: ogni sotto-pagina ha il suo permesso indipendente.
+            /campagna reindirizza al Riepilogo (chi non lo vede usa le
+            voci di menu' della sotto-pagina che gli e' concessa). */}
         <Route path="/campagna" element={
-          <ProtectedRoute feature="campagna">
+          <ProtectedRoute feature="campagna_riepilogo">
             <Navigate to="/campagna/riepilogo" replace />
           </ProtectedRoute>
         } />
         <Route path="/campagna/riepilogo" element={
-          <ProtectedRoute feature="campagna">
+          <ProtectedRoute feature="campagna_riepilogo">
             <CampagnaRiepilogoPage />
           </ProtectedRoute>
         } />
         <Route path="/campagna/importa" element={
-          <ProtectedRoute feature="campagna" requireEdit>
+          <ProtectedRoute feature="campagna_importa">
             <CampagnaImportaPage />
           </ProtectedRoute>
         } />
         <Route path="/campagna/stipendi" element={
-          <ProtectedRoute feature="campagna" requireEdit>
+          <ProtectedRoute feature="campagna_stipendi">
             <CampagnaStipendiPage />
           </ProtectedRoute>
         } />

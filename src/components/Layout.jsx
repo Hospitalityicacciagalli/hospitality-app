@@ -107,6 +107,16 @@ export default function Layout({ children }) {
   // Per il menu Campagna: attivo su qualunque sotto-pagina campagna.
   var campagnaActive = location.pathname.indexOf('/campagna') === 0;
 
+  // Campagna: ogni sotto-voce ha il suo permesso indipendente.
+  var vediCampagnaRiepilogo = canView('campagna_riepilogo');
+  var vediCampagnaImporta = canView('campagna_importa');
+  var vediCampagnaStipendi = canView('campagna_stipendi');
+  var vediCampagna = vediCampagnaRiepilogo || vediCampagnaImporta || vediCampagnaStipendi;
+  // La voce principale porta alla prima sotto-pagina che l'utente puo' vedere.
+  var campagnaLanding = vediCampagnaRiepilogo
+    ? '/campagna/riepilogo'
+    : (vediCampagnaImporta ? '/campagna/importa' : '/campagna/stipendi');
+
   var showAdminSection = canView('impostazioni');
 
   // Percentuale della barra del timer (residuo su totale).
@@ -351,31 +361,31 @@ export default function Layout({ children }) {
           </>
         )}
 
-        {/* Campagna: voce principale + sotto-voci se attivo */}
-        {canView('campagna') && (
+        {/* Campagna: voce principale se almeno una sotto-voce e' concessa;
+            ogni sotto-voce compare solo con il proprio permesso. */}
+        {vediCampagna && (
           <>
             <NavLink
-              to="/campagna/riepilogo"
-              className={function(p) {
-                var isActive = p.isActive || location.pathname === '/campagna';
-                return navClass(isActive);
-              }}
+              to={campagnaLanding}
+              className={function() { return navClass(campagnaActive); }}
               onClick={function() { setMobileOpen(false); }}>
               <span className="text-base">🌾</span>
               Campagna
             </NavLink>
             {campagnaActive && (
               <div className="ml-3 pl-3 border-l border-wine-700 space-y-1">
-                <NavLink
-                  to="/campagna/riepilogo"
-                  className={function(p) {
-                    var base = 'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ';
-                    return base + (p.isActive ? 'bg-wine-800 text-white' : 'text-wine-300 hover:text-white');
-                  }}
-                  onClick={function() { setMobileOpen(false); }}>
-                  Riepilogo
-                </NavLink>
-                {canEdit('campagna') && (
+                {vediCampagnaRiepilogo && (
+                  <NavLink
+                    to="/campagna/riepilogo"
+                    className={function(p) {
+                      var base = 'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ';
+                      return base + (p.isActive ? 'bg-wine-800 text-white' : 'text-wine-300 hover:text-white');
+                    }}
+                    onClick={function() { setMobileOpen(false); }}>
+                    Riepilogo
+                  </NavLink>
+                )}
+                {vediCampagnaImporta && (
                   <NavLink
                     to="/campagna/importa"
                     className={function(p) {
@@ -386,7 +396,7 @@ export default function Layout({ children }) {
                     Importa
                   </NavLink>
                 )}
-                {canEdit('campagna') && (
+                {vediCampagnaStipendi && (
                   <NavLink
                     to="/campagna/stipendi"
                     className={function(p) {
