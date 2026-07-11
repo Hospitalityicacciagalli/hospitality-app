@@ -40,6 +40,15 @@ function aggiungiGiorni(dateStr, giorni) {
   return d.toISOString().split('T')[0]
 }
 
+// Nome + cognome del beneficiario in un'unica stringa leggibile.
+// Le gift card vecchie hanno tutto in beneficiario_nome: qui va bene lo stesso.
+function beneficiarioCompleto(gc) {
+  if (!gc) return ''
+  var n = (gc.beneficiario_nome || '').trim()
+  var c = (gc.beneficiario_cognome || '').trim()
+  return (n + ' ' + c).trim()
+}
+
 // Costruisce la lista leggibile dei servizi di una tipologia
 function serviziTipologia(t) {
   if (!t) return []
@@ -122,6 +131,7 @@ function ModaleGiftCard(props) {
     committente_nome: isModifica ? (gcEsistente.committente_nome || '') : '',
     committente_contatto: isModifica ? (gcEsistente.committente_contatto || '') : '',
     beneficiario_nome: isModifica ? (gcEsistente.beneficiario_nome || '') : '',
+    beneficiario_cognome: isModifica ? (gcEsistente.beneficiario_cognome || '') : '',
     messaggio: isModifica ? (gcEsistente.messaggio || '') : '',
     data_acquisto: isModifica ? (gcEsistente.data_acquisto || '') : oggi,
     scadenza: isModifica ? (gcEsistente.scadenza || '') : aggiungiMesi(oggi, 6),
@@ -176,6 +186,7 @@ function ModaleGiftCard(props) {
       committente_nome: form.committente_nome.trim() || null,
       committente_contatto: form.committente_contatto.trim() || null,
       beneficiario_nome: form.beneficiario_nome.trim() || null,
+      beneficiario_cognome: form.beneficiario_cognome.trim() || null,
       messaggio: form.messaggio.trim() || null,
       data_acquisto: form.data_acquisto || null,
       scadenza: form.scadenza || null,
@@ -262,10 +273,17 @@ function ModaleGiftCard(props) {
                 placeholder="Telefono o email" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
             </div>
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Beneficiario</label>
-            <input type="text" value={form.beneficiario_nome} onChange={function(e) { handleChange('beneficiario_nome', e.target.value) }}
-              placeholder="Nome e cognome" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Beneficiario — Nome</label>
+              <input type="text" value={form.beneficiario_nome} onChange={function(e) { handleChange('beneficiario_nome', e.target.value) }}
+                placeholder="Nome" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Beneficiario — Cognome</label>
+              <input type="text" value={form.beneficiario_cognome} onChange={function(e) { handleChange('beneficiario_cognome', e.target.value) }}
+                placeholder="Cognome" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+            </div>
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Messaggio</label>
@@ -595,21 +613,38 @@ function PannelloServizi(props) {
         setShowFormPasto(false)
         setPastoInModifica(null)
       } else {
-        // Trova o crea cliente automatico
-        var nomeTipologia = tipologia ? tipologia.nome : 'Gift Card'
-        var nomeCliente = nomeTipologia + ' ' + gc.codice
-        var cercaCliente = await supabase.from('customers').select('id').eq('last_name', nomeCliente).limit(1)
-        var customerId
-        if (cercaCliente.data && cercaCliente.data.length > 0) {
-          customerId = cercaCliente.data[0].id
-        } else {
+        // Cliente VERO dal beneficiario (nome + cognome). Prima lo cerco fra
+        // gli esistenti; se non c'e' lo creo. La vecchia stringa "Tipologia +
+        // codice" resta nelle note del cliente per tracciabilita'.
+        var benNome = (gc.beneficiario_nome || '').trim()
+        var benCognome = (gc.beneficiario_cognome || '').trim()
+        var contatto = (gc.committente_contatto || '').trim()
+        var tracciabilita = 'Beneficiario gift card ' + (tipologia ? tipologia.nome + ' ' : '') + gc.codice
+        var customerId = null
+
+        // 1) riuso un cliente esistente solo se ho nome E cognome pieni
+        //    (evita accostamenti azzardati su un solo campo).
+        if (benNome && benCognome) {
+          var cerca = await supabase.from('customers')
+            .select('id')
+            .ilike('first_name', benNome)
+            .ilike('last_name', benCognome)
+            .limit(1)
+          if (!cerca.error && cerca.data && cerca.data.length > 0) {
+            customerId = cerca.data[0].id
+          }
+        }
+
+        // 2) se non l'ho trovato, ne creo uno vero col beneficiario.
+        if (!customerId) {
           var nuovoCliente = await supabase.from('customers').insert([{
-            first_name: gc.beneficiario_nome || gc.committente_nome || 'Beneficiario',
-            last_name: nomeCliente,
+            first_name: benNome || (gc.committente_nome || 'Beneficiario'),
+            last_name: benCognome || ('Gift ' + gc.codice),
+            phone: contatto || null,
             category: 'standard',
             is_active: true,
             source: 'manual',
-            notes: 'Cliente automatico per gift card ' + gc.codice
+            notes: tracciabilita
           }]).select('id')
           if (nuovoCliente.error) throw new Error(nuovoCliente.error.message)
           customerId = nuovoCliente.data[0].id
@@ -701,11 +736,11 @@ function PannelloServizi(props) {
               <span className={"px-2 py-0.5 rounded-full text-xs font-medium " + badgeStato(gc).cls}>{badgeStato(gc).label}</span>
             </div>
             <p className="text-xs text-gray-500 mt-0.5 font-mono">{gc.codice}</p>
-            {(gc.committente_nome || gc.beneficiario_nome) && (
+            {(gc.committente_nome || beneficiarioCompleto(gc)) && (
               <p className="text-xs text-gray-500 mt-0.5">
                 {gc.committente_nome && 'Da: ' + gc.committente_nome}
-                {gc.committente_nome && gc.beneficiario_nome && ' → '}
-                {gc.beneficiario_nome && gc.beneficiario_nome}
+                {gc.committente_nome && beneficiarioCompleto(gc) && ' → '}
+                {beneficiarioCompleto(gc) && beneficiarioCompleto(gc)}
               </p>
             )}
             {totServizi > 0 && (
@@ -1313,6 +1348,7 @@ function TabArchivio(props) {
       var match = (gc.codice || '').toLowerCase().indexOf(r) !== -1
         || (gc.committente_nome || '').toLowerCase().indexOf(r) !== -1
         || (gc.beneficiario_nome || '').toLowerCase().indexOf(r) !== -1
+        || (gc.beneficiario_cognome || '').toLowerCase().indexOf(r) !== -1
         || (gc.numero_scontrino || '').toLowerCase().indexOf(r) !== -1
       if (!match) return false
     }
@@ -1388,7 +1424,7 @@ function TabArchivio(props) {
                     </div>
                     <div className="flex items-center gap-3 text-xs text-gray-500 mt-1 flex-wrap">
                       {gc.committente_nome && <span>Da: <span className="text-gray-700 font-medium">{gc.committente_nome}</span></span>}
-                      {gc.beneficiario_nome && <span>A: <span className="text-gray-700 font-medium">{gc.beneficiario_nome}</span></span>}
+                      {beneficiarioCompleto(gc) && <span>A: <span className="text-gray-700 font-medium">{beneficiarioCompleto(gc)}</span></span>}
                     </div>
                     <div className="flex items-center gap-3 text-xs text-gray-500 mt-1 flex-wrap">
                       {gc.data_acquisto && <span>Acquistata: {formatData(gc.data_acquisto)}</span>}
