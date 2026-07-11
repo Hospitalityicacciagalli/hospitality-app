@@ -17,24 +17,25 @@ var AuthContext = createContext(null)
 // Unica fonte di verita': importata anche da UserManagement.
 // ============================================================
 export var FEATURES = [
-  { key: 'prenotazioni',         label: 'Prenotazioni',         type: 'standard' },
-  { key: 'importa_prenotazioni', label: 'Importa prenotazioni', type: 'standard' },
-  { key: 'limiti',               label: 'Limiti coperti',       type: 'standard' },
-  { key: 'alert_prenotazioni',   label: 'Alert prenotazioni',   type: 'standard' },
+  { key: 'prenotazioni',         label: 'Prenotazioni',         type: 'standard', gruppo: 'prenotazioni' },
+  { key: 'importa_prenotazioni', label: 'Importa',              type: 'standard', gruppo: 'prenotazioni' },
+  { key: 'limiti',               label: 'Limiti coperti',       type: 'standard', gruppo: 'prenotazioni' },
+  { key: 'alert_prenotazioni',   label: 'Alert',                type: 'standard', gruppo: 'prenotazioni' },
   { key: 'clienti',              label: 'Clienti',              type: 'standard' },
   { key: 'sale',                 label: 'Sale e Tavoli',        type: 'standard' },
   { key: 'staff',                label: 'Staff',                type: 'standard' },
   { key: 'turni',                label: 'Turni',                type: 'standard' },
-  { key: 'cassa',                label: 'Cassa',                type: 'cassa' },
-  { key: 'cassaforte',           label: 'Cassaforte',           type: 'standard' },
-  { key: 'totali_cassa',         label: 'Totali cassa',         type: 'standard' },
-  { key: 'variabili_cassa',      label: 'Variabili cassa',      type: 'standard' },
-  { key: 'centri_costo',         label: 'Centri di costo',      type: 'standard' },
-  { key: 'ordini_bordo',         label: 'Ordini Bordo',         type: 'standard' },
-  { key: 'listino_bordo',        label: 'Listino Bordo',        type: 'standard' },
-  { key: 'gift_card',            label: 'Gift Card',            type: 'standard' },
-  { key: 'wine_tour',            label: 'Wine Tour',            type: 'standard' },
-  { key: 'cooking_class',        label: 'Cooking Class',        type: 'standard' },
+  { key: 'cassa_reception',      label: 'Cassa Reception',      type: 'standard', gruppo: 'cassa' },
+  { key: 'cassa_ristorante',     label: 'Cassa Ristorante',     type: 'standard', gruppo: 'cassa' },
+  { key: 'totali_cassa',         label: 'Totali sensibili',     type: 'standard', gruppo: 'cassa' },
+  { key: 'cassaforte',           label: 'Cassaforte',           type: 'standard', gruppo: 'cassa' },
+  { key: 'variabili_cassa',      label: 'Variabili',            type: 'standard', gruppo: 'cassa' },
+  { key: 'centri_costo',         label: 'Centri di costo',      type: 'standard', gruppo: 'cassa' },
+  { key: 'ordini_bordo',         label: 'Ordini',               type: 'standard', gruppo: 'bordo' },
+  { key: 'listino_bordo',        label: 'Listino',              type: 'standard', gruppo: 'bordo' },
+  { key: 'gift_card',            label: 'Gift Card',            type: 'standard', gruppo: 'esperienze' },
+  { key: 'wine_tour',            label: 'Wine Tour',            type: 'standard', gruppo: 'esperienze' },
+  { key: 'cooking_class',        label: 'Cooking Class',        type: 'standard', gruppo: 'esperienze' },
   { key: 'stipendi',             label: 'Stipendi',             type: 'standard' },
   { key: 'campagna_riepilogo',   label: 'Riepilogo',            type: 'standard', gruppo: 'campagna' },
   { key: 'campagna_importa',     label: 'Importa',              type: 'standard', gruppo: 'campagna' },
@@ -61,7 +62,11 @@ export var FEATURES = [
 // Le voci di uno stesso gruppo conviene tenerle vicine in FEATURES.
 // ============================================================
 export var GRUPPI_FEATURE = [
-  { key: 'campagna', label: 'Campagna', icon: '🌾' }
+  { key: 'prenotazioni', label: 'Prenotazioni',  icon: '📅' },
+  { key: 'cassa',        label: 'Cassa',         icon: '💰' },
+  { key: 'bordo',        label: 'Bordo piscina', icon: '🍹' },
+  { key: 'esperienze',   label: 'Esperienze',    icon: '🎁' },
+  { key: 'campagna',     label: 'Campagna',      icon: '🌾' }
 ]
 
 // Rami che il PIN non puo' sbloccare (richiedono login reale).
@@ -80,16 +85,16 @@ export function featureRichiedeLoginReale(feature) {
 // Usato come fallback se un profilo non ha ancora il jsonb popolato.
 // ============================================================
 export var DEFAULT_PERMS_BY_ROLE = {
-  super_admin: { prenotazioni: 'write', importa_prenotazioni: 'write', limiti: 'write', alert_prenotazioni: 'write', clienti: 'write', sale: 'write', staff: 'write', turni: 'write', cassa: 'full',  cassaforte: 'write', totali_cassa: 'write', variabili_cassa: 'write', centri_costo: 'write', ordini_bordo: 'write', listino_bordo: 'write', gift_card: 'write', wine_tour: 'write', cooking_class: 'write', stipendi: 'write', campagna_riepilogo: 'write', campagna_importa: 'write', campagna_stipendi: 'write', impostazioni: 'write', utenti: 'write' },
-  proprieta:   { prenotazioni: 'write', importa_prenotazioni: 'none',  limiti: 'write', alert_prenotazioni: 'write', clienti: 'write', sale: 'read',  staff: 'none',  turni: 'none',  cassa: 'full',  cassaforte: 'write', totali_cassa: 'write', variabili_cassa: 'write', centri_costo: 'write', ordini_bordo: 'read',  listino_bordo: 'none',  gift_card: 'write', wine_tour: 'write', cooking_class: 'write', stipendi: 'write', campagna_riepilogo: 'write', campagna_importa: 'write', campagna_stipendi: 'write', impostazioni: 'none',  utenti: 'none' },
-  direttore:   { prenotazioni: 'write', importa_prenotazioni: 'write', limiti: 'write', alert_prenotazioni: 'write', clienti: 'write', sale: 'read',  staff: 'write', turni: 'write', cassa: 'full',  cassaforte: 'write', totali_cassa: 'write', variabili_cassa: 'write', centri_costo: 'write', ordini_bordo: 'write', listino_bordo: 'write', gift_card: 'write', wine_tour: 'write', cooking_class: 'write', stipendi: 'none',  campagna_riepilogo: 'write', campagna_importa: 'write', campagna_stipendi: 'write', impostazioni: 'write', utenti: 'none' },
-  reception:   { prenotazioni: 'write', importa_prenotazioni: 'none',  limiti: 'none', alert_prenotazioni: 'none',  clienti: 'write', sale: 'read',  staff: 'read',  turni: 'none',  cassa: 'full',  cassaforte: 'none',  totali_cassa: 'none', variabili_cassa: 'none', centri_costo: 'none', ordini_bordo: 'write', listino_bordo: 'write', gift_card: 'write', wine_tour: 'write', cooking_class: 'write', stipendi: 'none',  campagna_riepilogo: 'none', campagna_importa: 'none', campagna_stipendi: 'none', impostazioni: 'none',  utenti: 'none' },
-  sala:        { prenotazioni: 'write', importa_prenotazioni: 'none',  limiti: 'none', alert_prenotazioni: 'none',  clienti: 'write', sale: 'read',  staff: 'none',  turni: 'none',  cassa: 'full',  cassaforte: 'none',  totali_cassa: 'none', variabili_cassa: 'none', centri_costo: 'none', ordini_bordo: 'write', listino_bordo: 'write', gift_card: 'read',  wine_tour: 'read',  cooking_class: 'read',  stipendi: 'none',  campagna_riepilogo: 'none', campagna_importa: 'none', campagna_stipendi: 'none', impostazioni: 'none',  utenti: 'none' },
-  cucina:      { prenotazioni: 'read',  importa_prenotazioni: 'none',  limiti: 'none', alert_prenotazioni: 'none',  clienti: 'read',  sale: 'none',  staff: 'none',  turni: 'none',  cassa: 'none',  cassaforte: 'none',  totali_cassa: 'none', variabili_cassa: 'none', centri_costo: 'none', ordini_bordo: 'none',  listino_bordo: 'none',  gift_card: 'none',  wine_tour: 'none',  cooking_class: 'none',  stipendi: 'none',  campagna_riepilogo: 'none', campagna_importa: 'none', campagna_stipendi: 'none', impostazioni: 'none',  utenti: 'none' }
+  super_admin: { prenotazioni: 'write', importa_prenotazioni: 'write', limiti: 'write', alert_prenotazioni: 'write', clienti: 'write', sale: 'write', staff: 'write', turni: 'write', cassa_reception: 'write', cassa_ristorante: 'write', cassaforte: 'write', totali_cassa: 'write', variabili_cassa: 'write', centri_costo: 'write', ordini_bordo: 'write', listino_bordo: 'write', gift_card: 'write', wine_tour: 'write', cooking_class: 'write', stipendi: 'write', campagna_riepilogo: 'write', campagna_importa: 'write', campagna_stipendi: 'write', impostazioni: 'write', utenti: 'write' },
+  proprieta:   { prenotazioni: 'write', importa_prenotazioni: 'none',  limiti: 'write', alert_prenotazioni: 'write', clienti: 'write', sale: 'read',  staff: 'none',  turni: 'none',  cassa_reception: 'read', cassa_ristorante: 'read', cassaforte: 'write', totali_cassa: 'write', variabili_cassa: 'write', centri_costo: 'write', ordini_bordo: 'read',  listino_bordo: 'none',  gift_card: 'write', wine_tour: 'write', cooking_class: 'write', stipendi: 'write', campagna_riepilogo: 'write', campagna_importa: 'write', campagna_stipendi: 'write', impostazioni: 'none',  utenti: 'none' },
+  direttore:   { prenotazioni: 'write', importa_prenotazioni: 'write', limiti: 'write', alert_prenotazioni: 'write', clienti: 'write', sale: 'read',  staff: 'write', turni: 'write', cassa_reception: 'write', cassa_ristorante: 'write', cassaforte: 'write', totali_cassa: 'write', variabili_cassa: 'write', centri_costo: 'write', ordini_bordo: 'write', listino_bordo: 'write', gift_card: 'write', wine_tour: 'write', cooking_class: 'write', stipendi: 'none',  campagna_riepilogo: 'write', campagna_importa: 'write', campagna_stipendi: 'write', impostazioni: 'write', utenti: 'none' },
+  reception:   { prenotazioni: 'write', importa_prenotazioni: 'none',  limiti: 'none', alert_prenotazioni: 'none',  clienti: 'write', sale: 'read',  staff: 'read',  turni: 'none',  cassa_reception: 'write', cassa_ristorante: 'write', cassaforte: 'none',  totali_cassa: 'none', variabili_cassa: 'none', centri_costo: 'none', ordini_bordo: 'write', listino_bordo: 'write', gift_card: 'write', wine_tour: 'write', cooking_class: 'write', stipendi: 'none',  campagna_riepilogo: 'none', campagna_importa: 'none', campagna_stipendi: 'none', impostazioni: 'none',  utenti: 'none' },
+  sala:        { prenotazioni: 'write', importa_prenotazioni: 'none',  limiti: 'none', alert_prenotazioni: 'none',  clienti: 'write', sale: 'read',  staff: 'none',  turni: 'none',  cassa_reception: 'write', cassa_ristorante: 'write', cassaforte: 'none',  totali_cassa: 'none', variabili_cassa: 'none', centri_costo: 'none', ordini_bordo: 'write', listino_bordo: 'write', gift_card: 'read',  wine_tour: 'read',  cooking_class: 'read',  stipendi: 'none',  campagna_riepilogo: 'none', campagna_importa: 'none', campagna_stipendi: 'none', impostazioni: 'none',  utenti: 'none' },
+  cucina:      { prenotazioni: 'read',  importa_prenotazioni: 'none',  limiti: 'none', alert_prenotazioni: 'none',  clienti: 'read',  sale: 'none',  staff: 'none',  turni: 'none',  cassa_reception: 'none', cassa_ristorante: 'none', cassaforte: 'none',  totali_cassa: 'none', variabili_cassa: 'none', centri_costo: 'none', ordini_bordo: 'none',  listino_bordo: 'none',  gift_card: 'none',  wine_tour: 'none',  cooking_class: 'none',  stipendi: 'none',  campagna_riepilogo: 'none', campagna_importa: 'none', campagna_stipendi: 'none', impostazioni: 'none',  utenti: 'none' }
 }
 
 // Pavimento di sicurezza per ruoli non previsti.
-var BASE_FALLBACK = { prenotazioni: 'write', importa_prenotazioni: 'none', limiti: 'none', alert_prenotazioni: 'none', clienti: 'write', sale: 'none', staff: 'none', turni: 'none', cassa: 'light', cassaforte: 'none', totali_cassa: 'none', variabili_cassa: 'none', centri_costo: 'none', ordini_bordo: 'none', listino_bordo: 'none', gift_card: 'none', wine_tour: 'none', cooking_class: 'none', stipendi: 'none', campagna_riepilogo: 'none', campagna_importa: 'none', campagna_stipendi: 'none', impostazioni: 'none', utenti: 'none' }
+var BASE_FALLBACK = { prenotazioni: 'write', importa_prenotazioni: 'none', limiti: 'none', alert_prenotazioni: 'none', clienti: 'write', sale: 'none', staff: 'none', turni: 'none', cassa_reception: 'none', cassa_ristorante: 'none', cassaforte: 'none', totali_cassa: 'none', variabili_cassa: 'none', centri_costo: 'none', ordini_bordo: 'none', listino_bordo: 'none', gift_card: 'none', wine_tour: 'none', cooking_class: 'none', stipendi: 'none', campagna_riepilogo: 'none', campagna_importa: 'none', campagna_stipendi: 'none', impostazioni: 'none', utenti: 'none' }
 
 export function defaultPermissionsForRole(role) {
   return DEFAULT_PERMS_BY_ROLE[role] || BASE_FALLBACK
@@ -282,7 +287,7 @@ export function AuthProvider(props) {
     var role = ruoloEfficace()
     if (!role) return 'none'
     if (role === 'super_admin') {
-      return feature === 'cassa' ? 'full' : 'write'
+      return 'write'
     }
     var perms = permessiEfficaci()
     return perms[feature] || 'none'
@@ -294,7 +299,6 @@ export function AuthProvider(props) {
 
   function canEdit(feature) {
     var lvl = permissionLevel(feature)
-    if (feature === 'cassa') return lvl === 'full'
     return lvl === 'write'
   }
 

@@ -24,6 +24,17 @@ export default function ProfilePage() {
     try { return localStorage.getItem('icg_shared_device') === '1'; } catch (e) { return false; }
   });
 
+  // Preferenza di postazione: quale cassa mostrare a menu' su questo
+  // dispositivo. Non e' un permesso, solo visibilita' della voce nel menu'.
+  var [cassaMenu, setCassaMenu] = useState(function() {
+    try { return localStorage.getItem('icg_cassa_menu') || 'entrambe'; } catch (e) { return 'entrambe'; }
+  });
+
+  function setCassaMenuPref(val) {
+    setCassaMenu(val);
+    try { localStorage.setItem('icg_cassa_menu', val); } catch (e) {}
+  }
+
   var hasPin = pinJustSet || (profile && profile.pin_hash ? true : false);
 
   function toggleSharedDevice() {
@@ -294,6 +305,40 @@ export default function ProfilePage() {
           ) : (
             <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-600">Postazione personale</span>
           )}
+        </div>
+
+        {/* Quale cassa mostrare a menù su questo dispositivo. Non è un
+            permesso: filtra solo la voce del menù laterale (puoi comunque
+            passare all'altra cassa dal pulsante dentro la cassa stessa). */}
+        <div className="mt-5 pt-5 border-t border-gray-100">
+          <p className="text-sm font-medium text-gray-900">Cassa nel menù</p>
+          <p className="text-xs text-gray-500 mt-1 mb-3">
+            Scegli quale cassa vedere nel menù laterale di questo dispositivo. L'impostazione resta su questo dispositivo e browser; i permessi non cambiano. Dentro la cassa puoi sempre passare all'altra col pulsante dedicato (se ne hai il permesso).
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {[
+              { v: 'entrambe', label: 'Entrambe' },
+              { v: 'reception', label: 'Solo Reception' },
+              { v: 'ristorante', label: 'Solo Ristorante' }
+            ].map(function(o) {
+              var sel = cassaMenu === o.v;
+              return (
+                <button
+                  key={o.v}
+                  type="button"
+                  onClick={function() { setCassaMenuPref(o.v); }}
+                  className={
+                    'px-4 py-2 rounded-full text-sm font-medium border-2 transition-colors ' +
+                    (sel
+                      ? 'border-wine-700 bg-wine-700 text-white'
+                      : 'border-gray-300 bg-white text-gray-600 hover:border-wine-400')
+                  }
+                >
+                  {o.label}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>

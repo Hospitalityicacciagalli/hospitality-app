@@ -62,6 +62,15 @@ function ProtectedRoute({ children, feature, requireEdit }) {
   return children;
 }
 
+// /cassa apre la PRIMA cassa che l'utente puo' vedere (permessi separati
+// cassa_reception / cassa_ristorante). Se non ne vede nessuna, torna a home.
+function CassaIndexRedirect() {
+  var { canView } = useAuth();
+  if (canView('cassa_reception')) return <Navigate to="/cassa/reception" replace />;
+  if (canView('cassa_ristorante')) return <Navigate to="/cassa/ristorante" replace />;
+  return <Navigate to="/" replace />;
+}
+
 function AppRoutes() {
   var { session, loading } = useAuth();
 
@@ -183,15 +192,21 @@ function AppRoutes() {
           </ProtectedRoute>
         } />
 
-        {/* Cassa (nuova) — due casse separate via URL */}
+        {/* Cassa (nuova) — due casse separate, ognuna con permesso proprio.
+            /cassa apre la prima cassa visibile all'utente. */}
         <Route path="/cassa" element={
-          <ProtectedRoute feature="cassa">
-            <Navigate to="/cassa/reception" replace />
+          <ProtectedRoute>
+            <CassaIndexRedirect />
           </ProtectedRoute>
         } />
-        <Route path="/cassa/:quale" element={
-          <ProtectedRoute feature="cassa">
-            <CassaNuovaPage />
+        <Route path="/cassa/reception" element={
+          <ProtectedRoute feature="cassa_reception">
+            <CassaNuovaPage quale="reception" />
+          </ProtectedRoute>
+        } />
+        <Route path="/cassa/ristorante" element={
+          <ProtectedRoute feature="cassa_ristorante">
+            <CassaNuovaPage quale="ristorante" />
           </ProtectedRoute>
         } />
 
@@ -216,9 +231,12 @@ function AppRoutes() {
           </ProtectedRoute>
         } />
 
-        {/* Cassa OLD (congelata, sola consultazione) */}
+        {/* Cassa OLD (congelata, sola consultazione). Dopo lo split del
+            permesso cassa la proteggiamo con cassa_reception: chi aveva la
+            cassa la ritrova (la migrazione copia il vecchio valore in
+            entrambe le nuove chiavi). */}
         <Route path="/cassa-old" element={
-          <ProtectedRoute feature="cassa">
+          <ProtectedRoute feature="cassa_reception">
             <CassaPage />
           </ProtectedRoute>
         } />

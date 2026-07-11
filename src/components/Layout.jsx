@@ -19,6 +19,13 @@ export default function Layout({ children }) {
     try { return localStorage.getItem('icg_shared_device') === '1'; } catch (e) { return false; }
   });
 
+  // Preferenza di postazione: quale cassa mostrare a menu' su QUESTO
+  // dispositivo. 'entrambe' | 'reception' | 'ristorante'. Impostata nel Profilo.
+  // Non e' un permesso: filtra solo la visibilita' della voce nel menu'.
+  var [cassaMenu, setCassaMenu] = useState(function() {
+    try { return localStorage.getItem('icg_cassa_menu') || 'entrambe'; } catch (e) { return 'entrambe'; }
+  });
+
   // Minuti di elevazione, letti da restaurant_settings (default 5).
   var [minutiElevazione, setMinutiElevazione] = useState(5);
 
@@ -29,6 +36,7 @@ export default function Layout({ children }) {
     // Rileggo il flag "dispositivo condiviso" a ogni cambio pagina:
     // cosi' se lo attivi/disattivi nel profilo, il pulsante compare/sparisce.
     try { setSharedDevice(localStorage.getItem('icg_shared_device') === '1'); } catch (e) {}
+    try { setCassaMenu(localStorage.getItem('icg_cassa_menu') || 'entrambe'); } catch (e) {}
   }, [location.pathname]);
 
   useEffect(function() {
@@ -100,6 +108,11 @@ export default function Layout({ children }) {
   // Cassa attiva se siamo su una qualunque /cassa/...
   var cassaReceptionActive = location.pathname === '/cassa/reception' || location.pathname === '/cassa';
   var cassaRistoranteActive = location.pathname === '/cassa/ristorante';
+
+  // La voce cassa compare a menu' se la preferenza di postazione la include.
+  function cassaMenuMostra(quale) {
+    return cassaMenu === 'entrambe' || cassaMenu === quale;
+  }
 
   // Per il menu Stipendi: e' attivo se siamo su una qualunque sotto-pagina
   var stipendiActive = location.pathname.indexOf('/stipendi') === 0;
@@ -208,8 +221,9 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
-        {/* Cassa: due casse separate */}
-        {canView('cassa') && (
+        {/* Cassa: due casse separate. Compare se hai il permesso di QUELLA
+            cassa E se la preferenza di postazione (Profilo) la include. */}
+        {canView('cassa_reception') && cassaMenuMostra('reception') && (
           <NavLink
             to="/cassa/reception"
             className={function() { return navClass(cassaReceptionActive); }}
@@ -219,7 +233,7 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
-        {canView('cassa') && (
+        {canView('cassa_ristorante') && cassaMenuMostra('ristorante') && (
           <NavLink
             to="/cassa/ristorante"
             className={function() { return navClass(cassaRistoranteActive); }}

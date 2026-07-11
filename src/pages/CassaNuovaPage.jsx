@@ -458,20 +458,31 @@ function RigaMovimento(props) {
 // ═════════════════════════════════════════════════════════════
 // PAGINA PRINCIPALE
 // ═════════════════════════════════════════════════════════════
-export default function CassaNuovaPage() {
+export default function CassaNuovaPage(props) {
   var params = useParams();
   var navigate = useNavigate();
   var auth = useAuth();
   var profile = auth.profile;
   var userId = profile ? profile.id : null;
-  var puoScrivere = auth.canEdit('cassa');
+
+  // Quale cassa: dallo slug passato come prop dalle rotte esplicite
+  // (/cassa/reception, /cassa/ristorante); fallback al parametro URL.
+  var quale = props.quale || params.quale;
+  var cassaId = cassaDaSlug(quale);
+  var isRistorante = cassaId === ID_RISTORANTE;
+
+  // Permessi PER-CASSA (split del vecchio permesso unico 'cassa'): ogni
+  // cassa ha la sua chiave indipendente. Il pulsante "vai all'altra cassa"
+  // compare solo se hai anche il permesso dell'altra.
+  var featureCassa = isRistorante ? 'cassa_ristorante' : 'cassa_reception';
+  var featureAltra = isRistorante ? 'cassa_reception' : 'cassa_ristorante';
+  var puoVedereQuesta = auth.canView(featureCassa);
+  var puoVedereAltra = auth.canView(featureAltra);
+  var puoScrivere = auth.canEdit(featureCassa);
   var puoUsareCassaforte = auth.canEdit('cassaforte');
   // Solo chi ha il permesso "Totali cassa" (persona affidabile) vede il totale
   // "Movimenti di denaro" (l'incasso comprensivo di fattoria e caparre).
   var puoVedereFlusso = auth.canView('totali_cassa');
-
-  var cassaId = cassaDaSlug(params.quale);
-  var isRistorante = cassaId === ID_RISTORANTE;
 
   var [data, setData] = useState(oggiISO());
   var [sezione, setSezione] = useState('movimenti');
@@ -615,15 +626,30 @@ export default function CassaNuovaPage() {
 
   var tabs = [{ id: 'movimenti', label: 'Movimenti' }, { id: 'chiusura', label: 'Chiusura' }];
 
+  // Cintura di sicurezza: se si arriva qui senza il permesso di QUESTA cassa
+  // (es. link diretto), non mostriamo la pagina. Le rotte gia' filtrano;
+  // questa e' ridondanza difensiva.
+  if (!puoVedereQuesta) {
+    return (
+      <div className="p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-800 text-sm">
+          Non hai accesso a questa cassa.
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="p-4 lg:p-6 max-w-5xl mx-auto">
 
       <div className="flex flex-wrap items-center gap-3 mb-5">
         <h1 className="text-xl font-semibold text-gray-900">Cassa {nomeCassa(cassaId)}</h1>
-        <button onClick={vaiAllaAltra}
-          className="px-3 py-1.5 rounded-lg text-sm border border-gray-300 text-gray-600 hover:bg-gray-50">
-          Vai a Cassa {isRistorante ? 'Reception' : 'Ristorante'} &rarr;
-        </button>
+        {puoVedereAltra && (
+          <button onClick={vaiAllaAltra}
+            className="px-3 py-1.5 rounded-lg text-sm border border-gray-300 text-gray-600 hover:bg-gray-50">
+            Vai a Cassa {isRistorante ? 'Reception' : 'Ristorante'} &rarr;
+          </button>
+        )}
         <button onClick={chiediGestione}
           className="px-3 py-1.5 rounded-lg text-sm border border-gray-300 text-gray-600 hover:bg-gray-50">
           ⚙️ Gestisci
