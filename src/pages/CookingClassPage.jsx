@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { Plus, X, Trash2, PencilLine, ChevronLeft, ChevronRight, Users, Clock, ChefHat, Globe } from 'lucide-react'
+import { Plus, X, Trash2, PencilLine, ChevronLeft, ChevronRight, Users, Clock, ChefHat, Globe, Gift } from 'lucide-react'
 
 // ── UTILITY ──────────────────────────────────────────────────
 function formatData(dateStr) {
@@ -27,6 +28,31 @@ function nomeGiornoBreve(dayIndex) {
 }
 
 // ── MODALE CONFERMA ───────────────────────────────────────────
+// Nome + cognome del beneficiario (le gift vecchie hanno tutto nel nome).
+function beneficiarioGift(gc) {
+  if (!gc) return ''
+  var n = (gc.beneficiario_nome || '').trim()
+  var c = (gc.beneficiario_cognome || '').trim()
+  return (n + ' ' + c).trim()
+}
+
+// Elenco leggibile dei servizi di una tipologia gift card.
+function serviziTipologia(t) {
+  if (!t) return []
+  var s = []
+  if (t.pernottamento) s.push('\uD83C\uDFE8 Pernottamento ' + (t.notti ? t.notti + ' notte/i' : ''))
+  if (t.calice_benvenuto) s.push('\uD83E\uDD42 Calice di benvenuto')
+  if (t.wine_tour) s.push('\uD83C\uDF77 Wine Tour')
+  if (t.visita_orto) s.push('\uD83C\uDF31 Visita all\'orto')
+  if (t.cooking_class) s.push('\uD83D\uDC68\u200D\uD83C\uDF73 Cooking Class')
+  if (t.degustazione_vini_1) s.push('\uD83C\uDF47 ' + t.degustazione_vini_1)
+  if (t.degustazione_vini_2) s.push('\uD83C\uDF47 ' + t.degustazione_vini_2)
+  if (t.tipologia_pasto_1) s.push('\uD83C\uDF7D\uFE0F ' + t.tipologia_pasto_1)
+  if (t.tipologia_pasto_2) s.push('\uD83C\uDF7D\uFE0F ' + t.tipologia_pasto_2)
+  if (t.omaggio) s.push('\uD83C\uDF81 ' + t.omaggio)
+  return s
+}
+
 function ModaleConferma(props) {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -148,16 +174,35 @@ function ModalePrenotazione(props) {
   var prenotazioneEsistente = props.prenotazione || null
   var isModifica = prenotazioneEsistente !== null
 
+  // Gift card in arrivo dalla pagina Gift Card (?gift=<id>).
+  // I suoi dati sono SUGGERIMENTI: restano tutti modificabili.
+  var giftPre = props.giftPre || null
+  var gcPre = giftPre ? giftPre.gc : null
+  var tipPre = giftPre ? giftPre.tipologia : null
+
+  var notePre = ''
+  if (!isModifica && gcPre) {
+    notePre = 'Gift card ' + gcPre.codice + (tipPre ? ' \u2014 ' + tipPre.nome : '')
+  }
+
   var [form, setForm] = useState({
-    nome_gruppo: isModifica ? (prenotazioneEsistente.nome_gruppo || '') : '',
-    num_persone: isModifica ? String(prenotazioneEsistente.num_persone || '2') : '2',
-    lingua: isModifica ? (prenotazioneEsistente.lingua || sessione.lingua || 'ITA') : (sessione.lingua || 'ITA'),
-    note: isModifica ? (prenotazioneEsistente.note || '') : ''
+    nome_gruppo: isModifica
+      ? (prenotazioneEsistente.nome_gruppo || '')
+      : (gcPre ? (beneficiarioGift(gcPre) || gcPre.committente_nome || '') : ''),
+    num_persone: isModifica
+      ? String(prenotazioneEsistente.num_persone || '2')
+      : (gcPre && gcPre.numero_persone ? String(gcPre.numero_persone) : '2'),
+    lingua: isModifica
+      ? (prenotazioneEsistente.lingua || sessione.lingua || 'ITA')
+      : ((gcPre && gcPre.lingua) ? gcPre.lingua : (sessione.lingua || 'ITA')),
+    note: isModifica ? (prenotazioneEsistente.note || '') : notePre
   })
   var [giftCardSearch, setGiftCardSearch] = useState('')
   var [giftCardTrovate, setGiftCardTrovate] = useState([])
   var [giftCardSelezionata, setGiftCardSelezionata] = useState(
-    isModifica && prenotazioneEsistente.gift_card_id ? { id: prenotazioneEsistente.gift_card_id, codice: prenotazioneEsistente.gift_card_codice || '' } : null
+    isModifica && prenotazioneEsistente.gift_card_id
+      ? { id: prenotazioneEsistente.gift_card_id, codice: prenotazioneEsistente.gift_card_codice || '' }
+      : (gcPre ? { id: gcPre.id, codice: gcPre.codice } : null)
   )
   var [saving, setSaving] = useState(false)
   var [errore, setErrore] = useState('')
@@ -289,6 +334,7 @@ function DettaglioSessione(props) {
   var onClose = props.onClose
   var onModificaSessione = props.onModificaSessione
   var onEliminaSessione = props.onEliminaSessione
+  var giftPre = props.giftPre || null
 
   var [prenotazioni, setPrenotazioni] = useState([])
   var [loading, setLoading] = useState(true)
@@ -404,6 +450,7 @@ function DettaglioSessione(props) {
           <ModalePrenotazione
             sessione={sessione}
             prenotazione={prenotazioneInModifica}
+            giftPre={prenotazioneInModifica ? null : giftPre}
             onSave={handleSavePrenotazione}
             onClose={function() { setShowModalePrenotazione(false); setPrenotazioneInModifica(null) }}
           />
@@ -423,6 +470,13 @@ function DettaglioSessione(props) {
 // ── PAGINA PRINCIPALE ─────────────────────────────────────────
 export default function CookingClassPage() {
   var oggi = new Date()
+  var searchParamsResult = useSearchParams()
+  var searchParams = searchParamsResult[0]
+  var giftId = searchParams.get('gift')
+
+  // Gift card in arrivo dal pulsante "Prenota" della pagina Gift Card.
+  var [giftPre, setGiftPre] = useState(null)
+
   var [anno, setAnno] = useState(oggi.getFullYear())
   var [mese, setMese] = useState(oggi.getMonth())
   var [sessioni, setSessioni] = useState([])
@@ -434,6 +488,19 @@ export default function CookingClassPage() {
   var [confermaElimina, setConfermaElimina] = useState(null)
 
   useEffect(function() { loadSessioni() }, [anno, mese])
+
+  useEffect(function() {
+    if (!giftId) { setGiftPre(null); return }
+    supabase.from('gift_card')
+      .select('*, gift_card_tipologie(*)')
+      .eq('id', giftId)
+      .single()
+      .then(function(result) {
+        if (!result.error && result.data) {
+          setGiftPre({ gc: result.data, tipologia: result.data.gift_card_tipologie || null })
+        }
+      })
+  }, [giftId])
 
   function loadSessioni() {
     setLoading(true)
@@ -526,6 +593,40 @@ export default function CookingClassPage() {
           <Plus size={16} />Nuova Sessione
         </button>
       </div>
+
+      {/* Fascia di contesto: stiamo prenotando PER una gift card.
+          I dati sono suggerimenti: nella modale restano modificabili. */}
+      {giftPre && (
+        <div className="mb-4 bg-wine-50 border border-wine-200 rounded-xl p-4">
+          <div className="flex items-start gap-2">
+            <Gift size={18} className="text-wine-700 flex-shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-wine-900">
+                Prenotazione da Gift Card {giftPre.gc.codice}
+                {giftPre.tipologia ? ' \u2014 ' + giftPre.tipologia.nome : ''}
+              </p>
+              <p className="text-xs text-wine-800 mt-0.5">
+                {beneficiarioGift(giftPre.gc) ? 'Beneficiario: ' + beneficiarioGift(giftPre.gc) : 'Beneficiario non indicato'}
+                {giftPre.gc.numero_persone ? ' \u00B7 ' + giftPre.gc.numero_persone + ' persone' : ''}
+                {giftPre.gc.committente_contatto ? ' \u00B7 ' + giftPre.gc.committente_contatto : ''}
+              </p>
+              {giftPre.tipologia && serviziTipologia(giftPre.tipologia).length > 0 && (
+                <p className="text-xs text-wine-700 mt-1">
+                  Servizi del pacchetto: {serviziTipologia(giftPre.tipologia).join(' \u00B7 ')}
+                </p>
+              )}
+              {giftPre.tipologia && (giftPre.tipologia.tipologia_pasto_1 || giftPre.tipologia.tipologia_pasto_2) && (
+                <p className="text-xs text-wine-700 mt-1">
+                  Dopo aver prenotato la Cooking Class, torna alla Gift Card per prenotare il pasto collegato.
+                </p>
+              )}
+              <p className="text-xs text-wine-600 mt-1.5">
+                Scegli una sessione e aggiungi la prenotazione: i dati arrivano già compilati e restano modificabili.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Navigazione mese */}
       <div className="flex items-center justify-between mb-4">
@@ -663,6 +764,7 @@ export default function CookingClassPage() {
       {sessioneSelezionata && (
         <DettaglioSessione
           sessione={sessioneSelezionata}
+          giftPre={giftPre}
           onClose={function() { setSessioneSelezionata(null) }}
           onModificaSessione={function(s) {
             setSessioneSelezionata(null)

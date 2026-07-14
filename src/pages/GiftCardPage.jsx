@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { Plus, Search, X, Check, Gift, PencilLine, Trash2, ChevronDown, ChevronUp, AlertTriangle, Hotel, Wine, ChefHat, UtensilsCrossed } from 'lucide-react'
+import { Plus, Search, X, Check, Gift, PencilLine, Trash2, ChevronDown, ChevronUp, AlertTriangle, Hotel, Wine, ChefHat, UtensilsCrossed, CalendarPlus, ExternalLink, Sparkles } from 'lucide-react'
 
 // ── UTILITY ──────────────────────────────────────────────────
 function formatData(dateStr) {
@@ -1295,6 +1296,7 @@ function TabArchivio(props) {
   var [gcInModifica, setGcInModifica] = useState(null)
   var [gcPerUtilizzo, setGcPerUtilizzo] = useState(null)
   var [gcPerServizi, setGcPerServizi] = useState(null)
+  var [gcPerPrenota, setGcPerPrenota] = useState(null)
   var [confermaElimina, setConfermaElimina] = useState(null)
 
   useEffect(function() { loadGiftCard() }, [])
@@ -1453,6 +1455,10 @@ function TabArchivio(props) {
                       className="text-xs px-2 py-1.5 bg-wine-50 text-wine-700 rounded-lg border border-wine-200 hover:bg-wine-100 font-medium flex items-center gap-1">
                       <Gift size={12} />Servizi
                     </button>
+                    <button onClick={function() { setGcPerPrenota(gc) }}
+                      className="text-xs px-2 py-1.5 bg-wine-700 text-white rounded-lg border border-wine-700 hover:bg-wine-800 font-medium flex items-center gap-1">
+                      <CalendarPlus size={12} />Prenota
+                    </button>
                     {!gc.usata && !isScaduta(gc.scadenza) && (
                       <button onClick={function() { setGcPerUtilizzo(gc) }}
                         className="text-xs px-2 py-1.5 bg-green-50 text-green-700 rounded-lg border border-green-200 hover:bg-green-100 font-medium">
@@ -1478,6 +1484,7 @@ function TabArchivio(props) {
       {showModale && <ModaleGiftCard tipologie={tipologie} gc={gcInModifica} onSave={handleSaveGc} onClose={function() { setShowModale(false); setGcInModifica(null) }} />}
       {gcPerUtilizzo && <ModaleUtilizzo gc={gcPerUtilizzo} onSave={handleSaveUtilizzo} onClose={function() { setGcPerUtilizzo(null) }} />}
       {gcPerServizi && <PannelloServizi gc={gcPerServizi} tipologia={gcPerServizi.gift_card_tipologie} onClose={function() { setGcPerServizi(null) }} onAggiorna={handleAggiornaGc} />}
+      {gcPerPrenota && <ModalePrenota giftCard={gcPerPrenota} tipologia={gcPerPrenota.gift_card_tipologie} onClose={function() { setGcPerPrenota(null) }} />}
       {confermaElimina && <ModaleConferma testo={'Eliminare la gift card "' + confermaElimina.codice + '"?'} onConferma={handleElimina} onAnnulla={function() { setConfermaElimina(null) }} />}
     </div>
   )
@@ -1566,6 +1573,287 @@ function TabTipologie(props) {
       )}
       {showModale && <ModaleTipologia tipologia={tipologiaInModifica} onSave={handleSave} onClose={function() { setShowModale(false); setTipologiaInModifica(null) }} />}
       {confermaElimina && <ModaleConferma testo={'Eliminare la tipologia "' + confermaElimina.nome + '"?'} onConferma={handleElimina} onAnnulla={function() { setConfermaElimina(null) }} />}
+    </div>
+  )
+}
+
+// ============================================================
+// MODALE PRENOTA — smista i servizi della gift card verso le
+// pagine di prenotazione VERE (Wine Tour, Cooking Class,
+// Prenotazioni), gia' precompilate.
+//
+// Ogni servizio ha una AZIONE, dedotta dalla colonna della
+// tipologia in cui vive (vedi mappa concordata):
+//   pernottamento          -> alert camera (pannello Servizi)
+//   wine_tour              -> apre /wine-tour
+//   cooking_class          -> apre /cooking-class
+//   tipologia_pasto_1/2    -> apre /prenotazioni/nuova
+//   visita_orto            -> accessorio del wine tour
+//   degustazione_vini_1/2  -> accessorio del pasto
+//   calice_benvenuto       -> promemoria
+//   omaggio                -> promemoria
+//
+// Lo STATO ("gia' prenotato / da fare") non ha bisogno di
+// tabelle nuove: lo leggo dalle prenotazioni gia' collegate a
+// questa gift card tramite gift_card_id (FK gia' esistenti).
+// ============================================================
+function ModalePrenota(props) {
+  var gc = props.giftCard
+  var tipologia = props.tipologia
+  var onClose = props.onClose
+  var navigate = useNavigate()
+
+  var [wineTour, setWineTour] = useState([])
+  var [cooking, setCooking] = useState([])
+  var [pasti, setPasti] = useState([])
+  var [loading, setLoading] = useState(true)
+
+  useEffect(function() { caricaStato() }, [gc.id])
+
+  // Legge cosa risulta gia' prenotato per questa gift card.
+  function caricaStato() {
+    setLoading(true)
+    var pWt = supabase.from('wine_tour_prenotazioni')
+      .select('id, num_persone, wine_tour_sessioni(data, orario)')
+      .eq('gift_card_id', gc.id)
+    var pCc = supabase.from('cooking_class_prenotazioni')
+      .select('id, num_persone, cooking_class_sessioni(data, orario)')
+      .eq('gift_card_id', gc.id)
+    var pRe = supabase.from('reservations')
+      .select('id, reservation_date, meal_type, guests_count, status')
+      .eq('gift_card_id', gc.id)
+      .order('reservation_date', { ascending: true })
+
+    Promise.all([pWt, pCc, pRe]).then(function(res) {
+      setLoading(false)
+      setWineTour((!res[0].error && res[0].data) ? res[0].data : [])
+      setCooking((!res[1].error && res[1].data) ? res[1].data : [])
+      setPasti((!res[2].error && res[2].data) ? res[2].data : [])
+    })
+  }
+
+  // Giorno/turno SUGGERITI per il pasto post-cooking: li ricavo dalla
+  // cooking class gia' prenotata (mattina -> pranzo, pomeriggio -> cena).
+  // Restano suggerimenti: nella pagina prenotazioni si cambiano.
+  function suggerimentoDaCooking() {
+    if (cooking.length === 0) return null
+    var s = cooking[0].cooking_class_sessioni
+    if (!s || !s.data) return null
+    var ora = parseInt(String(s.orario || '12:00').split(':')[0], 10)
+    return { data: s.data, meal: (ora < 13 ? 'lunch' : 'dinner') }
+  }
+
+  // Apre la pagina giusta portandosi dietro il contesto della gift card.
+  function apriWineTour() {
+    navigate('/wine-tour?gift=' + gc.id)
+  }
+
+  function apriCooking() {
+    navigate('/cooking-class?gift=' + gc.id)
+  }
+
+  // n = 1 o 2 (quale dei due pasti). postCooking = se agganciarlo alla
+  // cooking class (giorno/turno suggeriti). Entrambi restano modificabili.
+  function apriPasto(n, postCooking) {
+    var url = '/prenotazioni/nuova?gift=' + gc.id + '&pasto=' + n
+    if (postCooking) {
+      var s = suggerimentoDaCooking()
+      if (s) url += '&date=' + s.data + '&meal=' + s.meal
+    }
+    navigate(url)
+  }
+
+  var suggerimento = suggerimentoDaCooking()
+  var haCooking = Boolean(tipologia && tipologia.cooking_class)
+
+  // Etichette dei pasti presenti nella tipologia.
+  var listaPasti = []
+  if (tipologia && tipologia.tipologia_pasto_1) listaPasti.push({ n: 1, label: tipologia.tipologia_pasto_1 })
+  if (tipologia && tipologia.tipologia_pasto_2) listaPasti.push({ n: 2, label: tipologia.tipologia_pasto_2 })
+
+  // Accessori e promemoria: non si prenotano, si ricordano.
+  var accessori = []
+  if (tipologia && tipologia.visita_orto) accessori.push({ testo: '🌱 Visita all\'orto', dove: 'da annotare sul Wine Tour' })
+  if (tipologia && tipologia.degustazione_vini_1) accessori.push({ testo: '🍇 ' + tipologia.degustazione_vini_1, dove: 'da annotare sul pasto' })
+  if (tipologia && tipologia.degustazione_vini_2) accessori.push({ testo: '🍇 ' + tipologia.degustazione_vini_2, dove: 'da annotare sul pasto' })
+
+  var promemoria = []
+  if (tipologia && tipologia.calice_benvenuto) promemoria.push('🥂 Calice di benvenuto')
+  if (tipologia && tipologia.omaggio) promemoria.push('🎁 ' + tipologia.omaggio)
+
+  function RigaServizio(p) {
+    return (
+      <div className="border border-gray-200 rounded-xl p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-gray-900">{p.titolo}</p>
+            {p.stato}
+          </div>
+          <div className="flex-shrink-0">{p.azione}</div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] flex flex-col">
+
+        <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between flex-shrink-0">
+          <div className="min-w-0">
+            <h3 className="font-semibold text-gray-900 flex items-center gap-2">
+              <CalendarPlus size={17} className="text-wine-700" />Prenota i servizi
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {gc.codice}{tipologia ? ' · ' + tipologia.nome : ''}
+              {beneficiarioCompleto(gc) ? ' · ' + beneficiarioCompleto(gc) : ''}
+              {gc.numero_persone ? ' · ' + gc.numero_persone + ' pers.' : ''}
+            </p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 flex-shrink-0"><X size={20} /></button>
+        </div>
+
+        <div className="p-5 overflow-y-auto space-y-3">
+
+          <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded-lg p-2.5">
+            I dati della gift card vengono proposti nella pagina di prenotazione: sono
+            suggerimenti, si possono sempre modificare (per esempio se il buono viene ceduto a un'altra persona).
+          </p>
+
+          {loading && <p className="text-sm text-gray-400 py-4 text-center">Caricamento...</p>}
+
+          {!loading && (
+            <>
+              {/* PERNOTTAMENTO — non si prenota qui: alert nel pannello Servizi */}
+              {tipologia && tipologia.pernottamento && (
+                <RigaServizio
+                  titolo={'🏨 Pernottamento' + (tipologia.notti ? ' ' + tipologia.notti + ' notte/i' : '')}
+                  stato={gc.pernottamento_data_inizio
+                    ? <p className="text-xs text-green-700 mt-0.5">Registrato dal {formatData(gc.pernottamento_data_inizio)}{gc.pernottamento_camera ? ' · camera ' + gc.pernottamento_camera : ''}</p>
+                    : <p className="text-xs text-amber-600 mt-0.5">Verifica la disponibilità della camera e registrala nel pannello Servizi</p>}
+                  azione={<span className="text-xs text-gray-400">Pannello Servizi</span>}
+                />
+              )}
+
+              {/* WINE TOUR — apre la pagina vera */}
+              {tipologia && tipologia.wine_tour && (
+                <RigaServizio
+                  titolo="🍷 Wine Tour"
+                  stato={wineTour.length > 0
+                    ? <p className="text-xs text-green-700 mt-0.5">
+                        Prenotato{wineTour[0].wine_tour_sessioni ? ' · ' + formatData(wineTour[0].wine_tour_sessioni.data) + ' ore ' + String(wineTour[0].wine_tour_sessioni.orario).slice(0, 5) : ''}
+                      </p>
+                    : <p className="text-xs text-gray-500 mt-0.5">Da prenotare</p>}
+                  azione={
+                    <button onClick={apriWineTour}
+                      className="text-xs px-3 py-1.5 bg-purple-700 text-white rounded-lg hover:bg-purple-800 font-medium flex items-center gap-1">
+                      <ExternalLink size={12} />{wineTour.length > 0 ? 'Apri' : 'Prenota'}
+                    </button>
+                  }
+                />
+              )}
+
+              {/* COOKING CLASS — apre la pagina vera */}
+              {haCooking && (
+                <RigaServizio
+                  titolo="👨‍🍳 Cooking Class"
+                  stato={cooking.length > 0
+                    ? <p className="text-xs text-green-700 mt-0.5">
+                        Prenotata{cooking[0].cooking_class_sessioni ? ' · ' + formatData(cooking[0].cooking_class_sessioni.data) + ' ore ' + String(cooking[0].cooking_class_sessioni.orario).slice(0, 5) : ''}
+                      </p>
+                    : <p className="text-xs text-gray-500 mt-0.5">Da prenotare</p>}
+                  azione={
+                    <button onClick={apriCooking}
+                      className="text-xs px-3 py-1.5 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium flex items-center gap-1">
+                      <ExternalLink size={12} />{cooking.length > 0 ? 'Apri' : 'Prenota'}
+                    </button>
+                  }
+                />
+              )}
+
+              {/* PASTI — aprono la pagina Prenotazioni. Per ognuno si puo'
+                  scegliere se agganciarlo alla cooking class (giorno/turno
+                  suggeriti) o prenotarlo liberamente. */}
+              {listaPasti.map(function(p) {
+                return (
+                  <div key={p.n} className="border border-gray-200 rounded-xl p-3">
+                    <p className="text-sm font-medium text-gray-900">🍽️ {p.label}</p>
+                    <p className="text-xs text-gray-500 mt-0.5">
+                      {pasti.length > 0
+                        ? 'Prenotazioni collegate a questa gift card: ' + pasti.length
+                        : 'Da prenotare'}
+                    </p>
+                    <div className="flex gap-2 mt-2 flex-wrap">
+                      {haCooking && (
+                        <button onClick={function() { apriPasto(p.n, true) }}
+                          disabled={!suggerimento}
+                          title={suggerimento ? '' : 'Prenota prima la Cooking Class per avere giorno e turno suggeriti'}
+                          className={
+                            'text-xs px-3 py-1.5 rounded-lg font-medium flex items-center gap-1 ' +
+                            (suggerimento
+                              ? 'bg-wine-700 text-white hover:bg-wine-800'
+                              : 'bg-gray-100 text-gray-400 cursor-not-allowed')
+                          }>
+                          <Sparkles size={12} />
+                          {suggerimento
+                            ? 'Dopo la Cooking (' + formatData(suggerimento.data) + ' · ' + (suggerimento.meal === 'lunch' ? 'pranzo' : 'cena') + ')'
+                            : 'Dopo la Cooking'}
+                        </button>
+                      )}
+                      <button onClick={function() { apriPasto(p.n, false) }}
+                        className="text-xs px-3 py-1.5 bg-white border border-wine-300 text-wine-700 rounded-lg hover:bg-wine-50 font-medium flex items-center gap-1">
+                        <ExternalLink size={12} />Scegli giorno e turno
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+
+              {/* Prenotazioni pasto gia' fatte: le elenco cosi' si vedono */}
+              {pasti.length > 0 && (
+                <div className="bg-green-50 border border-green-200 rounded-xl p-3">
+                  <p className="text-xs font-medium text-green-800 mb-1">Pasti già prenotati</p>
+                  {pasti.map(function(r) {
+                    return (
+                      <p key={r.id} className="text-xs text-green-700">
+                        {formatData(r.reservation_date)} · {r.meal_type === 'lunch' ? 'Pranzo' : 'Cena'} · {r.guests_count} pers.
+                        {r.status === 'cancelled' ? ' (annullata)' : ''}
+                      </p>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* ACCESSORI — viaggiano su un'altra prenotazione */}
+              {accessori.length > 0 && (
+                <div className="bg-teal-50 border border-teal-200 rounded-xl p-3">
+                  <p className="text-xs font-medium text-teal-800 mb-1">Da annotare sulla prenotazione</p>
+                  {accessori.map(function(a, i) {
+                    return <p key={i} className="text-xs text-teal-700">{a.testo} — {a.dove}</p>
+                  })}
+                </div>
+              )}
+
+              {/* PROMEMORIA — nessuna prenotazione */}
+              {promemoria.length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                  <p className="text-xs font-medium text-amber-800 mb-1">Promemoria (nessuna prenotazione)</p>
+                  {promemoria.map(function(t, i) {
+                    return <p key={i} className="text-xs text-amber-700">{t}</p>
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="px-5 py-3 border-t border-gray-100 flex-shrink-0">
+          <button onClick={onClose}
+            className="w-full py-2 border border-gray-300 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50">
+            Chiudi
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

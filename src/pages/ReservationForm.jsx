@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, Save, Search, AlertTriangle, UserPlus, Check, Users, ChevronRight } from 'lucide-react'
+import { ArrowLeft, Save, Search, AlertTriangle, UserPlus, Check, Users, ChevronRight, Gift } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import ConfermaPin from '../components/ConfermaPin'
@@ -108,6 +108,21 @@ function ReservationForm() {
   var initialDate = searchParams.get('date') || formatDateISO(new Date())
   var initialMeal = searchParams.get('meal') || 'dinner'
 
+  // ----------------------------------------------------------
+  // GIFT CARD (?gift=<id>&pasto=<n>) — la prenotazione nasce da un buono.
+  // Tutto quello che arriva dalla gift card e' un SUGGERIMENTO: cliente,
+  // persone e note si possono cambiare (il buono puo' essere ceduto).
+  // ----------------------------------------------------------
+  var giftId = searchParams.get('gift')
+  var pastoNum = searchParams.get('pasto')
+  var [giftCard, setGiftCard] = useState(null)
+  var [giftTipologia, setGiftTipologia] = useState(null)
+  var [giftApplicata, setGiftApplicata] = useState(false)
+  var [giftClienteNuovo, setGiftClienteNuovo] = useState(false)
+  // Legame gift card di una prenotazione GIA' esistente (in modifica):
+  // va conservato, altrimenti il salvataggio lo azzererebbe.
+  var [giftCardIdEsistente, setGiftCardIdEsistente] = useState(null)
+
   var [formData, setFormData] = useState({
     reservation_date: initialDate,
     meal_type: initialMeal,
@@ -126,6 +141,102 @@ function ReservationForm() {
   useEffect(function() {
     if (isEditing) loadReservation()
   }, [id])
+
+  // Carica la gift card di partenza e propone i suoi dati.
+  useEffect(function() {
+    if (!giftId || isEditing || giftApplicata) return
+    supabase.from('gift_card')
+      .select('*, gift_card_tipologie(*)')
+      .eq('id', giftId)
+      .single()
+      .then(function(result) {
+        if (result.error || !result.data) return
+        var gc = result.data
+        var tip = gc.gift_card_tipologie || null
+        setGiftCard(gc)
+        setGiftTipologia(tip)
+        setGiftApplicata(true)
+        applicaSuggerimentiGift(gc, tip)
+      })
+  }, [giftId, isEditing, giftApplicata])
+
+  // Nome + cognome del beneficiario (le gift vecchie hanno tutto nel nome).
+  function beneficiarioGift(gc) {
+    if (!gc) return { nome: '', cognome: '' }
+    return {
+      nome: (gc.beneficiario_nome || '').trim(),
+      cognome: (gc.beneficiario_cognome || '').trim()
+    }
+  }
+
+  // Etichetta del pasto scelto in Gift Card (?pasto=1|2).
+  function etichettaPasto(tip) {
+    if (!tip) return ''
+    if (pastoNum === '1') return tip.tipologia_pasto_1 || ''
+    if (pastoNum === '2') return tip.tipologia_pasto_2 || ''
+    return ''
+  }
+
+  // Precompila persone e note; propone il cliente beneficiario.
+  // NON crea nulla di nascosto: se il cliente non esiste, apre il form di
+  // creazione rapida gia' compilato e la conferma resta all'operatore.
+  function applicaSuggerimentiGift(gc, tip) {
+    var ben = beneficiarioGift(gc)
+    var pasto = etichettaPasto(tip)
+
+    // Note suggerite: contesto del buono + accessori che viaggiano sul pasto.
+    var righe = []
+    righe.push('Gift card ' + gc.codice + (tip ? ' - ' + tip.nome : ''))
+    if (pasto) righe.push('Pasto: ' + pasto)
+    if (tip && tip.degustazione_vini_1) righe.push('Vini inclusi: ' + tip.degustazione_vini_1)
+    if (tip && tip.degustazione_vini_2) righe.push('Vini inclusi: ' + tip.degustazione_vini_2)
+    var noteGift = righe.join('\n')
+
+    setFormData(function(prev) {
+      var u = Object.assign({}, prev)
+      if (gc.numero_persone && gc.numero_persone > 0) {
+        u.adults_count = gc.numero_persone
+        u.children_count = 0
+      }
+      u.notes = prev.notes ? (prev.notes + '\n' + noteGift) : noteGift
+      return u
+    })
+
+    // Cliente: prima lo cerco in anagrafica; se c'e', lo propongo selezionato.
+    if (ben.nome && ben.cognome) {
+      supabase.from('customers')
+        .select('*')
+        .ilike('first_name', ben.nome)
+        .ilike('last_name', ben.cognome)
+        .limit(1)
+        .then(function(res) {
+          if (!res.error && res.data && res.data.length > 0) {
+            selectCustomer(res.data[0])
+          } else {
+            proponiNuovoCliente(gc, tip, ben)
+          }
+        })
+    } else {
+      proponiNuovoCliente(gc, tip, ben)
+    }
+  }
+
+  // Apre la creazione rapida cliente GIA' COMPILATA col beneficiario.
+  // La vecchia stringa identificativa resta nelle note, per tracciabilita'.
+  function proponiNuovoCliente(gc, tip, ben) {
+    if (!ben.nome && !ben.cognome) return
+    setQuickForm({
+      first_name: ben.nome || (gc.committente_nome || ''),
+      last_name: ben.cognome || '',
+      phone: (gc.committente_contatto || '').trim(),
+      email: '',
+      category: 'standard',
+      notes: 'Beneficiario gift card ' + (tip ? tip.nome + ' ' : '') + gc.codice
+    })
+    setQuickError(null)
+    setGiftClienteNuovo(true)
+    setShowQuickCustomer(true)
+  }
 
   useEffect(function() {
     if (formData.reservation_date && formData.meal_type) checkAvailability()
@@ -173,6 +284,19 @@ function ReservationForm() {
       .then(function(result) {
         if (result.error) { alert('Prenotazione non trovata.'); navigate('/prenotazioni'); return }
         var res = result.data
+        if (res.gift_card_id) {
+          setGiftCardIdEsistente(res.gift_card_id)
+          supabase.from('gift_card')
+            .select('*, gift_card_tipologie(*)')
+            .eq('id', res.gift_card_id)
+            .single()
+            .then(function(g) {
+              if (!g.error && g.data) {
+                setGiftCard(g.data)
+                setGiftTipologia(g.data.gift_card_tipologie || null)
+              }
+            })
+        }
         setFormData({
           reservation_date: res.reservation_date,
           meal_type: res.meal_type === 'lunch' || res.meal_type === 'dinner' ? res.meal_type : 'dinner',
@@ -382,6 +506,7 @@ function ReservationForm() {
     var haAllergeni = Boolean(customerAllergens.length > 0 || hasAllergiePrenotazione)
     return {
       customer_id: selectedCustomer.id,
+      gift_card_id: giftCard ? giftCard.id : (giftCardIdEsistente || null),
       reservation_date: formData.reservation_date,
       meal_type: formData.meal_type,
       requested_time: requestedTime,
@@ -565,6 +690,44 @@ function ReservationForm() {
           {isEditing ? 'Modifica Prenotazione' : 'Nuova Prenotazione'}
         </h1>
       </div>
+
+      {/* Fascia GIFT CARD: la prenotazione nasce da un buono regalo.
+          I dati precompilati sono suggerimenti e restano modificabili. */}
+      {giftCard && (
+        <div className="mb-6 bg-wine-50 border border-wine-200 rounded-xl p-4">
+          <div className="flex items-start gap-2">
+            <Gift size={18} className="text-wine-700 flex-shrink-0 mt-0.5" />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-wine-900">
+                Gift Card {giftCard.codice}
+                {giftTipologia ? ' \u2014 ' + giftTipologia.nome : ''}
+              </p>
+              {etichettaPasto(giftTipologia) && (
+                <p className="text-xs text-wine-800 mt-0.5">
+                  Servizio: {etichettaPasto(giftTipologia)}
+                </p>
+              )}
+              <p className="text-xs text-wine-800 mt-0.5">
+                {(giftCard.beneficiario_nome || giftCard.beneficiario_cognome)
+                  ? 'Beneficiario: ' + ((giftCard.beneficiario_nome || '') + ' ' + (giftCard.beneficiario_cognome || '')).trim()
+                  : 'Beneficiario non indicato sulla gift card'}
+                {giftCard.numero_persone ? ' \u00B7 ' + giftCard.numero_persone + ' persone' : ''}
+                {giftCard.committente_contatto ? ' \u00B7 ' + giftCard.committente_contatto : ''}
+              </p>
+              {giftTipologia && (giftTipologia.degustazione_vini_1 || giftTipologia.degustazione_vini_2) && (
+                <p className="text-xs text-wine-700 mt-1">
+                  Vini inclusi: {[giftTipologia.degustazione_vini_1, giftTipologia.degustazione_vini_2].filter(Boolean).join(' \u00B7 ')}
+                </p>
+              )}
+              {!isEditing && (
+                <p className="text-xs text-wine-600 mt-1.5">
+                  Cliente, persone e note sono proposti dalla gift card: controllali e modificali se serve.
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
 
@@ -961,11 +1124,17 @@ function ReservationForm() {
                 <h2 className="text-lg font-semibold text-gray-900">Nuovo cliente</h2>
                 <p className="text-xs text-gray-400 mt-0.5">Il cliente verra creato e selezionato automaticamente</p>
               </div>
-              <button type="button" onClick={function() { setShowQuickCustomer(false) }}
+              <button type="button" onClick={function() { setShowQuickCustomer(false); setGiftClienteNuovo(false) }}
                 className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
             </div>
             <form onSubmit={handleQuickCustomerSubmit} className="p-6 space-y-4">
               {quickError && <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{quickError}</div>}
+              {giftClienteNuovo && (
+                <div className="p-3 bg-wine-50 border border-wine-200 rounded-lg text-xs text-wine-800">
+                  Il beneficiario della gift card non risulta in anagrafica. I dati qui sotto
+                  sono proposti dal buono: correggili se serve, poi conferma per creare il cliente.
+                </div>
+              )}
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-medium text-gray-700 mb-1">Nome *</label>
