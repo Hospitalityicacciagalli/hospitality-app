@@ -36,8 +36,12 @@ import LimitiPage from './pages/LimitiPage';
 import CampagnaImportaPage from './pages/CampagnaImportaPage';
 import CampagnaRiepilogoPage from './pages/CampagnaRiepilogoPage';
 import CampagnaStipendiPage from './pages/CampagnaStipendiPage';
+import HicDashboardPage from './pages/hic/HicDashboardPage';
 
-function ProtectedRoute({ children, feature, requireEdit }) {
+// feature   = un solo permesso richiesto.
+// features  = elenco di permessi: ne basta UNO qualunque (usato dalla
+//             Dashboard HotelInCloud, che ha due rami indipendenti).
+function ProtectedRoute({ children, feature, features, requireEdit }) {
   var { session, loading, canView, canEdit } = useAuth();
 
   if (loading) {
@@ -55,6 +59,20 @@ function ProtectedRoute({ children, feature, requireEdit }) {
   if (feature) {
     var ok = requireEdit ? canEdit(feature) : canView(feature);
     if (!ok) {
+      return <Navigate to="/" replace />;
+    }
+  }
+
+  if (features && features.length > 0) {
+    var almenoUno = false;
+    for (var i = 0; i < features.length; i++) {
+      var consentito = requireEdit ? canEdit(features[i]) : canView(features[i]);
+      if (consentito) {
+        almenoUno = true;
+        break;
+      }
+    }
+    if (!almenoUno) {
       return <Navigate to="/" replace />;
     }
   }
@@ -153,6 +171,15 @@ function AppRoutes() {
         <Route path="/limiti" element={
           <ProtectedRoute feature="limiti">
             <LimitiPage />
+          </ProtectedRoute>
+        } />
+
+        {/* Camere — Dashboard HotelInCloud (sola lettura).
+            Due permessi indipendenti: basta averne uno per entrare,
+            poi la pagina mostra solo le schede concesse. */}
+        <Route path="/camere" element={
+          <ProtectedRoute features={['hic_operativo', 'hic_economico']}>
+            <HicDashboardPage />
           </ProtectedRoute>
         } />
 

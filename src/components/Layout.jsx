@@ -130,6 +130,10 @@ export default function Layout({ children }) {
     ? '/campagna/riepilogo'
     : (vediCampagnaImporta ? '/campagna/importa' : '/campagna/stipendi');
 
+  // Camere (Dashboard HotelInCloud): la voce compare a chi ha almeno
+  // uno dei due rami. Quali schede vedra' dentro lo decide la pagina.
+  var vediCamere = canView('hic_operativo') || canView('hic_economico');
+
   var showAdminSection = canView('impostazioni');
 
   // Percentuale della barra del timer (residuo su totale).
@@ -178,6 +182,19 @@ export default function Layout({ children }) {
             onClick={function() { setMobileOpen(false); }}>
             <span className="text-base">🪑</span>
             Limiti coperti
+          </NavLink>
+        )}
+
+        {/* Camere: dashboard di Hotel in Cloud, sola lettura.
+            Attenzione: "Prenotazioni" qui sopra e' il RISTORANTE,
+            questa voce sono le CAMERE. */}
+        {vediCamere && (
+          <NavLink
+            to="/camere"
+            className={function(p) { return navClass(p.isActive); }}
+            onClick={function() { setMobileOpen(false); }}>
+            <span className="text-base">🛏️</span>
+            Camere
           </NavLink>
         )}
 
