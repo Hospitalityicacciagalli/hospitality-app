@@ -4,27 +4,42 @@ import { supabase } from '../../lib/supabase';
 import SchedaFatturato from './SchedaFatturato';
 import SchedaCanali from './SchedaCanali';
 import SchedaConfronto from './SchedaConfronto';
+import SchedaOccupazione from './SchedaOccupazione';
+import SchedaOspiti from './SchedaOspiti';
+import SchedaConsumi from './SchedaConsumi';
+import SchedaPrenotazioni from './SchedaPrenotazioni';
+import SchedaAnticipo from './SchedaAnticipo';
 
 // ============================================================
 // DASHBOARD HOTELINCLOUD — impalcatura
 //
 // Una sola pagina, le schede dentro. Ogni scheda e' un file suo e
-// compare solo se l'utente ha il permesso indicato qui sotto:
-// per aggiungere le schede operative (Occupazione, Ospiti, Consumi,
-// Prenotazioni, Anticipo) bastano un import e una riga in SCHEDE.
+// compare solo se l'utente ha il permesso indicato qui sotto.
+//
+// PERMESSI. Le schede che mostrano denaro sono hic_economico, quelle che
+// mostrano soltanto numeri fisici sono hic_operativo. Consumi e
+// Prenotazioni riga per riga sono economiche perche' mostrano importi —
+// la seconda li mostra addirittura uno per uno — e la marcatura eventi
+// che vive dentro Prenotazioni richiede la scrittura sulla parte
+// economica.
 //
 // Le somme NON si fanno qui: Supabase restituisce al massimo 1.000
 // righe per richiesta e taglia in silenzio, e gli addebiti sono
 // 30.455. Tutte le aggregazioni arrivano gia' fatte dalle funzioni
-// della migrazione 32, dove stanno scritte una volta sola le regole
-// della sezione 17.9 (mese di check-in, presente_in_hic, virtuali,
-// caparre, somma prima / arrotonda dopo).
+// delle migrazioni 32, 33 e 34, dove stanno scritte una volta sola le
+// regole della sezione 17.9 (mese di check-in, presente_in_hic,
+// virtuali, caparre, valore zero, somma prima / arrotonda dopo).
 // ============================================================
 
 var SCHEDE = [
-  { key: 'fatturato', label: 'Fatturato',         permesso: 'hic_economico', componente: SchedaFatturato },
-  { key: 'canali',    label: 'Canali',            permesso: 'hic_economico', componente: SchedaCanali },
-  { key: 'confronto', label: 'Confronto periodi', permesso: 'hic_economico', componente: SchedaConfronto }
+  { key: 'fatturato',    label: 'Fatturato',         permesso: 'hic_economico', componente: SchedaFatturato },
+  { key: 'canali',       label: 'Canali',            permesso: 'hic_economico', componente: SchedaCanali },
+  { key: 'confronto',    label: 'Confronto periodi', permesso: 'hic_economico', componente: SchedaConfronto },
+  { key: 'occupazione',  label: 'Occupazione',       permesso: 'hic_operativo', componente: SchedaOccupazione },
+  { key: 'ospiti',       label: 'Ospiti',            permesso: 'hic_operativo', componente: SchedaOspiti },
+  { key: 'consumi',      label: 'Consumi',           permesso: 'hic_economico', componente: SchedaConsumi },
+  { key: 'prenotazioni', label: 'Prenotazioni',      permesso: 'hic_economico', componente: SchedaPrenotazioni },
+  { key: 'anticipo',     label: 'Anticipo',          permesso: 'hic_operativo', componente: SchedaAnticipo }
 ];
 
 var PERIODI = [
@@ -287,11 +302,19 @@ export default function HicDashboardPage() {
           </div>
         </div>
 
-        {/* Il perimetro attivo dichiarato per esteso, sempre */}
+        {/* Il perimetro attivo dichiarato per esteso, sempre.
+            L'asse temporale NON si dichiara qui: non e' lo stesso per tutte
+            le schede. Occupazione attribuisce le notti al giorno in cui sono
+            state dormite, le altre al mese di check-in. Ogni scheda lo dice
+            nella propria intestazione, dove e' vero. */}
         <div className="mt-4 pt-3 border-t border-gray-100 text-xs text-gray-500 space-y-1">
-          <div><span className="font-semibold text-gray-600">Periodo attivo:</span> {etichettaPeriodo}, per mese di check-in.</div>
+          <div><span className="font-semibold text-gray-600">Periodo attivo:</span> {etichettaPeriodo}.</div>
           <div><span className="font-semibold text-gray-600">Perimetro attivo:</span> {DESCRIZIONE_PERIMETRO[perimetro]}</div>
           <div><span className="font-semibold text-gray-600">Voci evento:</span> {DESCRIZIONE_EVENTI[eventi]}</div>
+          <div className="text-gray-400">
+            Perimetro e voci evento valgono per le schede economiche. Occupazione, Ospiti e Anticipo
+            lavorano sempre sul perimetro standard e lo dichiarano in cima.
+          </div>
         </div>
       </div>
 
@@ -300,7 +323,8 @@ export default function HicDashboardPage() {
         <div className="bg-white rounded-xl border border-gray-200 p-8 text-center text-gray-500 text-sm">
           Nessuna scheda disponibile con i permessi attuali.
           <div className="text-xs text-gray-400 mt-2">
-            Le schede operative (occupazione, ospiti, consumi, prenotazioni, anticipo) arriveranno con il prossimo aggiornamento.
+            Servono il permesso hic_economico per le schede di fatturato e il permesso hic_operativo
+            per quelle di occupazione e ospiti.
           </div>
         </div>
       ) : (
