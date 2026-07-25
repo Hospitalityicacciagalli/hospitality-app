@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Fragment } from 'react';
 import { useAuth } from '../../lib/AuthContext';
 import { supabase } from '../../lib/supabase';
 import { euro, numero, percentuale } from './formati';
@@ -26,6 +26,39 @@ import { euro, numero, percentuale } from './formati';
 // IL PANNELLO DI MARCATURA ignora di proposito perimetro e filtro voci
 // evento: se il filtro fosse su "esclusi" non potresti mai raggiungere
 // una voce per smarcarla. Il periodo invece vale.
+//
+// ------------------------------------------------------------
+// NOVITA' (migrazione 35 / 35b)
+//
+// 1. MARCATURA DI RIGA. Ogni riga dell'elenco ha un pulsante che apre un
+//    pannellino SOTTO la riga stessa (mai una finestra sopra: sull'iPad
+//    le modali sono la fonte di meta' dei nostri guai). Da li' si dichiara
+//    che quella singola voce e' o non e' un evento, e facoltativamente si
+//    forza il gruppo dei consumi. La decisione di riga vince su quella di
+//    prenotazione, che a sua volta vince sulla proposta automatica.
+//    E' reversibile: Togli cancella il record e la riga torna
+//    all'automatismo.
+//
+// 2. LA TRAPPOLA DEL FILTRO, e come la si evita. Questo elenco RISPETTA i
+//    filtri della barra in alto (a differenza del pannello di marcatura,
+//    che li ignora di proposito). Quindi se il filtro voci evento e' su
+//    "solo eventi" e marchi una riga come "non e' un evento", quella riga
+//    esce dal filtro e sparirebbe sotto il dito, irraggiungibile per
+//    correggersi. Per questo dopo un salvataggio la riga NON viene
+//    ricaricata: resta al suo posto con un avviso in ambra, e sparisce
+//    solo al prossimo caricamento. Si ha sempre il tempo di tornare
+//    indietro.
+//
+// 3. IL CAMPO NOTE, in ENTRAMBI i pannelli. La colonna note esisteva su
+//    hic_marcature_evento fin dalla prima versione ma nessuno poteva
+//    scriverla: era una colonna morta. Ora si scrive sia sulla marcatura
+//    di prenotazione sia su quella di riga.
+//
+// Le marcature di riga NON passano da hic_elenco_righe (che elenca le sue
+// colonne una per una e andrebbe ricreata con un DROP, su una funzione
+// che regge la scheda in produzione): si leggono direttamente da
+// hic_marcature_riga per i soli addebito_id della pagina visibile. Sono
+// 50 per volta, ben sotto il limite delle 1.000 righe.
 // ============================================================
 
 var PAGINA = 50;
@@ -42,6 +75,8 @@ var STATI_MARCATURA = [
   { key: 'marcate',     label: "Gia' marcate" },
   { key: 'tutte',       label: 'Tutte' }
 ];
+
+var MAX_SUGGERIMENTI = 12;
 
 function Pillola(props) {
   var classe = props.attiva
@@ -71,6 +106,11 @@ function dataBreve(iso) {
   return p[2] + '/' + p[1] + '/' + p[0];
 }
 
+function ripulisci(testo) {
+  if (testo === null || testo === undefined) return '';
+  return String(testo).replace(/\s+/g, ' ').trim();
+}
+
 export default function SchedaPrenotazioni(props) {
   var da = props.da;
   var a = props.a;
@@ -98,7 +138,19 @@ export default function SchedaPrenotazioni(props) {
   var [caricamento, setCaricamento] = useState(true);
   var [errore, setErrore] = useState(null);
 
-  // --- Marcatura ---
+  // --- Marcatura di RIGA (nuova) ---
+  var [marcRighe, setMarcRighe] = useState({});
+  var [rigaAperta, setRigaAperta] = useState(null);
+  var [formMarcatura, setFormMarcatura] = useState(null);
+  var [formGruppo, setFormGruppo] = useState('');
+  var [formNote, setFormNote] = useState('');
+  var [rigaInSalvataggio, setRigaInSalvataggio] = useState(null);
+  var [erroreRiga, setErroreRiga] = useState(null);
+  var [sospese, setSospese] = useState({});
+  var [suggerimenti, setSuggerimenti] = useState([]);
+  var [suggerimentiChiesti, setSuggerimentiChiesti] = useState(false);
+
+  // --- Marcatura di PRENOTAZIONE ---
   var [statoMarcatura, setStatoMarcatura] = useState('da_rivedere');
   var [marcConteggio, setMarcConteggio] = useState(null);
   var [marcElenco, setMarcElenco] = useState([]);
@@ -107,6 +159,9 @@ export default function SchedaPrenotazioni(props) {
   var [marcErrore, setMarcErrore] = useState(null);
   var [inSalvataggio, setInSalvataggio] = useState(null);
   var [giroMarcatura, setGiroMarcatura] = useState(0);
+  var [noteEvento, setNoteEvento] = useState({});
+  var [notaAperta, setNotaAperta] = useState(null);
+  var [formNotaEvento, setFormNotaEvento] = useState('');
 
   // I filtri della barra o dei pulsanti riportano sempre alla prima pagina.
   useEffect(function() {
@@ -156,11 +211,47 @@ export default function SchedaPrenotazioni(props) {
       var c = risposte[2].data;
       setConteggio(c && c.length > 0 ? c[0] : null);
       setRighe(risposte[3].data || []);
+      // Una pagina nuova: gli avvisi in ambra della pagina precedente
+      // non hanno piu' senso, e nessun pannello resta aperto.
+      setSospese({});
+      setRigaAperta(null);
       setCaricamento(false);
     });
 
     return function() { annullato = true; };
   }, [da, a, perimetro, eventi, testoAttivo, categoria, ordine, pagina]);
+
+  // Le marcature di riga della sola pagina visibile.
+  useEffect(function() {
+    if (!righe || righe.length === 0) {
+      setMarcRighe({});
+      return;
+    }
+    var annullato = false;
+    var ids = [];
+    for (var i = 0; i < righe.length; i++) {
+      ids.push(righe[i].addebito_id);
+    }
+    supabase
+      .from('hic_marcature_riga')
+      .select('addebito_id, marcatura, gruppo, note, marcato_da, marcato_il')
+      .in('addebito_id', ids)
+      .then(function(res) {
+        if (annullato) return;
+        if (res.error) {
+          setErroreRiga(res.error.message);
+          return;
+        }
+        var mappa = {};
+        var dati = res.data || [];
+        for (var k = 0; k < dati.length; k++) {
+          mappa[dati[k].addebito_id] = dati[k];
+        }
+        setMarcRighe(mappa);
+      });
+
+    return function() { annullato = true; };
+  }, [righe]);
 
   useEffect(function() {
     if (vista !== 'marcatura') return;
@@ -186,11 +277,44 @@ export default function SchedaPrenotazioni(props) {
       var c = risposte[0].data;
       setMarcConteggio(c && c.length > 0 ? c[0] : null);
       setMarcElenco(risposte[1].data || []);
+      setNotaAperta(null);
       setMarcCaricamento(false);
     });
 
     return function() { annullato = true; };
   }, [vista, da, a, statoMarcatura, marcPagina, giroMarcatura]);
+
+  // Le note delle prenotazioni elencate nel pannello di marcatura.
+  // hic_eventi_da_rivedere non restituisce la colonna note, quindi la si
+  // legge a parte invece di ricreare la funzione.
+  useEffect(function() {
+    if (vista !== 'marcatura') return;
+    if (!marcElenco || marcElenco.length === 0) {
+      setNoteEvento({});
+      return;
+    }
+    var annullato = false;
+    var ids = [];
+    for (var i = 0; i < marcElenco.length; i++) {
+      ids.push(marcElenco[i].reservation_id);
+    }
+    supabase
+      .from('hic_marcature_evento')
+      .select('reservation_id, note')
+      .in('reservation_id', ids)
+      .then(function(res) {
+        if (annullato) return;
+        if (res.error) return;
+        var mappa = {};
+        var dati = res.data || [];
+        for (var k = 0; k < dati.length; k++) {
+          mappa[dati[k].reservation_id] = dati[k].note;
+        }
+        setNoteEvento(mappa);
+      });
+
+    return function() { annullato = true; };
+  }, [vista, marcElenco]);
 
   function cerca() {
     setTestoAttivo(testo.trim());
@@ -199,6 +323,165 @@ export default function SchedaPrenotazioni(props) {
   function azzeraRicerca() {
     setTesto('');
     setTestoAttivo('');
+  }
+
+  // ----------------------------------------------------------
+  // Suggerimenti per il campo gruppo.
+  // Si leggono una volta sola, alla prima apertura di un pannello, e solo
+  // dal dizionario dei consumi: e' una tabella piccola. Servono a evitare
+  // il refuso che creerebbe un gruppo nuovo in silenzio (il confronto
+  // ignora le maiuscole, quindi "ristorante" e "Ristorante" finiscono
+  // insieme, ma "Ristornate" no).
+  // ----------------------------------------------------------
+  function caricaSuggerimenti() {
+    if (suggerimentiChiesti) return;
+    setSuggerimentiChiesti(true);
+    supabase
+      .from('hic_voci_consumo')
+      .select('gruppo')
+      .then(function(res) {
+        if (res.error) return;
+        var visti = {};
+        var elenco = [];
+        var dati = res.data || [];
+        for (var i = 0; i < dati.length; i++) {
+          var g = ripulisci(dati[i].gruppo);
+          if (g === '') continue;
+          var chiave = g.toLowerCase();
+          if (visti[chiave]) continue;
+          visti[chiave] = true;
+          elenco.push(g);
+        }
+        elenco.sort();
+        setSuggerimenti(elenco.slice(0, MAX_SUGGERIMENTI));
+      });
+  }
+
+  function apriRiga(riga) {
+    if (rigaAperta === riga.addebito_id) {
+      setRigaAperta(null);
+      return;
+    }
+    var m = marcRighe[riga.addebito_id];
+    setRigaAperta(riga.addebito_id);
+    setFormMarcatura(m && m.marcatura ? m.marcatura : null);
+    setFormGruppo(m && m.gruppo ? m.gruppo : '');
+    setFormNote(m && m.note ? m.note : '');
+    setErroreRiga(null);
+    caricaSuggerimenti();
+  }
+
+  // Aggiorna la riga gia' a schermo senza ricaricare l'elenco.
+  // E' il cuore della soluzione alla trappola del filtro: la riga resta
+  // dov'e' anche quando non rispetta piu' i filtri attivi.
+  function aggiornaRigaLocale(addebitoId, marcatura) {
+    var nuove = [];
+    for (var i = 0; i < righe.length; i++) {
+      var r = righe[i];
+      if (r.addebito_id !== addebitoId) {
+        nuove.push(r);
+        continue;
+      }
+      var copia = {};
+      for (var k in r) {
+        if (Object.prototype.hasOwnProperty.call(r, k)) copia[k] = r[k];
+      }
+      if (marcatura === 'evento') {
+        copia.voce_evento = true;
+        copia.marcata_a_mano = true;
+      } else if (marcatura === 'non_evento') {
+        copia.voce_evento = false;
+        copia.marcata_a_mano = true;
+      }
+      nuove.push(copia);
+    }
+    setRighe(nuove);
+  }
+
+  function salvaRiga(addebitoId) {
+    var gruppoPulito = ripulisci(formGruppo);
+    var notePulite = ripulisci(formNote);
+
+    if (!formMarcatura && gruppoPulito === '') {
+      setErroreRiga("Serve almeno una delle due cose: dire se e' un evento, oppure indicare un gruppo.");
+      return;
+    }
+
+    setRigaInSalvataggio(addebitoId);
+    setErroreRiga(null);
+
+    supabase
+      .from('hic_marcature_riga')
+      .upsert({
+        addebito_id: addebitoId,
+        marcatura: formMarcatura ? formMarcatura : null,
+        gruppo: gruppoPulito === '' ? null : gruppoPulito,
+        note: notePulite === '' ? null : notePulite,
+        marcato_da: firma,
+        marcato_il: new Date().toISOString()
+      }, { onConflict: 'addebito_id' })
+      .then(function(res) {
+        setRigaInSalvataggio(null);
+        if (res.error) {
+          setErroreRiga(res.error.message);
+          return;
+        }
+        var mappa = {};
+        for (var k in marcRighe) {
+          if (Object.prototype.hasOwnProperty.call(marcRighe, k)) mappa[k] = marcRighe[k];
+        }
+        mappa[addebitoId] = {
+          addebito_id: addebitoId,
+          marcatura: formMarcatura ? formMarcatura : null,
+          gruppo: gruppoPulito === '' ? null : gruppoPulito,
+          note: notePulite === '' ? null : notePulite,
+          marcato_da: firma,
+          marcato_il: new Date().toISOString()
+        };
+        setMarcRighe(mappa);
+        aggiornaRigaLocale(addebitoId, formMarcatura);
+
+        var s = {};
+        for (var j in sospese) {
+          if (Object.prototype.hasOwnProperty.call(sospese, j)) s[j] = sospese[j];
+        }
+        s[addebitoId] = 'salvata';
+        setSospese(s);
+        setRigaAperta(null);
+      });
+  }
+
+  function togliRiga(addebitoId) {
+    setRigaInSalvataggio(addebitoId);
+    setErroreRiga(null);
+
+    supabase
+      .from('hic_marcature_riga')
+      .delete()
+      .eq('addebito_id', addebitoId)
+      .then(function(res) {
+        setRigaInSalvataggio(null);
+        if (res.error) {
+          setErroreRiga(res.error.message);
+          return;
+        }
+        var mappa = {};
+        for (var k in marcRighe) {
+          if (Object.prototype.hasOwnProperty.call(marcRighe, k)) {
+            if (String(k) === String(addebitoId)) continue;
+            mappa[k] = marcRighe[k];
+          }
+        }
+        setMarcRighe(mappa);
+
+        var s = {};
+        for (var j in sospese) {
+          if (Object.prototype.hasOwnProperty.call(sospese, j)) s[j] = sospese[j];
+        }
+        s[addebitoId] = 'tolta';
+        setSospese(s);
+        setRigaAperta(null);
+      });
   }
 
   function marca(reservationId, marcatura) {
@@ -236,6 +519,47 @@ export default function SchedaPrenotazioni(props) {
           return;
         }
         setGiroMarcatura(giroMarcatura + 1);
+      });
+  }
+
+  function apriNota(prenotazione) {
+    if (notaAperta === prenotazione.reservation_id) {
+      setNotaAperta(null);
+      return;
+    }
+    setNotaAperta(prenotazione.reservation_id);
+    var esistente = noteEvento[prenotazione.reservation_id];
+    setFormNotaEvento(esistente ? esistente : '');
+    setMarcErrore(null);
+  }
+
+  // La nota di prenotazione si salva da sola, senza toccare la marcatura:
+  // si annota anche una prenotazione che non si vuole marcare.
+  function salvaNotaEvento(reservationId) {
+    var notePulite = ripulisci(formNotaEvento);
+    setInSalvataggio(reservationId);
+    setMarcErrore(null);
+    supabase
+      .from('hic_marcature_evento')
+      .upsert({
+        reservation_id: reservationId,
+        note: notePulite === '' ? null : notePulite,
+        marcato_da: firma,
+        marcato_il: new Date().toISOString()
+      }, { onConflict: 'reservation_id' })
+      .then(function(res) {
+        setInSalvataggio(null);
+        if (res.error) {
+          setMarcErrore(res.error.message);
+          return;
+        }
+        var mappa = {};
+        for (var k in noteEvento) {
+          if (Object.prototype.hasOwnProperty.call(noteEvento, k)) mappa[k] = noteEvento[k];
+        }
+        mappa[reservationId] = notePulite === '' ? null : notePulite;
+        setNoteEvento(mappa);
+        setNotaAperta(null);
       });
   }
 
@@ -389,6 +713,12 @@ export default function SchedaPrenotazioni(props) {
               )}
             </div>
 
+            {erroreRiga && (
+              <div className="bg-red-50 border border-red-200 rounded-xl p-3 text-sm text-red-800 mb-3">
+                Errore: {erroreRiga}
+              </div>
+            )}
+
             {caricamento ? (
               <div className="text-sm text-gray-400 py-8 text-center">Caricamento...</div>
             ) : righe.length === 0 ? (
@@ -404,40 +734,194 @@ export default function SchedaPrenotazioni(props) {
                       <th className="py-2 px-3 font-semibold">Dicitura</th>
                       <th className="py-2 px-3 font-semibold text-right">Notti</th>
                       <th className="py-2 px-3 font-semibold text-right">Lordo</th>
-                      <th className="py-2 pl-3 font-semibold text-right">Netto</th>
+                      <th className="py-2 px-3 font-semibold text-right">Netto</th>
+                      <th className="py-2 pl-3 font-semibold text-right">Marcatura</th>
                     </tr>
                   </thead>
                   <tbody>
                     {righe.map(function(r) {
+                      var marcaturaRiga = marcRighe[r.addebito_id];
+                      var aperta = rigaAperta === r.addebito_id;
+                      var occupata = rigaInSalvataggio === r.addebito_id;
+                      var statoSospeso = sospese[r.addebito_id];
+
                       return (
-                        <tr key={r.addebito_id} className="border-b border-gray-100">
-                          <td className="py-2 pr-3 text-gray-600 whitespace-nowrap">{dataBreve(r.check_in)}</td>
-                          <td className="py-2 px-3 text-gray-800">
-                            {r.ospite || '—'}
-                            {r.codice_pren && (
-                              <span className="block text-xs text-gray-400">{r.codice_pren}</span>
-                            )}
-                          </td>
-                          <td className="py-2 px-3 text-gray-500">{r.categoria || '—'}</td>
-                          <td className="py-2 px-3 text-gray-800">
-                            {r.descrizione || <span className="text-gray-400 italic">senza dicitura</span>}
-                            {r.voce_evento && (
-                              <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-wine-100 text-wine-800 border border-wine-200">
-                                evento
-                              </span>
-                            )}
-                            {r.marcata_a_mano && (
-                              <span className="ml-1 text-xs text-gray-400">a mano</span>
-                            )}
-                          </td>
-                          <td className="py-2 px-3 text-right tabular-nums text-gray-500">{numero(r.quantita)}</td>
-                          <td className={r.a_valore_zero
-                            ? 'py-2 px-3 text-right tabular-nums text-amber-700'
-                            : 'py-2 px-3 text-right tabular-nums text-gray-900'}>
-                            {euro(r.importo)}
-                          </td>
-                          <td className="py-2 pl-3 text-right tabular-nums text-gray-600">{euro(r.imponibile)}</td>
-                        </tr>
+                        <Fragment key={r.addebito_id}>
+                          <tr className="border-b border-gray-100">
+                            <td className="py-2 pr-3 text-gray-600 whitespace-nowrap">{dataBreve(r.check_in)}</td>
+                            <td className="py-2 px-3 text-gray-800">
+                              {r.ospite || '—'}
+                              {r.codice_pren && (
+                                <span className="block text-xs text-gray-400">{r.codice_pren}</span>
+                              )}
+                            </td>
+                            <td className="py-2 px-3 text-gray-500">{r.categoria || '—'}</td>
+                            <td className="py-2 px-3 text-gray-800">
+                              {r.descrizione || <span className="text-gray-400 italic">senza dicitura</span>}
+                              {r.voce_evento && (
+                                <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-wine-100 text-wine-800 border border-wine-200">
+                                  evento
+                                </span>
+                              )}
+                              {r.marcata_a_mano && (
+                                <span className="ml-1 text-xs text-gray-400">a mano</span>
+                              )}
+                              {marcaturaRiga && marcaturaRiga.gruppo && (
+                                <span className="ml-2 text-xs px-2 py-0.5 rounded-full bg-gray-100 text-gray-600 border border-gray-200">
+                                  gruppo: {marcaturaRiga.gruppo}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2 px-3 text-right tabular-nums text-gray-500">{numero(r.quantita)}</td>
+                            <td className={r.a_valore_zero
+                              ? 'py-2 px-3 text-right tabular-nums text-amber-700'
+                              : 'py-2 px-3 text-right tabular-nums text-gray-900'}>
+                              {euro(r.importo)}
+                            </td>
+                            <td className="py-2 px-3 text-right tabular-nums text-gray-600">{euro(r.imponibile)}</td>
+                            <td className="py-2 pl-3 text-right whitespace-nowrap">
+                              {puoMarcare ? (
+                                <button
+                                  type="button"
+                                  disabled={occupata}
+                                  onClick={function() { apriRiga(r); }}
+                                  className={marcaturaRiga
+                                    ? 'px-3 py-1 rounded-lg text-xs font-medium border bg-wine-50 text-wine-800 border-wine-300 hover:bg-wine-100'
+                                    : 'px-3 py-1 rounded-lg text-xs font-medium border bg-white text-gray-600 border-gray-300 hover:border-wine-400 hover:text-wine-800'}>
+                                  {aperta ? 'Chiudi' : (marcaturaRiga ? 'Marcata' : 'Marca')}
+                                </button>
+                              ) : (
+                                <span className="text-xs text-gray-300">—</span>
+                              )}
+                            </td>
+                          </tr>
+
+                          {statoSospeso && (
+                            <tr className="border-b border-gray-100">
+                              <td colSpan={8} className="py-2 px-3">
+                                <div className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                                  {statoSospeso === 'tolta'
+                                    ? "Marcatura tolta: questa riga e' tornata alla proposta automatica."
+                                    : 'Marcatura salvata.'}
+                                  {' '}La riga resta visibile fino al prossimo caricamento. Se non rientra
+                                  piu' nei filtri attivi in alto, dopo sparira' da questo elenco: se devi
+                                  correggerti, fallo adesso.
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+
+                          {aperta && (
+                            <tr className="border-b border-gray-100 bg-gray-50">
+                              <td colSpan={8} className="py-3 px-3">
+                                <div className="space-y-3">
+                                  <div className="text-xs text-gray-500">
+                                    Questa decisione vale <span className="font-semibold">solo per questa riga</span> e
+                                    batte sia la marcatura della prenotazione sia la proposta automatica.
+                                  </div>
+
+                                  <div>
+                                    <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
+                                      E' un evento?
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                      <Pillola
+                                        attiva={formMarcatura === 'evento'}
+                                        onClick={function() { setFormMarcatura('evento'); }}>
+                                        Si, e' un evento
+                                      </Pillola>
+                                      <Pillola
+                                        attiva={formMarcatura === 'non_evento'}
+                                        onClick={function() { setFormMarcatura('non_evento'); }}>
+                                        No, non e' un evento
+                                      </Pillola>
+                                      <Pillola
+                                        attiva={formMarcatura === null}
+                                        onClick={function() { setFormMarcatura(null); }}>
+                                        Non mi pronuncio
+                                      </Pillola>
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
+                                      Gruppo dei consumi (facoltativo)
+                                    </div>
+                                    <input
+                                      type="text"
+                                      value={formGruppo}
+                                      onChange={function(e) { setFormGruppo(e.target.value); }}
+                                      placeholder="Lascia vuoto per non forzare nulla"
+                                      className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm w-72"
+                                    />
+                                    {suggerimenti.length > 0 && (
+                                      <div className="flex flex-wrap gap-1.5 mt-2">
+                                        {suggerimenti.map(function(g) {
+                                          return (
+                                            <button
+                                              key={g}
+                                              type="button"
+                                              onClick={function() { setFormGruppo(g); }}
+                                              className="px-2 py-0.5 rounded-full text-xs border bg-white text-gray-600 border-gray-300 hover:border-wine-400 hover:text-wine-800">
+                                              {g}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    )}
+                                    <div className="text-xs text-gray-400 mt-1">
+                                      Le maiuscole non contano, un refuso si': meglio toccare un
+                                      suggerimento che riscrivere il nome a mano.
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">
+                                      Nota (facoltativa)
+                                    </div>
+                                    <input
+                                      type="text"
+                                      value={formNote}
+                                      onChange={function(e) { setFormNote(e.target.value); }}
+                                      placeholder="Perche' hai deciso cosi'"
+                                      className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm w-full max-w-xl"
+                                    />
+                                  </div>
+
+                                  <div className="flex flex-wrap items-center gap-2 pt-1">
+                                    <button
+                                      type="button"
+                                      disabled={occupata}
+                                      onClick={function() { salvaRiga(r.addebito_id); }}
+                                      className="px-3 py-1.5 rounded-lg text-sm font-medium border bg-wine-800 text-white border-wine-800 hover:bg-wine-900">
+                                      Salva
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={function() { setRigaAperta(null); }}
+                                      className="px-3 py-1.5 rounded-lg text-sm text-gray-500 hover:text-gray-800">
+                                      Annulla
+                                    </button>
+                                    {marcaturaRiga && (
+                                      <button
+                                        type="button"
+                                        disabled={occupata}
+                                        onClick={function() { togliRiga(r.addebito_id); }}
+                                        className="px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-red-700">
+                                        Togli la marcatura
+                                      </button>
+                                    )}
+                                    {marcaturaRiga && marcaturaRiga.marcato_da && (
+                                      <span className="text-xs text-gray-400">
+                                        ultima modifica di {marcaturaRiga.marcato_da}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
                       );
                     })}
                   </tbody>
@@ -493,6 +977,12 @@ export default function SchedaPrenotazioni(props) {
               e vale per tutta la prenotazione.
             </div>
             <div>
+              Se invece il caso riguarda <span className="font-semibold">una singola voce</span> — una riga
+              associata a un evento per comodita' o per errore, solo in quell'occasione — non usare questo
+              pannello: vai in &quot;Elenco e medie&quot; e marca quella riga. La decisione di riga vince su
+              questa.
+            </div>
+            <div>
               Questo pannello ignora il perimetro e il filtro voci evento della barra in alto: altrimenti,
               con il filtro su &quot;esclusi&quot;, non potresti mai raggiungere una voce per smarcarla. Il periodo vale.
             </div>
@@ -535,6 +1025,9 @@ export default function SchedaPrenotazioni(props) {
               <div className="space-y-2">
                 {marcElenco.map(function(p) {
                   var occupato = inSalvataggio === p.reservation_id;
+                  var nota = noteEvento[p.reservation_id];
+                  var notaInModifica = notaAperta === p.reservation_id;
+
                   return (
                     <div key={p.reservation_id} className="border border-gray-200 rounded-lg p-3">
                       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -562,6 +1055,11 @@ export default function SchedaPrenotazioni(props) {
                               {p.marcato_da && <span className="ml-2 text-gray-400">da {p.marcato_da}</span>}
                             </div>
                           )}
+                          {nota && !notaInModifica && (
+                            <div className="text-xs text-gray-500 italic mt-1 break-words">
+                              nota: {nota}
+                            </div>
+                          )}
                         </div>
 
                         {puoMarcare && (
@@ -580,6 +1078,13 @@ export default function SchedaPrenotazioni(props) {
                               className="px-3 py-1.5 rounded-lg text-sm font-medium border bg-white text-gray-700 border-gray-300 hover:border-gray-400">
                               Non e' un evento
                             </button>
+                            <button
+                              type="button"
+                              disabled={occupato}
+                              onClick={function() { apriNota(p); }}
+                              className="px-3 py-1.5 rounded-lg text-sm font-medium border bg-white text-gray-600 border-gray-300 hover:border-wine-400 hover:text-wine-800">
+                              {notaInModifica ? 'Chiudi nota' : (nota ? 'Modifica nota' : 'Aggiungi nota')}
+                            </button>
                             {p.marcatura && (
                               <button
                                 type="button"
@@ -592,6 +1097,36 @@ export default function SchedaPrenotazioni(props) {
                           </div>
                         )}
                       </div>
+
+                      {notaInModifica && (
+                        <div className="mt-3 pt-3 border-t border-gray-100 space-y-2">
+                          <input
+                            type="text"
+                            value={formNotaEvento}
+                            onChange={function(e) { setFormNotaEvento(e.target.value); }}
+                            placeholder="Perche' questa prenotazione e' o non e' un evento"
+                            className="border border-gray-300 rounded-lg px-2 py-1.5 text-sm w-full max-w-xl"
+                          />
+                          <div className="flex flex-wrap items-center gap-2">
+                            <button
+                              type="button"
+                              disabled={occupato}
+                              onClick={function() { salvaNotaEvento(p.reservation_id); }}
+                              className="px-3 py-1.5 rounded-lg text-sm font-medium border bg-wine-800 text-white border-wine-800 hover:bg-wine-900">
+                              Salva la nota
+                            </button>
+                            <button
+                              type="button"
+                              onClick={function() { setNotaAperta(null); }}
+                              className="px-3 py-1.5 rounded-lg text-sm text-gray-500 hover:text-gray-800">
+                              Annulla
+                            </button>
+                            <span className="text-xs text-gray-400">
+                              La nota si salva da sola: si puo' annotare anche senza marcare.
+                            </span>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
