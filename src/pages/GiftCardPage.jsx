@@ -1347,8 +1347,21 @@ function TabArchivio(props) {
     if (filtroTipologia && gc.tipologia_id !== filtroTipologia) return false
     if (ricerca) {
       var r = ricerca.toLowerCase()
+      // I codici collegati stanno in un ARRAY: senza questo giro
+      // una gift card acquistata in coppia si trova solo col primo
+      // codice, e il secondo risulta inesistente.
+      var trovatoCollegato = false
+      var arrCollegati = gc.codici_collegati || []
+      for (var iCol = 0; iCol < arrCollegati.length; iCol++) {
+        if (String(arrCollegati[iCol] || '').toLowerCase().indexOf(r) !== -1) {
+          trovatoCollegato = true
+          break
+        }
+      }
       var match = (gc.codice || '').toLowerCase().indexOf(r) !== -1
+        || trovatoCollegato
         || (gc.committente_nome || '').toLowerCase().indexOf(r) !== -1
+        || (gc.committente_contatto || '').toLowerCase().indexOf(r) !== -1
         || (gc.beneficiario_nome || '').toLowerCase().indexOf(r) !== -1
         || (gc.beneficiario_cognome || '').toLowerCase().indexOf(r) !== -1
         || (gc.numero_scontrino || '').toLowerCase().indexOf(r) !== -1
@@ -1389,7 +1402,7 @@ function TabArchivio(props) {
         <div className="relative flex-1 min-w-48">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
           <input type="text" value={ricerca} onChange={function(e) { setRicerca(e.target.value) }}
-            placeholder="Cerca codice, nome..." className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+            placeholder="Cerca codice, codice collegato, nome, contatto, scontrino..." className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
         </div>
         <select value={filtroTipologia} onChange={function(e) { setFiltroTipologia(e.target.value) }}
           className="border border-gray-200 rounded-lg px-3 py-2 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-wine-500">
