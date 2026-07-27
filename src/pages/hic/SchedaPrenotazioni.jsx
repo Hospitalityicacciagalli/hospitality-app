@@ -16,12 +16,25 @@ import { euro, numero, percentuale } from './formati';
 // qui sotto hai l'elenco vero delle righe che le compongono, quindi se un
 // numero ti sembra strano puoi guardare da dove viene.
 //
-// REGOLA 15 — a valore zero. Le prenotazioni con anche una sola riga a
-// zero (gift card, omaggi, servizi gia' scontrinati) NON entrano nel
-// denominatore delle medie: contano le persone e le notti ma non hanno
-// portato denaro qui dentro, e abbasserebbero lo scontrino medio proprio
-// negli anni in cui hai venduto piu' gift card. Quante sono e quanta
-// capacita' hanno assorbito e' sempre scritto sotto le medie.
+// REGOLA 15 e 15-bis — a valore zero (CORRETTA dalla migrazione 36).
+// Una prenotazione esce dal denominatore delle medie SOLO SE TUTTE le
+// sue righe valgono zero. Fino alla 36 bastava UNA riga a zero: siccome
+// l'antipasto compreso in un menu a prezzo fisso e' a zero quasi meta'
+// delle volte, uscivano 1.736 prenotazioni su 4.769 (il 36%) e con esse
+// il 41,8% del fatturato, e le medie erano circa il 12% piu' basse del
+// vero. L'errore peggiorava quando il ristorante andava bene.
+//
+// Restano fuori solo le prenotazioni tutte a zero e quelle senza
+// addebiti: portano 0,00 e non spostano nessuna somma.
+//
+// IL SOGGIORNO A ZERO e' il caso a parte. Se e' la riga di categoria 7
+// a valere zero, la camera e' stata pagata prima e altrove (buono
+// regalo, omaggio) e quella media e' per forza incompleta. Queste
+// prenotazioni restano DENTRO il calcolo ma vengono dichiarate sotto le
+// medie (colonne gift_* di hic_medie) invece di sparire dentro una
+// condizione che nessuno rilegge piu'. Sono 147, spendono piu' della
+// media perche' chi arriva con un buono regalo cena, e vale la pena
+// accorgersene il giorno in cui diventano 400.
 //
 // IL PANNELLO DI MARCATURA ignora di proposito perimetro e filtro voci
 // evento: se il filtro fosse su "esclusi" non potresti mai raggiungere
@@ -614,7 +627,7 @@ export default function SchedaPrenotazioni(props) {
               <div className="bg-white rounded-xl border border-gray-200 p-4 text-xs text-gray-500 space-y-1">
                 <div>
                   <span className="font-semibold text-gray-600">Su cosa sono calcolate:</span>{' '}
-                  {numero(medie.prenotazioni_base)} prenotazioni piene, {numero(medie.ospiti_base)} ospiti,
+                  {numero(medie.prenotazioni_base)} prenotazioni con un valore, {numero(medie.ospiti_base)} ospiti,
                   {' '}{numero(medie.notti_base)} notti, {euro(medie.lordo_base)} lordi.
                 </div>
                 <div>
@@ -622,14 +635,30 @@ export default function SchedaPrenotazioni(props) {
                   <span className={Number(medie.escluse_prenotazioni) > 0 ? 'font-semibold text-amber-700' : 'font-semibold text-gray-700'}>
                     {numero(medie.escluse_prenotazioni)}
                   </span>
-                  {' '}prenotazioni a valore zero, in tutto o in parte
+                  {' '}prenotazioni senza alcun valore
                   {medie.escluse_quota === null ? '' : ' (' + percentuale(medie.escluse_quota) + ')'} —
                   {' '}{numero(medie.escluse_notti)} notti e {numero(medie.escluse_ospiti)} ospiti.
+                  Tutte le loro righe valgono zero, oppure non hanno addebiti: portano 0,00 e non
+                  spostano nessuna somma.
                 </div>
+                {Number(medie.gift_prenotazioni) > 0 && (
+                  <div>
+                    <span className="font-semibold text-gray-600">Dentro il calcolo, ma da sapere:</span>{' '}
+                    <span className="font-semibold text-amber-700">
+                      {numero(medie.gift_prenotazioni)}
+                    </span>
+                    {' '}prenotazioni con il soggiorno a zero —
+                    {' '}{numero(medie.gift_notti)} notti e {numero(medie.gift_ospiti)} ospiti,
+                    {' '}{euro(medie.gift_lordo)} di sola ristorazione e servizi
+                    {medie.gift_quota === null ? '' : ' (' + percentuale(medie.gift_quota) + ' del lordo)'}.
+                  </div>
+                )}
                 <div className="pt-1 text-gray-400">
-                  Sono gift card, omaggi e servizi gia' scontrinati: il soggiorno c'e' stato, il denaro
-                  e' entrato prima e altrove. Contarli nel diviso farebbe scendere lo scontrino medio
-                  senza che sia mai mancato un euro.
+                  Una prenotazione esce dal calcolo solo se TUTTE le sue righe valgono zero: un
+                  antipasto compreso in un menu a prezzo fisso non rende gratis la cena. Chi ha avuto
+                  il soggiorno in regalo resta invece dentro, ma la camera e' stata pagata prima e
+                  altrove: la sua media e' incompleta, ed e' il motivo per cui viene contato qui sopra
+                  a parte.
                 </div>
               </div>
             </>
