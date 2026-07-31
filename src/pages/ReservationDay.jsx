@@ -18,6 +18,16 @@ function turnoDb(turno) {
   return turno === 'lunch' ? 'pranzo' : 'cena'
 }
 
+// Rende sicuro un testo libero (note, titoli) dentro l'HTML delle stampe:
+// un carattere < o & scritto in una nota non deve poter rompere la pagina.
+function esc(testo) {
+  if (testo == null) return ''
+  return String(testo)
+    .split('&').join('&amp;')
+    .split('<').join('&lt;')
+    .split('>').join('&gt;')
+}
+
 // Costruisce lista servizi di una tipologia gift card
 function serviziTipologia(t) {
   if (!t) return []
@@ -537,6 +547,7 @@ function StampaMenu(props) {
   var turno = props.turno
   var reservations = props.reservations
   var sale = props.sale
+  var eventi = props.eventi || []
   var [aperto, setAperto] = useState(false)
   var ref = useRef(null)
 
@@ -548,17 +559,115 @@ function StampaMenu(props) {
     return function() { document.removeEventListener('mousedown', handleClick) }
   }, [])
 
-  var stileBase = '<style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px;} h1{font-size:16px;margin-bottom:4px;} .sub{color:#666;font-size:11px;margin-bottom:16px;} table{width:100%;border-collapse:collapse;margin-bottom:16px;} th{background:#7a1b2e;color:white;padding:6px 8px;text-align:left;font-size:11px;} td{padding:6px 8px;border-bottom:1px solid #eee;vertical-align:top;} .section-title{font-weight:bold;font-size:13px;color:#7a1b2e;margin:18px 0 6px;border-bottom:2px solid #7a1b2e;padding-bottom:3px;} .badge{display:inline-block;background:#fee2e2;color:#991b1b;border-radius:4px;padding:1px 5px;font-size:10px;margin-right:3px;} .badge-bam{display:inline-block;background:#fef9c3;color:#854d0e;border-radius:4px;padding:1px 5px;font-size:10px;} .badge-stato{display:inline-block;border-radius:4px;padding:1px 6px;font-size:10px;margin-right:3px;} .note{color:#666;font-style:italic;font-size:11px;} .avviso{background:#fff7ed;border:1px solid #fed7aa;border-radius:4px;padding:4px 8px;font-size:11px;color:#9a3412;margin-top:3px;} .card{border:1px solid #ddd;border-radius:6px;padding:10px 14px;margin-bottom:10px;page-break-inside:avoid;} .cliente{font-weight:bold;font-size:13px;} .row{display:flex;gap:16px;margin-top:4px;flex-wrap:wrap;align-items:center;} @media print{body{padding:8px;}}</style>'
+  var stileBase = '<style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px;} h1{font-size:16px;margin-bottom:4px;} .sub{color:#666;font-size:11px;margin-bottom:16px;} table{width:100%;border-collapse:collapse;margin-bottom:16px;} th{background:#7a1b2e;color:white;padding:6px 8px;text-align:left;font-size:11px;} td{padding:6px 8px;border-bottom:1px solid #eee;vertical-align:top;} .section-title{font-weight:bold;font-size:13px;color:#7a1b2e;margin:18px 0 6px;border-bottom:2px solid #7a1b2e;padding-bottom:3px;} .badge{display:inline-block;background:#fee2e2;color:#991b1b;border-radius:4px;padding:1px 5px;font-size:10px;margin-right:3px;} .badge-bam{display:inline-block;background:#fef9c3;color:#854d0e;border-radius:4px;padding:1px 5px;font-size:10px;} .badge-stato{display:inline-block;border-radius:4px;padding:1px 6px;font-size:10px;margin-right:3px;} .note{color:#666;font-style:italic;font-size:11px;} .avviso{background:#fff7ed;border:1px solid #fed7aa;border-radius:4px;padding:4px 8px;font-size:11px;color:#9a3412;margin-top:3px;} .card{border:1px solid #ddd;border-radius:6px;padding:10px 14px;margin-bottom:10px;page-break-inside:avoid;} .cliente{font-weight:bold;font-size:13px;} .row{display:flex;gap:16px;margin-top:4px;flex-wrap:wrap;align-items:center;} .riepilogo{border:2px solid #7a1b2e;border-radius:6px;padding:8px 12px;margin-bottom:14px;page-break-inside:avoid;} .riep-titolo{font-weight:bold;font-size:12px;color:#7a1b2e;margin-bottom:5px;} table.riep{width:auto;margin:0;} table.riep td{border:none;padding:2px 16px 2px 0;font-size:12px;vertical-align:baseline;} table.riep td.num{font-weight:bold;font-size:15px;text-align:right;} table.riep td.det{color:#555;font-size:11px;} table.riep tr.tot td{border-top:1px solid #7a1b2e;padding-top:5px;font-weight:bold;} table.riep tr.tot td.det{font-weight:normal;} .card-evento{border:1px solid #fcd34d;border-left:4px solid #d97706;background:#fffbeb;border-radius:6px;padding:10px 14px;margin-bottom:10px;page-break-inside:avoid;} tr.riga-totale td{border-top:2px solid #7a1b2e;font-weight:bold;background:#faf5f6;} .totale-blocco{border-top:2px solid #7a1b2e;padding-top:6px;margin-top:4px;font-size:12px;font-weight:bold;page-break-inside:avoid;} @media print{body{padding:8px;}}</style>'
+
+  // Eventi che pesano su QUESTO turno: la stessa regola della pagina a
+  // schermo (un evento "Giornata intera" vale sia a pranzo sia a cena).
+  function eventiDelTurno() {
+    return eventi.filter(function(ev) { return ev.meal_type === turno || ev.meal_type === 'both' })
+  }
+
+  // Un unico punto di calcolo per tutte le stampe: i numeri stampati devono
+  // coincidere con quelli della testata a schermo, sempre.
+  function calcolaTotali() {
+    var ospiti = 0
+    var adulti = 0
+    var bambini = 0
+    reservations.forEach(function(r) {
+      ospiti += r.guests_count || 0
+      adulti += r.adults_count || 0
+      bambini += r.children_count || 0
+    })
+    var evs = eventiDelTurno()
+    var ospitiEvento = 0
+    var senzaNumero = false
+    evs.forEach(function(ev) {
+      var cr = ev.covers_reserved
+      // Un evento senza numero ospiti non si somma e va dichiarato:
+      // un evento reale non ha mai zero ospiti.
+      if (cr == null || cr === '' || Number(cr) === 0) senzaNumero = true
+      else ospitiEvento += (parseInt(cr, 10) || 0)
+    })
+    return {
+      prenotazioni: reservations.length,
+      ospiti: ospiti,
+      adulti: adulti,
+      bambini: bambini,
+      eventi: evs.length,
+      ospitiEvento: ospitiEvento,
+      senzaNumero: senzaNumero,
+      totale: ospiti + ospitiEvento
+    }
+  }
+
+  // Riquadro in testa a ogni stampa: prenotazioni, eventi, totale del turno.
+  function buildRiepilogoHtml() {
+    var t = calcolaTotali()
+    var piu = t.senzaNumero ? ' +?' : ''
+    var html = '<div class="riepilogo">'
+    html += '<div class="riep-titolo">Riepilogo del turno</div>'
+    html += '<table class="riep">'
+    html += '<tr><td>Prenotazioni</td><td class="num">' + t.prenotazioni + '</td>'
+    html += '<td class="det">' + t.ospiti + ' ospiti \u00b7 ' + t.adulti + ' adulti + ' + t.bambini + ' bambini</td></tr>'
+    html += '<tr><td>Eventi</td><td class="num">' + t.eventi + '</td>'
+    html += '<td class="det">' + t.ospitiEvento + piu + ' ospiti previsti</td></tr>'
+    html += '<tr class="tot"><td>Totale turno</td><td class="num">' + t.totale + piu + '</td>'
+    html += '<td class="det">ospiti attesi \u00b7 ' + t.ospiti + ' da prenotazioni + ' + t.ospitiEvento + piu + ' da eventi</td></tr>'
+    html += '</table>'
+    if (t.senzaNumero) {
+      html += '<div class="avviso">Un evento di questo turno non ha il numero ospiti indicato: il totale resta parziale.</div>'
+    }
+    html += '</div>'
+    return html
+  }
+
+  // Sezione con gli eventi del turno. Gli eventi non hanno tavoli assegnati
+  // e conoscono solo il numero ospiti complessivo: adulti e bambini restano
+  // dichiarati soltanto per le prenotazioni.
+  function buildEventiHtml() {
+    var evs = eventiDelTurno()
+    if (evs.length === 0) return ''
+    var totEv = 0
+    var senzaNumero = false
+    var html = '<div class="section-title">' + (evs.length === 1 ? 'Evento del giorno' : 'Eventi del giorno') + '</div>'
+    evs.forEach(function(ev) {
+      var cr = ev.covers_reserved
+      if (cr == null || cr === '' || Number(cr) === 0) senzaNumero = true
+      else totEv += (parseInt(cr, 10) || 0)
+      var stato = STATO_EVENTO_LABELS[ev.event_type] || ev.event_type
+      var pasto = PASTO_LABELS[ev.meal_type] || ev.meal_type
+      var statoColor = ev.event_type === 'confirmed' ? '#fef3c7' : '#dbeafe'
+      html += '<div class="card-evento">'
+      html += '<div class="cliente">\u2605 ' + esc(ev.title || 'Evento') + '</div>'
+      html += '<div class="row">'
+      html += '<span class="badge-stato" style="background:' + statoColor + ';color:#111;">' + stato + '</span>'
+      html += '<span class="badge-stato" style="background:#f3f4f6;color:#111;">' + pasto + '</span>'
+      html += '<span>\ud83d\udc65 ' + ((cr == null || cr === '' || Number(cr) === 0) ? 'numero ospiti non indicato' : cr + ' ospiti previsti') + '</span>'
+      html += '</div>'
+      if (ev.notes) html += '<div class="note">\ud83d\udcdd ' + esc(ev.notes) + '</div>'
+      html += '</div>'
+    })
+    // Con un evento solo il totale ripeterebbe la riga sopra: si stampa
+    // soltanto quando gli eventi sono piu di uno.
+    if (evs.length > 1) {
+      html += '<div class="totale-blocco">Totale eventi: ' + evs.length + ' \u00b7 ' + totEv + (senzaNumero ? ' +?' : '') + ' ospiti previsti</div>'
+    }
+    return html
+  }
 
   function buildStampaSalaHtml(salaFiltro, righeAll, turnoLabel) {
     var titolo = salaFiltro ? 'Sala: ' + salaFiltro.nome : 'Riepilogo tutte le sale'
     var html = '<html><head><title>' + titolo + '</title>' + stileBase + '</head><body>'
     html += '<h1>' + titolo + ' \u2014 ' + turnoLabel + '</h1>'
     html += '<div class="sub">' + formatDateDisplay(dateStr) + '</div>'
+    html += buildRiepilogoHtml()
+    var htmlEventi = buildEventiHtml()
+    html += htmlEventi
+    if (htmlEventi !== '') html += '<div class="section-title">Tavoli assegnati</div>'
     var saleConTavoli = salaFiltro ? [salaFiltro] : sale
     saleConTavoli.forEach(function(s) {
       var righe = righeAll.filter(function(r) { return r.tavoli_sala && r.tavoli_sala.sala_id === s.id })
-      if (!salaFiltro) html += '<div class="section-title">' + s.nome + '</div>'
+      if (!salaFiltro) html += '<div class="section-title">' + esc(s.nome) + '</div>'
       if (righe.length === 0) { html += '<p class="note">Nessun tavolo assegnato per questa sala.</p>'; return }
       var perTavolo = {}
       righe.forEach(function(r) {
@@ -573,14 +682,14 @@ function StampaMenu(props) {
       nomiTavoli.forEach(function(nomeTavolo) {
         perTavolo[nomeTavolo].forEach(function(item) {
           var res = item.res; var tp = item.tp
-          var cliente = res.customers ? (res.customers.last_name + ' ' + res.customers.first_name) : '\u2014'
+          var cliente = res.customers ? esc(res.customers.last_name + ' ' + res.customers.first_name) : '\u2014'
           var allerge = tp.allergie_tavolo || []
-          var allergeLabel = allerge.length > 0 ? allerge.map(function(a) { return '<span class="badge">' + a + '</span>' }).join('') : '\u2014'
-          html += '<tr><td><strong>' + nomeTavolo + '</strong></td><td>' + cliente + '</td>'
+          var allergeLabel = allerge.length > 0 ? allerge.map(function(a) { return '<span class="badge">' + esc(a) + '</span>' }).join('') : '\u2014'
+          html += '<tr><td><strong>' + esc(nomeTavolo) + '</strong></td><td>' + cliente + '</td>'
           html += '<td>' + (tp.n_ospiti_assegnati || res.guests_count) + '</td>'
           html += '<td>' + (tp.n_bambini_tavolo || 0) + '</td>'
           html += '<td>' + allergeLabel + '</td>'
-          html += '<td class="note">' + (tp.note_tavolo || '\u2014') + '</td></tr>'
+          html += '<td class="note">' + (tp.note_tavolo ? esc(tp.note_tavolo) : '\u2014') + '</td></tr>'
         })
       })
       html += '</table>'
@@ -620,48 +729,58 @@ function StampaMenu(props) {
         var html = '<html><head><title>Lista Cucina</title>' + stileBase + '</head><body>'
         html += '<h1>Lista Cucina \u2014 ' + turnoLabel + '</h1>'
         html += '<div class="sub">' + formatDateDisplay(dateStr) + ' \u00b7 ' + reservations.length + ' prenotazioni</div>'
+        html += buildRiepilogoHtml()
+        html += buildEventiHtml()
+        html += '<div class="section-title">' + (reservations.length === 1 ? 'Prenotazione' : 'Prenotazioni') + '</div>'
+        if (reservations.length === 0) {
+          html += '<p class="note">Nessuna prenotazione su questo turno.</p>'
+        }
         reservations.forEach(function(res) {
           var tavRighe = perPrenotazione[res.id] || []
           var bambiniTotRes = 0
           tavRighe.forEach(function(r) { bambiniTotRes += r.n_bambini_tavolo || 0 })
           var allergeClienti = res.has_allergen_alerts ? ['\u26a0 vedi scheda cliente'] : []
           html += '<div class="card">'
-          html += '<div class="cliente">' + (res.customers ? res.customers.last_name + ' ' + res.customers.first_name : '\u2014') + '</div>'
+          html += '<div class="cliente">' + (res.customers ? esc(res.customers.last_name + ' ' + res.customers.first_name) : '\u2014') + '</div>'
           html += '<div class="row">'
-          html += '<span>\ud83d\udc65 ' + res.guests_count + ' ospiti</span>'
-          if (bambiniTotRes > 0) html += '<span class="badge-bam">\ud83c\udf7c ' + bambiniTotRes + ' bambini</span>'
+          html += '<span>\ud83d\udc65 ' + res.guests_count + ' ospiti (' + (res.adults_count || 0) + ' ad. + ' + (res.children_count || 0) + ' ba.)</span>'
+          if (bambiniTotRes > 0) html += '<span class="badge-bam">\ud83c\udf7c ' + bambiniTotRes + ' bambini ai tavoli</span>'
           if (res.requested_time) html += '<span>\u23f0 ' + res.requested_time.substring(0, 5) + '</span>'
           html += '</div>'
           if (res.allergie_prenotazione) {
-            html += '<div class="avviso">\u26a0 Allergeni prenotazione: ' + res.allergie_prenotazione + '</div>'
+            html += '<div class="avviso">\u26a0 Allergeni prenotazione: ' + esc(res.allergie_prenotazione) + '</div>'
           }
           if (allergeClienti.length > 0) {
             html += '<div class="avviso">\u26a0 Allergeni cliente: ' + allergeClienti.map(function(a) { return '<span class="badge">' + a + '</span>' }).join('') + '</div>'
           }
           if (res.notes) {
-            html += '<div class="note">\ud83d\udcdd ' + res.notes + '</div>'
+            html += '<div class="note">\ud83d\udcdd ' + esc(res.notes) + '</div>'
           }
           if (tavRighe.length > 0) {
             html += '<table style="margin-top:8px;"><tr><th>Tavolo</th><th>Sala</th><th>Ospiti</th><th>Bambini</th><th>Allergeni tavolo</th><th>Note</th></tr>'
             tavRighe.forEach(function(r) {
-              var nomeTav = r.tavoli_sala ? r.tavoli_sala.nome : '\u2014'
+              var nomeTav = r.tavoli_sala ? esc(r.tavoli_sala.nome) : '\u2014'
               var salaObj = r.tavoli_sala ? sale.find(function(s) { return s.id === r.tavoli_sala.sala_id }) : null
-              var nomeSala = salaObj ? salaObj.nome : ''
+              var nomeSala = salaObj ? esc(salaObj.nome) : ''
               var allerge = r.allergie_tavolo || []
-              var allergeLabel = allerge.length > 0 ? allerge.map(function(a) { return '<span class="badge">' + a + '</span>' }).join('') : '\u2014'
+              var allergeLabel = allerge.length > 0 ? allerge.map(function(a) { return '<span class="badge">' + esc(a) + '</span>' }).join('') : '\u2014'
               html += '<tr><td><strong>' + nomeTav + '</strong></td><td>' + nomeSala + '</td>'
               html += '<td>' + (r.n_ospiti_assegnati || '\u2014') + '</td>'
               html += '<td>' + (r.n_bambini_tavolo || 0) + '</td>'
               html += '<td>' + allergeLabel + '</td>'
-              html += '<td class="note">' + (r.note_tavolo || '\u2014') + '</td></tr>'
+              html += '<td class="note">' + (r.note_tavolo ? esc(r.note_tavolo) : '\u2014') + '</td></tr>'
             })
             html += '</table>'
           } else {
             html += '<p class="note" style="margin-top:6px;">Nessun tavolo assegnato</p>'
           }
-          if (res.special_requests) html += '<div class="note">\u2605 Richieste speciali: ' + res.special_requests + '</div>'
+          if (res.special_requests) html += '<div class="note">\u2605 Richieste speciali: ' + esc(res.special_requests) + '</div>'
           html += '</div>'
         })
+        var tot = calcolaTotali()
+        var piuTot = tot.senzaNumero ? ' +?' : ''
+        html += '<div class="totale-blocco">Totale prenotazioni: ' + tot.prenotazioni + ' \u00b7 ' + tot.ospiti + ' ospiti \u00b7 ' + tot.adulti + ' adulti + ' + tot.bambini + ' bambini</div>'
+        html += '<div class="totale-blocco">TOTALE DEL TURNO: ' + tot.totale + piuTot + ' ospiti \u00b7 ' + tot.ospiti + ' da prenotazioni + ' + tot.ospitiEvento + piuTot + ' da eventi</div>'
         html += '</body></html>'
         var w = window.open('', '_blank')
         w.document.write(html)
@@ -685,10 +804,13 @@ function StampaMenu(props) {
     var html = '<html><head><title>Prenotazioni ' + turnoLabel + '</title>' + stileBase + '</head><body>'
     html += '<h1>Prenotazioni \u2014 ' + turnoLabel + '</h1>'
     html += '<div class="sub">' + formatDateDisplay(dateStr) + ' \u00b7 ' + reservations.length + ' prenotazioni</div>'
+    html += buildRiepilogoHtml()
+    html += buildEventiHtml()
+    html += '<div class="section-title">' + (reservations.length === 1 ? 'Prenotazione' : 'Prenotazioni') + '</div>'
     html += '<table>'
     html += '<tr><th>Orario</th><th>Cliente</th><th>Ospiti</th><th>Stato</th><th>Allergeni</th><th>Note</th></tr>'
     ordinate.forEach(function(res) {
-      var cliente = res.customers ? (res.customers.last_name + ' ' + res.customers.first_name) : '\u2014'
+      var cliente = res.customers ? esc(res.customers.last_name + ' ' + res.customers.first_name) : '\u2014'
       var cat = res.customers && res.customers.category !== 'standard' ? categoryLabels[res.customers.category] : ''
       var orario = res.requested_time ? res.requested_time.substring(0, 5) : '\u2014'
       var stato = statusLabels[res.status] || res.status
@@ -701,12 +823,12 @@ function StampaMenu(props) {
       if (res.has_allergen_alerts) allergeList.push('\u26a0 cliente')
       if (res.allergie_prenotazione) allergeList.push(res.allergie_prenotazione)
       var allergeLabel = allergeList.length > 0
-        ? allergeList.map(function(a) { return '<span class="badge">' + a + '</span>' }).join('')
+        ? allergeList.map(function(a) { return '<span class="badge">' + esc(a) + '</span>' }).join('')
         : '\u2014'
 
       var noteList = []
-      if (res.notes) noteList.push(res.notes)
-      if (res.special_requests) noteList.push('\u2605 ' + res.special_requests)
+      if (res.notes) noteList.push(esc(res.notes))
+      if (res.special_requests) noteList.push('\u2605 ' + esc(res.special_requests))
       var noteLabel = noteList.length > 0 ? noteList.join(' | ') : '\u2014'
 
       html += '<tr>'
@@ -718,7 +840,16 @@ function StampaMenu(props) {
       html += '<td class="note">' + noteLabel + '</td>'
       html += '</tr>'
     })
+    var totP = calcolaTotali()
+    var piuP = totP.senzaNumero ? ' +?' : ''
+    html += '<tr class="riga-totale">'
+    html += '<td>Totale</td>'
+    html += '<td>' + totP.prenotazioni + ' prenotazioni</td>'
+    html += '<td>' + totP.ospiti + ' (' + totP.adulti + ' ad. + ' + totP.bambini + ' ba.)</td>'
+    html += '<td></td><td></td><td></td>'
+    html += '</tr>'
     html += '</table>'
+    html += '<div class="totale-blocco">TOTALE DEL TURNO: ' + totP.totale + piuP + ' ospiti \u00b7 ' + totP.ospiti + ' da prenotazioni + ' + totP.ospitiEvento + piuP + ' da eventi</div>'
     html += '</body></html>'
     var w = window.open('', '_blank')
     w.document.write(html)
@@ -1041,7 +1172,7 @@ function ReservationDay() {
           </div>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <StampaMenu dateStr={dateStr} turno={selectedMeal} reservations={activeReservations} sale={sale} />
+          <StampaMenu dateStr={dateStr} turno={selectedMeal} reservations={activeReservations} sale={sale} eventi={eventi} />
           <button onClick={function() { setEventoInModifica(null); setShowFormEvento(true) }}
             className="inline-flex items-center gap-2 bg-amber-500 text-white px-4 py-2.5 rounded-xl hover:bg-amber-600 transition-colors font-medium shadow-sm text-sm">
             <Calendar size={16} />
