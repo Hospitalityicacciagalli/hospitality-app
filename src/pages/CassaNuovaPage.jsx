@@ -50,7 +50,27 @@ function formatEuro(n) { return arrotonda(n).toLocaleString('it-IT', { style: 'c
 
 function labelNatura(v) { for (var i = 0; i < NATURE.length; i++) { if (NATURE[i].v === v) return NATURE[i].label; } return v || ''; }
 function labelPagamento(v) { for (var i = 0; i < PAGAMENTI.length; i++) { if (PAGAMENTI[i].v === v) return PAGAMENTI[i].label; } return v || ''; }
-function labelGiro(v) { return v === 'versa_cassaforte' ? 'Versa in cassaforte' : (v === 'preleva_cassaforte' ? 'Preleva da cassaforte' : v); }
+function labelGiro(v) {
+  if (v === 'versa_cassaforte') return 'Versa in cassaforte';
+  if (v === 'preleva_cassaforte') return 'Preleva da cassaforte';
+  if (v === 'trasferimento') return 'Trasferimento fra casse';
+  return v;
+}
+
+// (mig. 43) chiave condivisa dalle due righe di un trasferimento.
+// crypto.randomUUID non esiste su tutti i Safari: la riserva serve
+// davvero, la cassa si usa dall'iPad.
+function nuovoUuid() {
+  if (typeof crypto !== 'undefined' && crypto && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  var modello = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx';
+  return modello.replace(/[xy]/g, function(c) {
+    var r = Math.random() * 16 | 0;
+    var v = (c === 'x') ? r : ((r & 0x3) | 0x8);
+    return v.toString(16);
+  });
+}
 
 function spostaData(iso, giorni) {
   var d = new Date(iso + 'T00:00:00');
@@ -95,6 +115,9 @@ function effettoContanti(m) {
   if (m.tipo === 'giro') {
     if (m.giro_tipo === 'versa_cassaforte') return -m.importo;
     if (m.giro_tipo === 'preleva_cassaforte') return m.importo;
+    // (mig. 44) le due righe di un trasferimento sono simmetriche:
+    // solo trasferimento_uscita dice da che parte guarda questa.
+    if (m.giro_tipo === 'trasferimento') return m.trasferimento_uscita ? -m.importo : m.importo;
     return 0;
   }
   return 0;
@@ -228,6 +251,7 @@ function ModaleMovimento(props) {
   var [daCausale, setDaCausale] = useState(isModifica ? (esistente.da_causale || '') : '');
   var [nota, setNota] = useState(isModifica ? (esistente.nota || '') : '');
   var [versaSubito, setVersaSubito] = useState(false);
+  var [direzioneUscita, setDirezioneUscita] = useState(true);
   var [salvando, setSalvando] = useState(false);
   var [errore, setErrore] = useState('');
 
@@ -244,10 +268,33 @@ function ModaleMovimento(props) {
   // Opzioni del giro: "preleva" solo con permesso cassaforte.
   var opzGiro = [{ v: 'versa_cassaforte', label: 'Versa in cassaforte' }];
   if (puoUsareCassaforte) opzGiro.push({ v: 'preleva_cassaforte', label: 'Preleva da cassaforte' });
+  // (mig. 43/44) trasferimento diretto fra le due casse. Consentito a chi
+  // opera su questa cassa anche senza il permesso dell'altra: chi consegna
+  // i contanti e' chi li registra, e il PIN dice chi se ne fa carico.
+  opzGiro.push({ v: 'trasferimento', label: 'Trasferisci all\'altra cassa' });
+
+  var nomeQuesta = nomeCassa(cassaId);
+  var nomeAltra = nomeCassa(isRistorante ? ID_RECEPTION : ID_RISTORANTE);
+  var isTrasferimento = tipo === 'giro' && giroTipo === 'trasferimento';
 
   function handleSalva() {
     if (importo <= 0) { setErrore('Inserisci un importo maggiore di zero.'); return; }
     setErrore('');
+
+    // (mig. 43/44) Il trasferimento non si scrive da qui: e' UN gesto che
+    // genera DUE righe in due casse diverse, e va firmato col PIN. La
+    // modale consegna i dati alla pagina, che chiede la firma e scrive.
+    if (isTrasferimento) {
+      if (isModifica) { setErrore('Un trasferimento non si modifica: va annullato e rifatto.'); return; }
+      props.onFirmaTrasferimento({
+        importo: importo,
+        uscita: direzioneUscita,
+        da_causale: daCausale || null,
+        nota: nota || null
+      });
+      return;
+    }
+
     setSalvando(true);
 
     var riga = {
@@ -324,7 +371,32 @@ function ModaleMovimento(props) {
             <div>
               <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Giro di contanti</div>
               <Pills opzioni={opzGiro} value={giroTipo} onChange={setGiroTipo} />
-              <div className="text-xs text-gray-400 mt-2">Il giro sposta contanti fra cassa e cassaforte: non e' un incasso.</div>
+              {isTrasferimento ? (
+                <div className="text-xs text-gray-400 mt-2">Il trasferimento sposta contanti fra le due casse: non e' un incasso.</div>
+              ) : (
+                <div className="text-xs text-gray-400 mt-2">Il giro sposta contanti fra cassa e cassaforte: non e' un incasso.</div>
+              )}
+            </div>
+          )}
+
+          {isTrasferimento && (
+            <div className="bg-wine-50 border border-wine-200 rounded-lg p-3 space-y-3">
+              <div className="text-xs font-medium text-gray-500 uppercase tracking-wide">Direzione</div>
+              <Pills
+                opzioni={[
+                  { v: 'uscita', label: 'Consegno a ' + nomeAltra },
+                  { v: 'entrata', label: 'Ricevo da ' + nomeAltra }
+                ]}
+                value={direzioneUscita ? 'uscita' : 'entrata'}
+                onChange={function(v) { setDirezioneUscita(v === 'uscita'); }} />
+              <div className="text-xs text-gray-600">
+                {direzioneUscita
+                  ? 'I contanti escono da ' + nomeQuesta + ' ed entrano in ' + nomeAltra + '.'
+                  : 'I contanti escono da ' + nomeAltra + ' ed entrano in ' + nomeQuesta + '.'}
+              </div>
+              <div className="text-xs text-wine-800">
+                Verranno create due righe collegate, una per cassa. Ti sara' chiesto il PIN: la firma vale per entrambe e dichiara che i contanti sono passati di mano.
+              </div>
             </div>
           )}
 
@@ -444,7 +516,7 @@ function ModaleMovimento(props) {
             <button onClick={onChiudi} className="flex-1 px-4 py-3 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">Annulla</button>
             <button onClick={handleSalva} disabled={salvando}
               className="flex-1 px-4 py-3 bg-wine-700 hover:bg-wine-800 disabled:bg-wine-300 text-white rounded-lg text-sm font-medium">
-              {salvando ? 'Salvataggio...' : (isModifica ? 'Aggiorna' : 'Salva')}
+              {salvando ? 'Salvataggio...' : (isTrasferimento ? 'Firma il trasferimento' : (isModifica ? 'Aggiorna' : 'Salva'))}
             </button>
           </div>
         </div>
@@ -472,11 +544,18 @@ function RigaMovimento(props) {
   var isEntrata = m.tipo === 'entrata';
   var isSpesa = m.tipo === 'spesa';
   var isGiroPreleva = m.tipo === 'giro' && m.giro_tipo === 'preleva_cassaforte';
-  var positivo = isEntrata || isGiroPreleva;
+  // (mig. 44) un trasferimento in ENTRATA fa crescere i contanti come un preleva
+  var isTrasferimento = m.tipo === 'giro' && m.giro_tipo === 'trasferimento';
+  var isTrasferimentoIn = isTrasferimento && !m.trasferimento_uscita;
+  var positivo = isEntrata || isGiroPreleva || isTrasferimentoIn;
 
   var titolo;
   if (isEntrata) titolo = 'Entrata · ' + labelNatura(m.natura) + ' · ' + labelPagamento(m.pagamento);
   else if (isSpesa) titolo = 'Spesa · ' + labelPagamento(m.pagamento);
+  else if (isTrasferimento) {
+    titolo = 'Trasferimento · ' + (m.trasferimento_uscita ? 'consegnati a ' : 'ricevuti da ')
+      + nomeCassa(m.cassa_collegata_id);
+  }
   else titolo = 'Giro · ' + labelGiro(m.giro_tipo);
 
   var dettagli = [];
@@ -498,6 +577,11 @@ function RigaMovimento(props) {
   if (m.annullato && m.annullato_da_nome) {
     firmaAnnullamento = 'Annullato da ' + m.annullato_da_nome + (m.annullato_il ? ' alle ' + oraDa(m.annullato_il) : '');
   }
+  // Firma del trasferimento (firmato_da_nome, mig. 43)
+  var firmaTrasferimento = '';
+  if (isTrasferimento && m.firmato_da_nome) {
+    firmaTrasferimento = 'Firmato da ' + m.firmato_da_nome;
+  }
 
   return (
     <div className={'flex items-center gap-3 p-3 rounded-lg border ' + bordo}>
@@ -508,14 +592,18 @@ function RigaMovimento(props) {
           {!m.annullato && coperto && (
             <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">Coperto da chiusura firmata</span>
           )}
+          {isTrasferimento && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-wine-100 text-wine-800 border border-wine-200">Coppia collegata</span>
+          )}
         </div>
         {dettagli.length > 0 && <div className="text-xs text-gray-500 mt-0.5 truncate">{dettagli.join(' · ')}</div>}
+        {firmaTrasferimento && <div className="text-xs text-gray-500 mt-0.5">{firmaTrasferimento}</div>}
         {firmaAnnullamento && <div className="text-xs text-gray-500 mt-0.5">{firmaAnnullamento}</div>}
       </div>
       <div className={'font-semibold text-lg ' + coloreImporto}>{positivo ? '+' : '-'}{formatEuro(m.importo)}</div>
       {props.puoScrivere && !m.annullato && (
         <div className="flex flex-col gap-1 flex-shrink-0">
-          {coperto ? (
+          {(coperto || isTrasferimento) ? (
             <span className="text-xs px-2 py-1 rounded border border-gray-200 text-gray-400 text-center">Non modificabile</span>
           ) : (
             <button onClick={function() { props.onModifica(m); }} className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-white">Modifica</button>
@@ -576,6 +664,9 @@ export default function CassaNuovaPage(props) {
   var [showPinAnnulla, setShowPinAnnulla] = useState(false);
   var [movimentoDaAnnullare, setMovimentoDaAnnullare] = useState(null);
   var [msgAnnulla, setMsgAnnulla] = useState('');
+  // (mig. 43/44) firma del trasferimento fra le due casse
+  var [showPinTrasferimento, setShowPinTrasferimento] = useState(false);
+  var [datiTrasferimento, setDatiTrasferimento] = useState(null);
 
   // riferimenti
   useEffect(function() {
@@ -675,9 +766,61 @@ export default function CassaNuovaPage(props) {
     setMovimentoDaModificare(null);
   }
 
+  // ══════════════════════════════════════════════════════════
+  // (mig. 43/44) TRASFERIMENTO FRA LE DUE CASSE
+  // Un gesto, due righe, una firma. Le righe portano la stessa
+  // trasferimento_id e direzioni opposte: nascono insieme e si
+  // annullano insieme.
+  // ══════════════════════════════════════════════════════════
+  function onPinTrasferimento(info) {
+    setShowPinTrasferimento(false);
+    var d = datiTrasferimento;
+    setDatiTrasferimento(null);
+    if (!d) return;
+
+    var altraCassaId = isRistorante ? ID_RECEPTION : ID_RISTORANTE;
+    var cassaChePaga = d.uscita ? cassaId : altraCassaId;
+    var cassaCheRiceve = d.uscita ? altraCassaId : cassaId;
+    var tid = nuovoUuid();
+
+    function riga(mia, altra, esceDaQui) {
+      return {
+        cassa_id: mia, data: data, tipo: 'giro',
+        natura: null, pagamento: null, importo: d.importo,
+        is_hotel_cloud: false, centro_di_costo_id: null,
+        giro_tipo: 'trasferimento',
+        cassa_collegata_id: altra,
+        trasferimento_id: tid,
+        trasferimento_uscita: esceDaQui,
+        tavolo_id: null, event_id: null,
+        da_causale: d.da_causale, nota: d.nota,
+        firmato_da: info.user_id || null,
+        firmato_da_nome: info.nome || null,
+        inserito_da: userId || null
+      };
+    }
+
+    var righe = [
+      riga(cassaChePaga, cassaCheRiceve, true),
+      riga(cassaCheRiceve, cassaChePaga, false)
+    ];
+
+    supabase.from('cassa2_movimenti').insert(righe).select().then(function(r) {
+      if (r.error) { setMsgAnnulla('Errore nel trasferimento: ' + r.error.message); return; }
+      // In elenco entra solo la riga di QUESTA cassa; l'altra vive nell'altra pagina.
+      var mie = (r.data || []).filter(function(x) { return x.cassa_id === cassaId; });
+      if (mie.length > 0) setMovimenti(function(prev) { return prev.concat(mie); });
+      setMsgAnnulla('Trasferimento di ' + formatEuro(d.importo) + ' firmato da ' + (info.nome || '') +
+        ': contanti da ' + nomeCassa(cassaChePaga) + ' a ' + nomeCassa(cassaCheRiceve) +
+        '. Registrate due righe collegate, una per cassa.');
+    });
+  }
+
   // ── (mig. 41) ANNULLAMENTO ──
   // Se il movimento e' coperto da almeno una firma, l'annullamento passa dal
   // PIN e viene firmato (annullato_da_nome). Se non lo e', resta immediato.
+  // (mig. 43/44) Se e' un trasferimento, la coppia si annulla INSIEME e la
+  // copertura si valuta su ENTRAMBE le casse.
   function scriviAnnullamento(m, nomeFirma, idFirma) {
     var quando = new Date().toISOString();
     var patch = {
@@ -687,14 +830,29 @@ export default function CassaNuovaPage(props) {
     };
     if (nomeFirma) patch.annullato_da_nome = nomeFirma;
 
-    supabase.from('cassa2_movimenti').update(patch).eq('id', m.id).select().then(function(r) {
+    var query = supabase.from('cassa2_movimenti').update(patch);
+    // La coppia si annulla in un colpo solo: nessuno stato in cui una c'e'
+    // e l'altra no.
+    if (m.trasferimento_id) query = query.eq('trasferimento_id', m.trasferimento_id);
+    else query = query.eq('id', m.id);
+
+    query.select().then(function(r) {
       if (r.error) { setMsgAnnulla('Errore nell\'annullamento: ' + r.error.message); return; }
-      var aggiornato = (r.data && r.data.length > 0) ? r.data[0] : Object.assign({}, m, patch);
+      var tornate = r.data || [];
       setMovimenti(function(prev) {
-        return prev.map(function(x) { return x.id === m.id ? Object.assign({}, x, aggiornato) : x; });
+        return prev.map(function(x) {
+          for (var i = 0; i < tornate.length; i++) {
+            if (tornate[i].id === x.id) return Object.assign({}, x, tornate[i]);
+          }
+          return x;
+        });
       });
+      var coda = m.trasferimento_id ? ' Annullate entrambe le righe del trasferimento.' : '';
       if (nomeFirma) {
-        setMsgAnnulla('Movimento annullato e firmato da ' + nomeFirma + '. Le chiusure che lo comprendevano sono ora dichiarate superate: per correggere davvero, registra una chiusura nuova.');
+        setMsgAnnulla('Movimento annullato e firmato da ' + nomeFirma + '.' + coda +
+          ' Le chiusure che lo comprendevano sono ora dichiarate superate: per correggere davvero, registra una chiusura nuova.');
+      } else if (coda) {
+        setMsgAnnulla('Trasferimento annullato.' + coda);
       } else {
         setMsgAnnulla('');
       }
@@ -703,14 +861,44 @@ export default function CassaNuovaPage(props) {
 
   function handleAnnulla(m) {
     setMsgAnnulla('');
-    var firme = firmeCheCoprono(m, chiusure);
-    if (firme.length === 0) {
-      // Giornata aperta per questo movimento: nessuna firma lo copre.
-      scriviAnnullamento(m, null, null);
+
+    // Movimento normale: basta guardare le chiusure di questa cassa.
+    if (!m.trasferimento_id) {
+      if (firmeCheCoprono(m, chiusure).length === 0) { scriviAnnullamento(m, null, null); return; }
+      setMovimentoDaAnnullare(m);
+      setShowPinAnnulla(true);
       return;
     }
-    setMovimentoDaAnnullare(m);
-    setShowPinAnnulla(true);
+
+    // Trasferimento: la riga gemella vive nell'ALTRA cassa, e le chiusure
+    // dell'altra cassa qui non sono caricate. Se il gemello e' coperto da una
+    // firma laggiu', annullare senza PIN riscriverebbe in silenzio una
+    // fotografia che non vediamo nemmeno.
+    setMsgAnnulla('Controllo le chiusure di entrambe le casse...');
+    supabase.from('cassa2_movimenti').select('*')
+      .eq('trasferimento_id', m.trasferimento_id)
+      .then(function(rm) {
+        var coppia = rm.data || [];
+        var altre = coppia.filter(function(x) { return x.cassa_id !== cassaId; });
+        if (altre.length === 0) {
+          // Gemello non trovato: prudenza, si chiede comunque la firma.
+          setMsgAnnulla('');
+          setMovimentoDaAnnullare(m);
+          setShowPinAnnulla(true);
+          return;
+        }
+        var gemello = altre[0];
+        supabase.from('cassa2_chiusure').select('*')
+          .eq('cassa_id', gemello.cassa_id).eq('data', gemello.data)
+          .then(function(rc) {
+            setMsgAnnulla('');
+            var copertoQui = firmeCheCoprono(m, chiusure).length > 0;
+            var copertoLa = firmeCheCoprono(gemello, rc.data || []).length > 0;
+            if (!copertoQui && !copertoLa) { scriviAnnullamento(m, null, null); return; }
+            setMovimentoDaAnnullare(m);
+            setShowPinAnnulla(true);
+          });
+      });
   }
 
   function onPinAnnulla(info) {
@@ -728,6 +916,10 @@ export default function CassaNuovaPage(props) {
     // (mig. 41, decisione (a)) un movimento coperto da una firma non si
     // modifica: non esiste una colonna di modifica, quindi il cambiamento
     // sarebbe invisibile per sempre. Si annulla (tracciato) e si reinserisce.
+    if (m.trasferimento_id) {
+      setMsgAnnulla('Un trasferimento non si modifica: e\' un solo gesto scritto su due casse. Annullalo (si annullano entrambe le righe) e rifallo con i dati giusti.');
+      return;
+    }
     if (firmeCheCoprono(m, chiusure).length > 0) {
       setMsgAnnulla('Questo movimento e\' coperto da una chiusura gia\' firmata e non si puo\' modificare: annullalo (ti verra\' chiesto il PIN) e reinseriscilo corretto.');
       return;
@@ -880,6 +1072,12 @@ export default function CassaNuovaPage(props) {
           movimento={movimentoDaModificare}
           onGestisci={chiediGestione}
           onSalvato={handleSalvato}
+          onFirmaTrasferimento={function(dati) {
+            setShowForm(false);
+            setMovimentoDaModificare(null);
+            setDatiTrasferimento(dati);
+            setShowPinTrasferimento(true);
+          }}
           onChiudi={function() { setShowForm(false); setMovimentoDaModificare(null); }} />
       )}
 
@@ -896,6 +1094,13 @@ export default function CassaNuovaPage(props) {
         message="Questo movimento e' compreso in una chiusura gia' firmata. La chiusura non verra' riscritta: resta la fotografia, e sara' dichiarata superata. Scegli il tuo nome e inserisci il PIN per firmare l'annullamento."
         onCancel={function() { setShowPinAnnulla(false); setMovimentoDaAnnullare(null); }}
         onConfirmed={onPinAnnulla} />
+
+      <ConfermaPin
+        open={showPinTrasferimento}
+        title="Firma il trasferimento"
+        message="Stai dichiarando che i contanti sono passati fisicamente da una cassa all'altra. La firma vale per entrambe le righe. Scegli il tuo nome e inserisci il PIN."
+        onCancel={function() { setShowPinTrasferimento(false); setDatiTrasferimento(null); }}
+        onConfirmed={onPinTrasferimento} />
     </div>
   );
 }
