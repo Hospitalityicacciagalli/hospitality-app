@@ -731,25 +731,27 @@ export default function CassaNuovaPage(props) {
   var attivi = movimentiRicchi.filter(function(m) { return !m.annullato; });
 
   var ufficiale = 0, fattoria = 0, caparre = 0, spese = 0;
-  var entrateContanti = 0, speseContanti = 0, versaCassaforte = 0, prelevaCassaforte = 0;
+  // ⚠️ I CONTANTI SI CALCOLANO IN UN POSTO SOLO: effettoContanti().
+  // Fino alla mig. 44 questa somma ripeteva le regole per conto suo e
+  // conosceva solo i giri di cassaforte: i trasferimenti fra casse
+  // venivano scritti correttamente e poi ignorati, e i contanti non si
+  // muovevano. Chi aggiunge un tipo di movimento tocca effettoContanti
+  // e basta: qui non c'e' piu' niente da ricordarsi.
+  var contantiOggi = 0;
   attivi.forEach(function(m) {
     if (m.tipo === 'entrata') {
       if (m.natura === 'fattoria') fattoria += m.importo;
       else if (m.natura === 'caparra') caparre += m.importo;
       else ufficiale += m.importo;
-      if (m.pagamento === 'contanti') entrateContanti += m.importo;
     } else if (m.tipo === 'spesa') {
       spese += m.importo;
-      if (m.pagamento === 'contanti') speseContanti += m.importo;
-    } else if (m.tipo === 'giro') {
-      if (m.giro_tipo === 'versa_cassaforte') versaCassaforte += m.importo;
-      if (m.giro_tipo === 'preleva_cassaforte') prelevaCassaforte += m.importo;
     }
+    contantiOggi += effettoContanti(m);
   });
   ufficiale = arrotonda(ufficiale);
   var reale = arrotonda(ufficiale + fattoria + caparre);
   spese = arrotonda(spese);
-  var contantiOggi = arrotonda(entrateContanti - speseContanti - versaCassaforte + prelevaCassaforte);
+  contantiOggi = arrotonda(contantiOggi);
   var contantiInCassa = arrotonda(fondoApertura + contantiOggi);
 
   var listaVisibile = movimentiRicchi;
