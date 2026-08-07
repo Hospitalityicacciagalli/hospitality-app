@@ -10,6 +10,16 @@ import ConfermaPin from '../components/ConfermaPin';
 // Movimenti: ENTRATA (scontrino/fattura/fattoria/caparra) / SPESA / GIRO.
 // Chiusure MULTIPLE al giorno, confermate con PIN (chi + quando).
 // Cassaforte NON e' qui: pagina dedicata sotto permesso 'cassaforte'.
+//
+// (mig. 41) CHIUSURA DI CORREZIONE — una chiusura firmata e' una fotografia
+// e non si riscrive mai. Il controllo lavora PER MOVIMENTO, non per giornata:
+// un movimento e' "coperto" solo dalle firme apposte DOPO la sua creazione.
+//   - annullare un movimento coperto  -> chiede il PIN, scrive annullato_da_nome
+//   - annullare un movimento scoperto -> immediato, come prima
+//   - modificare un movimento coperto -> VIETATO (non esiste una colonna di
+//     modifica: sarebbe un cambiamento non verificabile a posteriori)
+//   - le chiusure invalidate mostrano una fascia ambra col teorico ricalcolato
+//     La correzione vera si fa registrando una chiusura NUOVA.
 // ─────────────────────────────────────────────────────────────
 
 var ID_RECEPTION = 'd375c1de-04b9-490e-ab8f-5f11a6cb969f';
@@ -74,6 +84,51 @@ function ordinaPer(righe) {
 function labelEvento(ev) {
   var pasto = ev.meal_type === 'lunch' ? 'Pranzo' : (ev.meal_type === 'dinner' ? 'Cena' : 'Giornata');
   return ev.event_date + ' · ' + ev.title + ' (' + pasto + ')';
+}
+
+// ── (mig. 41) effetto di UN movimento sui contanti in cassa ──
+// Serve per ricalcolare il teorico di una chiusura invalidata.
+// Chi non muove contanti vale zero: il teorico non cambia, ma il riepilogo si'.
+function effettoContanti(m) {
+  if (m.tipo === 'entrata') return m.pagamento === 'contanti' ? m.importo : 0;
+  if (m.tipo === 'spesa') return m.pagamento === 'contanti' ? -m.importo : 0;
+  if (m.tipo === 'giro') {
+    if (m.giro_tipo === 'versa_cassaforte') return -m.importo;
+    if (m.giro_tipo === 'preleva_cassaforte') return m.importo;
+    return 0;
+  }
+  return 0;
+}
+
+// ── (mig. 41, regola 27) le firme che COPRONO un movimento ──
+// Una chiusura copre un movimento solo se e' stata firmata DOPO che il
+// movimento esisteva. Con 2-3 chiusure al giorno, un movimento creato dopo
+// la chiusura del pranzo non e' coperto da quella firma e resta libero.
+// Ragionare per giornata invece che per firma bloccherebbe operazioni legittime.
+function firmeCheCoprono(m, chiusure) {
+  if (!m || !chiusure || chiusure.length === 0) return [];
+  // Senza data di creazione non possiamo dimostrare che sia successivo:
+  // prudenza, lo consideriamo coperto da tutte.
+  if (!m.creato_il) return chiusure.slice();
+  var nascita = new Date(m.creato_il).getTime();
+  return chiusure.filter(function(c) {
+    if (!c.chiusa_il) return false;
+    return new Date(c.chiusa_il).getTime() > nascita;
+  });
+}
+
+// ── (mig. 41) i movimenti che invalidano UNA chiusura ──
+// Sono quelli che esistevano al momento della firma (creato_il < chiusa_il)
+// e sono stati annullati DOPO (annullato_il > chiusa_il).
+function annullatiDopoLaFirma(chiusura, movimenti) {
+  if (!chiusura || !chiusura.chiusa_il) return [];
+  var firma = new Date(chiusura.chiusa_il).getTime();
+  return movimenti.filter(function(m) {
+    if (!m.annullato || !m.annullato_il) return false;
+    if (new Date(m.annullato_il).getTime() <= firma) return false;
+    if (!m.creato_il) return true;
+    return new Date(m.creato_il).getTime() < firma;
+  });
 }
 
 // ── gruppo di pulsanti tappabili (sostituisce i menu' nativi) ──
@@ -435,20 +490,37 @@ function RigaMovimento(props) {
   var bordo = m.annullato ? 'border-gray-200 bg-gray-50 opacity-60' : (positivo ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50');
   var coloreImporto = m.annullato ? 'text-gray-400' : (positivo ? 'text-green-700' : 'text-red-700');
 
+  // (mig. 41) coperto = esiste almeno una chiusura firmata dopo la sua nascita
+  var coperto = props.coperto;
+
+  // Traccia dell'annullamento firmato col PIN (annullato_da_nome, mig. 41)
+  var firmaAnnullamento = '';
+  if (m.annullato && m.annullato_da_nome) {
+    firmaAnnullamento = 'Annullato da ' + m.annullato_da_nome + (m.annullato_il ? ' alle ' + oraDa(m.annullato_il) : '');
+  }
+
   return (
     <div className={'flex items-center gap-3 p-3 rounded-lg border ' + bordo}>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium text-gray-800">{titolo}</span>
           {m.annullato && <span className="text-xs px-2 py-0.5 rounded-full bg-gray-200 text-gray-500">Annullato</span>}
+          {!m.annullato && coperto && (
+            <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-200">Coperto da chiusura firmata</span>
+          )}
         </div>
         {dettagli.length > 0 && <div className="text-xs text-gray-500 mt-0.5 truncate">{dettagli.join(' · ')}</div>}
+        {firmaAnnullamento && <div className="text-xs text-gray-500 mt-0.5">{firmaAnnullamento}</div>}
       </div>
       <div className={'font-semibold text-lg ' + coloreImporto}>{positivo ? '+' : '-'}{formatEuro(m.importo)}</div>
       {props.puoScrivere && !m.annullato && (
         <div className="flex flex-col gap-1 flex-shrink-0">
-          <button onClick={function() { props.onModifica(m); }} className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-white">Modifica</button>
-          <button onClick={function() { props.onAnnulla(m.id); }} className="text-xs px-2 py-1 rounded border border-red-200 text-red-600 hover:bg-white">Annulla</button>
+          {coperto ? (
+            <span className="text-xs px-2 py-1 rounded border border-gray-200 text-gray-400 text-center">Non modificabile</span>
+          ) : (
+            <button onClick={function() { props.onModifica(m); }} className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-white">Modifica</button>
+          )}
+          <button onClick={function() { props.onAnnulla(m); }} className="text-xs px-2 py-1 rounded border border-red-200 text-red-600 hover:bg-white">Annulla</button>
         </div>
       )}
     </div>
@@ -498,6 +570,12 @@ export default function CassaNuovaPage(props) {
   var [filtroTavolo, setFiltroTavolo] = useState('');
   var [showPinGestione, setShowPinGestione] = useState(false);
   var [msgGestione, setMsgGestione] = useState('');
+  // (mig. 41) le chiusure del giorno vivono qui: servono sia alla scheda
+  // Chiusura sia all'annullamento, che deve sapere se il movimento e' coperto.
+  var [chiusure, setChiusure] = useState([]);
+  var [showPinAnnulla, setShowPinAnnulla] = useState(false);
+  var [movimentoDaAnnullare, setMovimentoDaAnnullare] = useState(null);
+  var [msgAnnulla, setMsgAnnulla] = useState('');
 
   // riferimenti
   useEffect(function() {
@@ -528,10 +606,20 @@ export default function CassaNuovaPage(props) {
       });
   }, [cassaId, data]);
 
+  // (mig. 41) chiusure del giorno, in ordine di firma (la piu' recente in cima)
+  function caricaChiusure() {
+    supabase.from('cassa2_chiusure').select('*')
+      .eq('cassa_id', cassaId).eq('data', data)
+      .order('chiusa_il', { ascending: false })
+      .then(function(r) { setChiusure(r.data || []); });
+  }
+  useEffect(caricaChiusure, [cassaId, data]);
+
   // movimenti del giorno
   useEffect(function() {
     setLoading(true);
     setFiltroTavolo('');
+    setMsgAnnulla('');
     supabase.from('cassa2_movimenti').select('*')
       .eq('cassa_id', cassaId).eq('data', data).order('creato_il', { ascending: true })
       .then(function(r) {
@@ -587,16 +675,66 @@ export default function CassaNuovaPage(props) {
     setMovimentoDaModificare(null);
   }
 
-  function handleAnnulla(id) {
-    supabase.from('cassa2_movimenti')
-      .update({ annullato: true, annullato_da: userId, annullato_il: new Date().toISOString() })
-      .eq('id', id).then(function(r) {
-        if (!r.error) setMovimenti(function(prev) { return prev.map(function(m) { return m.id === id ? Object.assign({}, m, { annullato: true }) : m; }); });
+  // ── (mig. 41) ANNULLAMENTO ──
+  // Se il movimento e' coperto da almeno una firma, l'annullamento passa dal
+  // PIN e viene firmato (annullato_da_nome). Se non lo e', resta immediato.
+  function scriviAnnullamento(m, nomeFirma, idFirma) {
+    var quando = new Date().toISOString();
+    var patch = {
+      annullato: true,
+      annullato_da: idFirma || userId || null,
+      annullato_il: quando
+    };
+    if (nomeFirma) patch.annullato_da_nome = nomeFirma;
+
+    supabase.from('cassa2_movimenti').update(patch).eq('id', m.id).select().then(function(r) {
+      if (r.error) { setMsgAnnulla('Errore nell\'annullamento: ' + r.error.message); return; }
+      var aggiornato = (r.data && r.data.length > 0) ? r.data[0] : Object.assign({}, m, patch);
+      setMovimenti(function(prev) {
+        return prev.map(function(x) { return x.id === m.id ? Object.assign({}, x, aggiornato) : x; });
       });
+      if (nomeFirma) {
+        setMsgAnnulla('Movimento annullato e firmato da ' + nomeFirma + '. Le chiusure che lo comprendevano sono ora dichiarate superate: per correggere davvero, registra una chiusura nuova.');
+      } else {
+        setMsgAnnulla('');
+      }
+    });
+  }
+
+  function handleAnnulla(m) {
+    setMsgAnnulla('');
+    var firme = firmeCheCoprono(m, chiusure);
+    if (firme.length === 0) {
+      // Giornata aperta per questo movimento: nessuna firma lo copre.
+      scriviAnnullamento(m, null, null);
+      return;
+    }
+    setMovimentoDaAnnullare(m);
+    setShowPinAnnulla(true);
+  }
+
+  function onPinAnnulla(info) {
+    setShowPinAnnulla(false);
+    var m = movimentoDaAnnullare;
+    setMovimentoDaAnnullare(null);
+    if (!m) return;
+    // Il PIN qui e' tracciabilita', non autorizzazione: chi annulla e' gia'
+    // in una sessione con permesso di scrittura, e le sessioni sono condivise.
+    scriviAnnullamento(m, info.nome || null, info.user_id || null);
   }
 
   function apriNuovo() { setMovimentoDaModificare(null); setShowForm(true); }
-  function apriModifica(m) { setMovimentoDaModificare(m); setShowForm(true); }
+  function apriModifica(m) {
+    // (mig. 41, decisione (a)) un movimento coperto da una firma non si
+    // modifica: non esiste una colonna di modifica, quindi il cambiamento
+    // sarebbe invisibile per sempre. Si annulla (tracciato) e si reinserisce.
+    if (firmeCheCoprono(m, chiusure).length > 0) {
+      setMsgAnnulla('Questo movimento e\' coperto da una chiusura gia\' firmata e non si puo\' modificare: annullalo (ti verra\' chiesto il PIN) e reinseriscilo corretto.');
+      return;
+    }
+    setMovimentoDaModificare(m);
+    setShowForm(true);
+  }
   function vaiAllaAltra() { navigate('/cassa/' + (isRistorante ? 'reception' : 'ristorante')); }
 
   // Livello del permesso variabili_cassa dell'utente che conferma col PIN
@@ -666,6 +804,13 @@ export default function CassaNuovaPage(props) {
         <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">{msgGestione}</div>
       )}
 
+      {msgAnnulla && (
+        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800 flex items-start gap-3">
+          <div className="flex-1">{msgAnnulla}</div>
+          <button onClick={function() { setMsgAnnulla(''); }} className="text-amber-700 hover:text-amber-900 text-lg leading-none">&times;</button>
+        </div>
+      )}
+
       <div className="flex gap-1 border-b border-gray-200 mb-5">
         {tabs.map(function(t) {
           var sel = t.id === sezione;
@@ -712,7 +857,8 @@ export default function CassaNuovaPage(props) {
           ) : (
             <div className="space-y-2">
               {listaVisibile.map(function(m) {
-                return <RigaMovimento key={m.id} movimento={m} puoScrivere={puoScrivere} onModifica={apriModifica} onAnnulla={handleAnnulla} />;
+                var coperto = firmeCheCoprono(m, chiusure).length > 0;
+                return <RigaMovimento key={m.id} movimento={m} coperto={coperto} puoScrivere={puoScrivere} onModifica={apriModifica} onAnnulla={handleAnnulla} />;
               })}
             </div>
           )}
@@ -723,7 +869,8 @@ export default function CassaNuovaPage(props) {
         <ChiusuraTab
           cassaId={cassaId} data={data} puoScrivere={puoScrivere}
           fondoApertura={fondoApertura} contantiInCassa={contantiInCassa}
-          ufficiale={ufficiale} spese={spese} attivi={attivi} />
+          ufficiale={ufficiale} spese={spese} attivi={attivi}
+          chiusure={chiusure} movimenti={movimentiRicchi} onRicaricaChiusure={caricaChiusure} />
       )}
 
       {showForm && (
@@ -742,6 +889,13 @@ export default function CassaNuovaPage(props) {
         message="Scegli il tuo nome e inserisci il PIN per aprire la gestione di sale, tavoli e centri di costo."
         onCancel={function() { setShowPinGestione(false); }}
         onConfirmed={onPinGestione} />
+
+      <ConfermaPin
+        open={showPinAnnulla}
+        title="Annullamento su giornata gia' chiusa"
+        message="Questo movimento e' compreso in una chiusura gia' firmata. La chiusura non verra' riscritta: resta la fotografia, e sara' dichiarata superata. Scegli il tuo nome e inserisci il PIN per firmare l'annullamento."
+        onCancel={function() { setShowPinAnnulla(false); setMovimentoDaAnnullare(null); }}
+        onConfirmed={onPinAnnulla} />
     </div>
   );
 }
@@ -757,17 +911,13 @@ function ChiusuraTab(props) {
     return t;
   });
   var [notaDiff, setNotaDiff] = useState('');
-  var [chiusure, setChiusure] = useState([]);
   var [showPin, setShowPin] = useState(false);
   var [msg, setMsg] = useState('');
 
-  function caricaChiusure() {
-    supabase.from('cassa2_chiusure').select('*')
-      .eq('cassa_id', props.cassaId).eq('data', props.data)
-      .order('chiusa_il', { ascending: false })
-      .then(function(r) { setChiusure(r.data || []); });
-  }
-  useEffect(caricaChiusure, [props.cassaId, props.data]);
+  // (mig. 41) le chiusure arrivano dalla pagina: la stessa lista che serve
+  // all'annullamento per sapere se un movimento e' coperto.
+  var chiusure = props.chiusure || [];
+  var movimenti = props.movimenti || [];
 
   function setTaglio(campo, val) {
     setTagli(function(prev) { var n = Object.assign({}, prev); n[campo] = val; return n; });
@@ -810,7 +960,7 @@ function ChiusuraTab(props) {
     supabase.from('cassa2_chiusure').insert([riga]).select().then(function(r) {
       if (r.error) { setMsg('Errore: ' + r.error.message); return; }
       setMsg('Chiusura registrata da ' + (info.nome || '') + '. Il contato diventa il fondo successivo.');
-      caricaChiusure();
+      if (props.onRicaricaChiusure) props.onRicaricaChiusure();
     });
   }
 
@@ -890,15 +1040,47 @@ function ChiusuraTab(props) {
           <div className="space-y-2">
             {chiusure.map(function(c) {
               var quadra = Math.abs(c.differenza) < 0.01;
+
+              // (mig. 41) chi ha invalidato questa firma, e di quanto
+              var invalidanti = annullatiDopoLaFirma(c, movimenti);
+              var superata = invalidanti.length > 0;
+              var delta = 0;
+              invalidanti.forEach(function(m) { delta += effettoContanti(m); });
+              delta = arrotonda(delta);
+              var teoricoRicalcolato = arrotonda(c.teorico_contanti - delta);
+              var cornice = superata ? 'border-amber-300 bg-amber-50' : 'border-gray-200';
+
               return (
-                <div key={c.id} className="flex items-center gap-3 p-3 rounded-lg border border-gray-200">
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-gray-800">{oraDa(c.chiusa_il)} · {c.chiusa_da_nome || '—'}</div>
-                    <div className="text-xs text-gray-500">Contato {formatEuro(c.contato_contanti)} · teorico {formatEuro(c.teorico_contanti)}</div>
+                <div key={c.id} className={'p-3 rounded-lg border ' + cornice}>
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-gray-800">{oraDa(c.chiusa_il)} · {c.chiusa_da_nome || '—'}</div>
+                      <div className="text-xs text-gray-500">Contato {formatEuro(c.contato_contanti)} · teorico {formatEuro(c.teorico_contanti)}</div>
+                    </div>
+                    <div className={'text-sm font-semibold ' + (quadra ? 'text-green-700' : 'text-amber-700')}>
+                      {c.differenza > 0 ? '+' : ''}{formatEuro(c.differenza)}
+                    </div>
                   </div>
-                  <div className={'text-sm font-semibold ' + (quadra ? 'text-green-700' : 'text-amber-700')}>
-                    {c.differenza > 0 ? '+' : ''}{formatEuro(c.differenza)}
-                  </div>
+
+                  {superata && (
+                    <div className="mt-3 pt-3 border-t border-amber-200 text-xs text-amber-900 space-y-1">
+                      <div className="font-semibold">
+                        Chiusura superata: {invalidanti.length === 1 ? 'un movimento e\' stato annullato' : invalidanti.length + ' movimenti sono stati annullati'} dopo questa firma.
+                      </div>
+                      {Math.abs(delta) >= 0.01 ? (
+                        <div>
+                          Teorico contanti ricalcolato: <span className="font-semibold">{formatEuro(teoricoRicalcolato)}</span> (firmato {formatEuro(c.teorico_contanti)}).
+                        </div>
+                      ) : (
+                        <div>
+                          Nessun contante coinvolto: il teorico non cambia, ma il <span className="font-semibold">riepilogo per natura e pagamento non e' piu' esatto</span>.
+                        </div>
+                      )}
+                      <div className="text-amber-800">
+                        I numeri firmati restano quelli: una chiusura firmata non si riscrive. Il contato e' stato contato a mano e resta il fondo del giorno dopo. Per correggere davvero, registra una <span className="font-semibold">chiusura nuova</span>: vince la piu' recente.
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}
