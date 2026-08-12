@@ -33,6 +33,8 @@ export default function StaffList() {
 
   var [staff, setStaff] = useState([]);
   var [departments, setDepartments] = useState([]);
+  // Reparti AGGIUNTIVI per dipendente (migrazione 45): { staff_id: [reparto, ...] }
+  var [extraByStaff, setExtraByStaff] = useState({});
   var [loading, setLoading] = useState(true);
   var [search, setSearch] = useState("");
   var [filterDept, setFilterDept] = useState("all");
@@ -43,8 +45,25 @@ export default function StaffList() {
 
   useEffect(function() {
     loadDepartments();
+    loadExtraDepartments();
     loadStaff();
   }, []);
+
+  function loadExtraDepartments() {
+    supabase
+      .from("staff_member_departments")
+      .select("staff_id, staff_departments(id, name, color)")
+      .then(function(result) {
+        if (result.error) return;
+        var mappa = {};
+        (result.data || []).forEach(function(r) {
+          if (!r.staff_departments) return;
+          if (!mappa[r.staff_id]) mappa[r.staff_id] = [];
+          mappa[r.staff_id].push(r.staff_departments);
+        });
+        setExtraByStaff(mappa);
+      });
+  }
 
   function loadDepartments() {
     supabase
@@ -268,6 +287,18 @@ export default function StaffList() {
                           {member.staff_departments.name}
                         </span>
                       )}
+                      {(extraByStaff[member.id] || []).map(function(d) {
+                        return (
+                          <span
+                            key={d.id}
+                            className="text-xs px-2 py-0.5 rounded-full border bg-white"
+                            style={{ color: d.color, borderColor: d.color }}
+                            title="Reparto aggiuntivo: compare anche nei turni di questo reparto"
+                          >
+                            + {d.name}
+                          </span>
+                        );
+                      })}
                     </div>
                   </div>
 

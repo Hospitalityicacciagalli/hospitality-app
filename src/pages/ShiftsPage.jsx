@@ -3,7 +3,7 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/AuthContext";
 import {
   Calendar, ChevronLeft, ChevronRight, Plus, X, Clock,
-  Users, Coffee, Moon, Trash2, BedDouble
+  Users, Coffee, Moon, Trash2, BedDouble, Pencil, Copy, AlertTriangle
 } from "lucide-react";
 
 // Timeline visibile: dalle 6:00 alle 24:00
@@ -47,17 +47,31 @@ export default function ShiftsPage() {
   var canManage = canEdit("turni");
 
   var [weekStart, setWeekStart] = useState(mondayOf(toISO(new Date())));
-  var [departments, setDepartments] = useState([]);
+  // FONTE UNICA dei reparti: tutti, anche quelli fuori dai turni.
+  // Servono per nominare il reparto di un turno in conflitto (regola 31: una copia sola).
+  var [allDepartments, setAllDepartments] = useState([]);
   var [selectedDept, setSelectedDept] = useState(null);
   var [staff, setStaff] = useState([]);
   var [templates, setTemplates] = useState([]);
-  var [shifts, setShifts] = useState([]);
+  // FONTE UNICA dei turni: TUTTI i reparti della settimana.
+  // I turni del reparto selezionato sono un filtro di questi, non una seconda lettura.
+  var [allShifts, setAllShifts] = useState([]);
   var [leaves, setLeaves] = useState([]);
   var [covers, setCovers] = useState({}); // { "iso": { lunch: n, dinner: n } }
   var [loading, setLoading] = useState(true);
 
   // Pop-up giorno (riepilogo + assegna)
   var [dayPanel, setDayPanel] = useState(null); // iso del giorno aperto, o null
+
+  // Pannello del singolo turno: Modifica / Duplica / Elimina
+  var [shiftPanel, setShiftPanel] = useState(null);   // il turno toccato, o null
+  var [panelMode, setPanelMode] = useState("menu");   // "menu" | "modifica" | "duplica"
+  var [panelSaving, setPanelSaving] = useState(false);
+  var [editStart, setEditStart] = useState("");
+  var [editEnd, setEditEnd] = useState("");
+  var [editTemplateId, setEditTemplateId] = useState("");
+  var [editNotes, setEditNotes] = useState("");
+  var [dupSelected, setDupSelected] = useState([]);
 
   // Modale assegnazione turno (dentro il pop-up giorno)
   var [showAssign, setShowAssign] = useState(false);
@@ -79,27 +93,56 @@ export default function ShiftsPage() {
   }, [selectedDept]);
 
   useEffect(function() {
-    if (selectedDept) {
-      loadShifts(selectedDept, weekStart);
-      loadLeaves(weekStart);
-      loadCovers(weekStart);
-    }
-  }, [selectedDept, weekStart]);
+    loadShifts(weekStart);
+    loadLeaves(weekStart);
+    loadCovers(weekStart);
+  }, [weekStart]);
 
   function loadDepartments() {
     setLoading(true);
     supabase.from("staff_departments").select("*").order("sort_order").then(function(result) {
       if (result.error) { alert("Errore caricamento reparti: " + result.error.message); setLoading(false); return; }
-      var inShifts = (result.data || []).filter(function(d) { return d.is_active !== false && d.show_in_shifts !== false; });
-      setDepartments(inShifts);
+      var tutti = result.data || [];
+      setAllDepartments(tutti);
+      var inShifts = tutti.filter(function(d) { return d.is_active !== false && d.show_in_shifts !== false; });
       if (inShifts.length > 0 && !selectedDept) setSelectedDept(inShifts[0].id);
       setLoading(false);
     });
   }
 
+  function ordinaStaff(lista) {
+    return lista.slice().sort(function(a, b) {
+      var an = (a.last_name || "") + " " + (a.first_name || "");
+      var bn = (b.last_name || "") + " " + (b.first_name || "");
+      if (an < bn) return -1;
+      if (an > bn) return 1;
+      return 0;
+    });
+  }
+
+  // Lo staff di un reparto = chi ce l'ha come reparto PRINCIPALE (staff_members.department_id)
+  // piu' chi ce l'ha fra i reparti AGGIUNTIVI (staff_member_departments, migrazione 45).
   function loadStaff(deptId) {
-    supabase.from("staff_members").select("*").eq("department_id", deptId).eq("is_active", true).order("last_name").then(function(result) {
-      if (!result.error) setStaff(result.data || []);
+    supabase.from("staff_member_departments").select("staff_id").eq("department_id", deptId).then(function(resExtra) {
+      var extraIds = [];
+      if (!resExtra.error && resExtra.data) {
+        resExtra.data.forEach(function(r) { extraIds.push(r.staff_id); });
+      }
+      supabase.from("staff_members").select("*").eq("department_id", deptId).eq("is_active", true).then(function(resBase) {
+        var base = (!resBase.error && resBase.data) ? resBase.data : [];
+        if (extraIds.length === 0) { setStaff(ordinaStaff(base)); return; }
+        supabase.from("staff_members").select("*").in("id", extraIds).eq("is_active", true).then(function(resAgg) {
+          var agg = (!resAgg.error && resAgg.data) ? resAgg.data : [];
+          var visti = {};
+          var uniti = [];
+          base.concat(agg).forEach(function(s) {
+            if (visti[s.id]) return;
+            visti[s.id] = true;
+            uniti.push(s);
+          });
+          setStaff(ordinaStaff(uniti));
+        });
+      });
     });
   }
 
@@ -109,11 +152,13 @@ export default function ShiftsPage() {
     });
   }
 
-  function loadShifts(deptId, ws) {
+  // Legge i turni di TUTTI i reparti: serve per accorgersi che una persona
+  // assegnata a piu' reparti abbia gia' un turno altrove nello stesso giorno.
+  function loadShifts(ws) {
     var weekEnd = addDays(ws, 6);
     var rangeStart = addDays(ws, -1);
-    supabase.from("staff_shifts").select("*").eq("department_id", deptId).gte("shift_date", rangeStart).lte("shift_date", weekEnd).then(function(result) {
-      if (!result.error) setShifts(result.data || []);
+    supabase.from("staff_shifts").select("*").gte("shift_date", rangeStart).lte("shift_date", weekEnd).then(function(result) {
+      if (!result.error) setAllShifts(result.data || []);
     });
   }
 
@@ -153,11 +198,18 @@ export default function ShiftsPage() {
     });
   }
 
+  // ---- Viste derivate: nessuna seconda lettura, nessuna seconda copia ----
+  var departments = allDepartments.filter(function(d) { return d.is_active !== false && d.show_in_shifts !== false; });
+  var shifts = allShifts.filter(function(s) { return s.department_id === selectedDept; });
+
   var weekDays = [];
   for (var i = 0; i < 7; i++) weekDays.push(addDays(weekStart, i));
 
   function templateName(id) { var t = templates.find(function(x) { return x.id === id; }); return t ? t.name : null; }
   function staffName(id) { var s = staff.find(function(x) { return x.id === id; }); return s ? (s.first_name + " " + s.last_name) : "—"; }
+  function deptName(id) { var d = allDepartments.find(function(x) { return x.id === id; }); return d ? d.name : "altro reparto"; }
+  // Sta in questo reparto come AGGIUNTIVO (il principale e' un altro).
+  function isAggiuntivo(s) { return s.department_id !== selectedDept; }
 
   // turni veri (entry_type === 'turno') di un giorno
   function workShiftsOfDay(iso) {
@@ -214,6 +266,37 @@ export default function ShiftsPage() {
     });
   }
 
+  // ---- CONTROLLO DEL TURNO — UNA COPIA SOLA ----
+  // La usano assegna, modifica e duplica. Non va duplicata: se un giorno cambia
+  // una regola, deve cambiare qui e basta (regola 31).
+  // Restituisce l'elenco dei problemi, in parole. Vuoto = nessun problema.
+  function problemiTurno(staffId, iso, start, end, escludiId) {
+    var problemi = [];
+    if (isOnLeave(staffId, iso)) problemi.push("in ferie");
+    if (isRest(staffId, iso)) problemi.push("segnato riposo");
+
+    var a = timeToHours(start);
+    var b = endHours(end);
+    allShifts.forEach(function(s) {
+      if (escludiId && s.id === escludiId) return;
+      if (s.staff_id !== staffId) return;
+      if (s.shift_date !== iso) return;
+      if (s.entry_type === "riposo") return;
+      var c = timeToHours(s.start_time);
+      var d = endHours(s.end_time);
+      if (a == null || b == null || c == null || d == null) return;
+      if (a < d && c < b) {
+        problemi.push("gia in turno " + timeShort(s.start_time) + "–" + endLabel(s.end_time) + " in " + deptName(s.department_id));
+      }
+    });
+    return problemi;
+  }
+
+  function confermaProblemi(nome, problemi) {
+    if (problemi.length === 0) return true;
+    return confirm(nome + ": " + problemi.join("; ") + ". Procedere comunque?");
+  }
+
   // ---- Azioni ----
 
   function openAssignFor() {
@@ -235,12 +318,7 @@ export default function ShiftsPage() {
   function saveAssign() {
     if (!assignStaffId) { alert("Seleziona un dipendente."); return; }
     if (!assignStart || !assignEnd) { alert("Imposta orario di inizio e fine."); return; }
-    if (isOnLeave(assignStaffId, dayPanel)) {
-      if (!confirm(staffName(assignStaffId) + " risulta in ferie in questo giorno. Assegnare comunque?")) return;
-    }
-    if (isRest(assignStaffId, dayPanel)) {
-      if (!confirm(staffName(assignStaffId) + " è segnato come riposo in questo giorno. Assegnare comunque il turno?")) return;
-    }
+    if (!confermaProblemi(staffName(assignStaffId), problemiTurno(assignStaffId, dayPanel, assignStart, assignEnd, null))) return;
     setSavingAssign(true);
     supabase.from("staff_shifts").insert({
       shift_date: dayPanel,
@@ -255,7 +333,7 @@ export default function ShiftsPage() {
       setSavingAssign(false);
       if (result.error) { alert("Errore: " + result.error.message); return; }
       setShowAssign(false);
-      loadShifts(selectedDept, weekStart);
+      loadShifts(weekStart);
     });
   }
 
@@ -263,7 +341,106 @@ export default function ShiftsPage() {
     if (!confirm("Eliminare questo turno?")) return;
     supabase.from("staff_shifts").delete().eq("id", shiftId).then(function(result) {
       if (result.error) { alert("Errore: " + result.error.message); return; }
-      loadShifts(selectedDept, weekStart);
+      chiudiShiftPanel();
+      loadShifts(weekStart);
+    });
+  }
+
+  // ---- Pannello del singolo turno: Modifica / Duplica / Elimina ----
+
+  function apriShiftPanel(sh) {
+    if (!canManage) return;
+    setShiftPanel(sh);
+    setPanelMode("menu");
+    setEditStart(timeShort(sh.start_time));
+    setEditEnd(timeShort(sh.end_time));
+    setEditTemplateId(sh.template_id || "");
+    setEditNotes(sh.notes || "");
+    setDupSelected([]);
+  }
+
+  function chiudiShiftPanel() {
+    setShiftPanel(null);
+    setPanelMode("menu");
+    setDupSelected([]);
+    setPanelSaving(false);
+  }
+
+  function pickEditTemplate(tid) {
+    setEditTemplateId(tid);
+    var t = templates.find(function(x) { return x.id === tid; });
+    if (t) { setEditStart(timeShort(t.start_time)); setEditEnd(timeShort(t.end_time)); }
+  }
+
+  function salvaModifica() {
+    if (!shiftPanel) return;
+    if (!editStart || !editEnd) { alert("Imposta orario di inizio e fine."); return; }
+    var problemi = problemiTurno(shiftPanel.staff_id, shiftPanel.shift_date, editStart, editEnd, shiftPanel.id);
+    if (!confermaProblemi(staffName(shiftPanel.staff_id), problemi)) return;
+    setPanelSaving(true);
+    supabase.from("staff_shifts").update({
+      start_time:  editStart,
+      end_time:    editEnd,
+      template_id: editTemplateId || null,
+      notes:       editNotes.trim() || null,
+      updated_at:  new Date().toISOString()
+    }).eq("id", shiftPanel.id).then(function(result) {
+      setPanelSaving(false);
+      if (result.error) { alert("Errore: " + result.error.message); return; }
+      chiudiShiftPanel();
+      loadShifts(weekStart);
+    });
+  }
+
+  function toggleDup(staffId) {
+    setDupSelected(function(prev) {
+      if (prev.indexOf(staffId) !== -1) {
+        return prev.filter(function(x) { return x !== staffId; });
+      }
+      var next = prev.slice();
+      next.push(staffId);
+      return next;
+    });
+  }
+
+  // Candidati alla duplica: SOLO chi ha questo reparto, principale o aggiuntivo.
+  function candidatiDuplica() {
+    if (!shiftPanel) return [];
+    return staff.filter(function(s) { return s.id !== shiftPanel.staff_id; });
+  }
+
+  function duplicaSuSelezionati() {
+    if (!shiftPanel) return;
+    if (dupSelected.length === 0) { alert("Seleziona almeno un collega."); return; }
+
+    var conProblemi = [];
+    dupSelected.forEach(function(sid) {
+      var p = problemiTurno(sid, shiftPanel.shift_date, shiftPanel.start_time, shiftPanel.end_time, null);
+      if (p.length > 0) conProblemi.push("- " + staffName(sid) + ": " + p.join("; "));
+    });
+    if (conProblemi.length > 0) {
+      if (!confirm("Attenzione:\n" + conProblemi.join("\n") + "\n\nDuplicare comunque il turno per tutti i selezionati?")) return;
+    }
+
+    var righe = dupSelected.map(function(sid) {
+      return {
+        shift_date:    shiftPanel.shift_date,
+        department_id: shiftPanel.department_id,
+        staff_id:      sid,
+        template_id:   shiftPanel.template_id || null,
+        start_time:    shiftPanel.start_time,
+        end_time:      shiftPanel.end_time,
+        notes:         shiftPanel.notes || null,
+        entry_type:    "turno"
+      };
+    });
+
+    setPanelSaving(true);
+    supabase.from("staff_shifts").insert(righe).then(function(result) {
+      setPanelSaving(false);
+      if (result.error) { alert("Errore: " + result.error.message); return; }
+      chiudiShiftPanel();
+      loadShifts(weekStart);
     });
   }
 
@@ -273,7 +450,7 @@ export default function ShiftsPage() {
     if (existing) {
       supabase.from("staff_shifts").delete().eq("id", existing.id).then(function(result) {
         if (result.error) { alert("Errore: " + result.error.message); return; }
-        loadShifts(selectedDept, weekStart);
+        loadShifts(weekStart);
       });
     } else {
       if (hasWork(staffId, dayPanel)) {
@@ -286,7 +463,7 @@ export default function ShiftsPage() {
         entry_type: "riposo"
       }).then(function(result) {
         if (result.error) { alert("Errore: " + result.error.message); return; }
-        loadShifts(selectedDept, weekStart);
+        loadShifts(weekStart);
       });
     }
   }
@@ -404,19 +581,21 @@ export default function ShiftsPage() {
                       var left = pct(a);
                       var width = pct(b) - pct(a);
                       var barColor = isExtra ? "#f59e0b" : (currentDept.color || "#7c3aed");
+                      var altrove = s && isAggiuntivo(s);
                       return (
-                        <div key={sh.id} className="flex items-center gap-2">
+                        <div
+                          key={sh.id}
+                          onClick={function() { apriShiftPanel(sh); }}
+                          className={"flex items-center gap-2 rounded " + (canManage ? "cursor-pointer hover:bg-gray-50" : "")}
+                          title={canManage ? "Tocca il turno per modificarlo, duplicarlo o eliminarlo" : ""}
+                        >
                           <span className="text-xs text-gray-600 truncate text-right" style={{ width: "112px", flexShrink: 0 }}>
+                            {altrove && <span className="text-gray-400 mr-0.5">•</span>}
                             {s ? (s.last_name + " " + s.first_name.charAt(0) + ".") : "—"}
                           </span>
                           <div className="relative flex-1 h-6">
                             <div className="absolute h-6 rounded flex items-center px-2 gap-1" style={{ left: left + "%", width: width + "%", backgroundColor: barColor }}>
                               <span className="text-xs text-white font-medium truncate">{timeShort(sh.start_time)}–{endLabel(sh.end_time)}</span>
-                              {canManage && (
-                                <button onClick={function() { deleteShift(sh.id); }} className="ml-auto text-white opacity-70 hover:opacity-100" title="Elimina turno">
-                                  <X size={12} />
-                                </button>
-                              )}
                             </div>
                           </div>
                         </div>
@@ -462,6 +641,8 @@ export default function ShiftsPage() {
           <span className="flex items-center gap-1.5"><span className="w-3.5 h-2.5 rounded" style={{ backgroundColor: "#f59e0b" }} /> personale extra</span>
           <span className="flex items-center gap-1.5"><Coffee size={12} className="text-amber-600" /> coperti pranzo</span>
           <span className="flex items-center gap-1.5"><Moon size={12} className="text-indigo-600" /> coperti cena</span>
+          <span className="flex items-center gap-1.5"><span className="text-gray-400">•</span> in aiuto da un altro reparto</span>
+          {canManage && <span className="flex items-center gap-1.5"><Pencil size={12} className="text-gray-400" /> tocca un turno per modificarlo o duplicarlo</span>}
         </div>
       )}
 
@@ -503,17 +684,47 @@ export default function ShiftsPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Dipendente</label>
-                    <select value={assignStaffId} onChange={function(e) { setAssignStaffId(e.target.value); }} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-300">
-                      <option value="">— Seleziona —</option>
-                      {(assignExtra ? extraStaff : fixedStaff).map(function(s) { return <option key={s.id} value={s.id}>{s.last_name} {s.first_name}</option>; })}
-                    </select>
+                    {(assignExtra ? extraStaff : fixedStaff).length === 0 && (
+                      <p className="text-sm text-gray-400">Nessuno disponibile in questo reparto.</p>
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      {(assignExtra ? extraStaff : fixedStaff).map(function(s) {
+                        var scelto = assignStaffId === s.id;
+                        return (
+                          <button
+                            key={s.id}
+                            onClick={function() { setAssignStaffId(s.id); }}
+                            className={"px-3 py-2 rounded-lg text-sm border transition-colors " + (scelto ? "bg-wine-700 text-white border-wine-700" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-100")}
+                          >
+                            {s.last_name} {s.first_name}
+                            {isAggiuntivo(s) && <span className={"ml-1 text-xs " + (scelto ? "text-wine-100" : "text-gray-400")}>· in aiuto</span>}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">Turno tipo (scorciatoia)</label>
-                    <select value={assignTemplateId} onChange={function(e) { pickTemplate(e.target.value); }} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-300">
-                      <option value="">— Orario manuale —</option>
-                      {templates.map(function(t) { return <option key={t.id} value={t.id}>{t.name} ({timeShort(t.start_time)}–{endLabel(t.end_time)})</option>; })}
-                    </select>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={function() { setAssignTemplateId(""); }}
+                        className={"px-3 py-2 rounded-lg text-sm border transition-colors " + (assignTemplateId === "" ? "bg-gray-700 text-white border-gray-700" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-100")}
+                      >
+                        Orario manuale
+                      </button>
+                      {templates.map(function(t) {
+                        var scelto = assignTemplateId === t.id;
+                        return (
+                          <button
+                            key={t.id}
+                            onClick={function() { pickTemplate(t.id); }}
+                            className={"px-3 py-2 rounded-lg text-sm border transition-colors " + (scelto ? "bg-wine-700 text-white border-wine-700" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-100")}
+                          >
+                            {t.name} ({timeShort(t.start_time)}–{endLabel(t.end_time)})
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -559,7 +770,14 @@ export default function ShiftsPage() {
                   return (
                     <div key={s.id} className="flex items-center gap-2 py-2 px-2 rounded-lg border border-gray-100">
                       <div className="flex-1 min-w-0">
-                        <div className="text-sm font-medium text-gray-800 truncate">{s.last_name} {s.first_name}</div>
+                        <div className="text-sm font-medium text-gray-800 truncate">
+                          {s.last_name} {s.first_name}
+                          {isAggiuntivo(s) && (
+                            <span className="ml-1.5 text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">
+                              in aiuto da {deptName(s.department_id)}
+                            </span>
+                          )}
+                        </div>
                         <div className="text-xs text-gray-400">
                           ieri: {y === "ferie" ? "ferie" : (y === "riposo" ? "riposo" : (y ? y : "—"))}
                           <span className="mx-1.5">·</span>
@@ -580,6 +798,164 @@ export default function ShiftsPage() {
                   );
                 })}
               </div>
+
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PANNELLO DEL SINGOLO TURNO: Modifica · Duplica · Elimina */}
+      {shiftPanel && canManage && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-lg max-h-screen overflow-y-auto">
+
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200">
+              <div className="min-w-0">
+                <h2 className="text-lg font-semibold text-gray-900 truncate">
+                  {staffName(shiftPanel.staff_id)}
+                </h2>
+                <p className="text-xs text-gray-500">
+                  {formatDayLabel(shiftPanel.shift_date)} · {timeShort(shiftPanel.start_time)}–{endLabel(shiftPanel.end_time)} · {deptName(shiftPanel.department_id)}
+                </p>
+              </div>
+              <button onClick={chiudiShiftPanel} className="text-gray-400 hover:text-gray-600 flex-shrink-0">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="p-5">
+
+              {/* MENU */}
+              {panelMode === "menu" && (
+                <div className="space-y-2">
+                  {shiftPanel.notes && (
+                    <p className="text-sm text-gray-500 mb-3">Note: {shiftPanel.notes}</p>
+                  )}
+                  <button
+                    onClick={function() { setPanelMode("modifica"); }}
+                    className="w-full flex items-center gap-3 border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <Pencil size={16} className="text-wine-600" />
+                    <span className="font-medium">Modifica</span>
+                    <span className="text-gray-400 text-xs">orario, turno tipo, note</span>
+                  </button>
+                  <button
+                    onClick={function() { setPanelMode("duplica"); }}
+                    className="w-full flex items-center gap-3 border border-gray-200 rounded-lg px-4 py-3 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+                  >
+                    <Copy size={16} className="text-wine-600" />
+                    <span className="font-medium">Duplica</span>
+                    <span className="text-gray-400 text-xs">stesso orario, altri colleghi</span>
+                  </button>
+                  <button
+                    onClick={function() { deleteShift(shiftPanel.id); }}
+                    className="w-full flex items-center gap-3 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-600 hover:bg-red-50 transition-colors"
+                  >
+                    <Trash2 size={16} />
+                    <span className="font-medium">Elimina</span>
+                  </button>
+                </div>
+              )}
+
+              {/* MODIFICA */}
+              {panelMode === "modifica" && (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Turno tipo (scorciatoia)</label>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        onClick={function() { setEditTemplateId(""); }}
+                        className={"px-3 py-2 rounded-lg text-sm border transition-colors " + (editTemplateId === "" ? "bg-gray-700 text-white border-gray-700" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-100")}
+                      >
+                        Orario manuale
+                      </button>
+                      {templates.map(function(t) {
+                        var scelto = editTemplateId === t.id;
+                        return (
+                          <button
+                            key={t.id}
+                            onClick={function() { pickEditTemplate(t.id); }}
+                            className={"px-3 py-2 rounded-lg text-sm border transition-colors " + (scelto ? "bg-wine-700 text-white border-wine-700" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-100")}
+                          >
+                            {t.name} ({timeShort(t.start_time)}–{endLabel(t.end_time)})
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1"><Clock size={12} /> Inizio</label>
+                      <input type="time" value={editStart} onChange={function(e) { setEditStart(e.target.value); }} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-300" />
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-1"><Clock size={12} /> Fine</label>
+                      <input type="time" value={editEnd} onChange={function(e) { setEditEnd(e.target.value); }} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-300" />
+                      <p className="text-xs text-gray-400 mt-1">Fine 00:00 = 24:00</p>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Note (opzionale)</label>
+                    <input type="text" value={editNotes} onChange={function(e) { setEditNotes(e.target.value); }} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-300" />
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <button onClick={function() { setPanelMode("menu"); }} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm hover:bg-gray-50 transition-colors">Indietro</button>
+                    <button onClick={salvaModifica} disabled={panelSaving} className="flex-1 bg-wine-700 text-white py-2 rounded-lg text-sm hover:bg-wine-800 transition-colors disabled:opacity-50">
+                      {panelSaving ? "Salvataggio..." : "Salva"}
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* DUPLICA */}
+              {panelMode === "duplica" && (
+                <div className="space-y-3">
+                  <p className="text-sm text-gray-500">
+                    Stesso giorno, stesso orario ({timeShort(shiftPanel.start_time)}–{endLabel(shiftPanel.end_time)}), stesso reparto.
+                    Compaiono solo i colleghi che hanno {deptName(shiftPanel.department_id)} fra i loro reparti.
+                  </p>
+
+                  {candidatiDuplica().length === 0 && (
+                    <p className="text-sm text-gray-400">Nessun altro collega in questo reparto.</p>
+                  )}
+
+                  <div className="space-y-1.5">
+                    {candidatiDuplica().map(function(s) {
+                      var scelto = dupSelected.indexOf(s.id) !== -1;
+                      var problemi = problemiTurno(s.id, shiftPanel.shift_date, shiftPanel.start_time, shiftPanel.end_time, null);
+                      return (
+                        <button
+                          key={s.id}
+                          onClick={function() { toggleDup(s.id); }}
+                          className={"w-full text-left rounded-lg border px-3 py-2 transition-colors " + (scelto ? "bg-wine-50 border-wine-300" : "bg-white border-gray-200 hover:bg-gray-50")}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className={"w-4 h-4 rounded border flex-shrink-0 " + (scelto ? "bg-wine-700 border-wine-700" : "border-gray-300")} />
+                            <span className="text-sm font-medium text-gray-800 flex-1 min-w-0 truncate">
+                              {s.last_name} {s.first_name}
+                            </span>
+                            {s.is_extra && <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full flex-shrink-0">Extra</span>}
+                            {isAggiuntivo(s) && <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full flex-shrink-0">in aiuto</span>}
+                          </div>
+                          {problemi.length > 0 && (
+                            <div className="flex items-start gap-1.5 mt-1 ml-6 text-xs text-amber-700">
+                              <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" />
+                              <span>{problemi.join(" · ")}</span>
+                            </div>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <div className="flex gap-2 pt-1">
+                    <button onClick={function() { setPanelMode("menu"); }} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm hover:bg-gray-50 transition-colors">Indietro</button>
+                    <button onClick={duplicaSuSelezionati} disabled={panelSaving || dupSelected.length === 0} className="flex-1 bg-wine-700 text-white py-2 rounded-lg text-sm hover:bg-wine-800 transition-colors disabled:opacity-50">
+                      {panelSaving ? "Salvataggio..." : "Duplica su " + dupSelected.length}
+                    </button>
+                  </div>
+                </div>
+              )}
 
             </div>
           </div>

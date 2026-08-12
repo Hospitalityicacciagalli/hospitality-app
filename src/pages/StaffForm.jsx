@@ -139,6 +139,10 @@ export default function StaffForm() {
   var [departments, setDepartments] = useState([]);
   var [jobTitles, setJobTitles] = useState([]);
   var [availability, setAvailability] = useState([]);
+  // Reparti AGGIUNTIVI (migrazione 45). Il reparto principale resta form.department_id
+  // e non va mai ripetuto qui: e' l'unica regola che tiene il dato in una copia sola.
+  var [repartiExtra, setRepartiExtra] = useState([]);
+  var [repartiExtraIniziali, setRepartiExtraIniziali] = useState([]);
   var [loading, setLoading] = useState(isEdit);
   var [saving, setSaving] = useState(false);
 
@@ -225,7 +229,59 @@ export default function StaffForm() {
           is_extra:          d.is_extra === true
         });
         loadAvailability(d.id);
+        loadRepartiExtra(d.id);
         setLoading(false);
+      });
+  }
+
+  function loadRepartiExtra(staffId) {
+    supabase
+      .from("staff_member_departments")
+      .select("department_id")
+      .eq("staff_id", staffId)
+      .then(function(result) {
+        if (result.error) return;
+        var ids = (result.data || []).map(function(r) { return r.department_id; });
+        setRepartiExtra(ids);
+        setRepartiExtraIniziali(ids);
+      });
+  }
+
+  function toggleRepartoExtra(deptId) {
+    setRepartiExtra(function(prev) {
+      if (prev.indexOf(deptId) !== -1) {
+        return prev.filter(function(x) { return x !== deptId; });
+      }
+      var next = prev.slice();
+      next.push(deptId);
+      return next;
+    });
+  }
+
+  // Scrive solo le differenze: toglie quelli rimossi, aggiunge quelli nuovi.
+  function sincronizzaRepartiExtra(staffId, desiderati, fine) {
+    var daTogliere = repartiExtraIniziali.filter(function(id) { return desiderati.indexOf(id) === -1; });
+    var daAggiungere = desiderati.filter(function(id) { return repartiExtraIniziali.indexOf(id) === -1; });
+
+    function passoAggiunta() {
+      if (daAggiungere.length === 0) { fine(null); return; }
+      var righe = daAggiungere.map(function(id) {
+        return { staff_id: staffId, department_id: id };
+      });
+      supabase.from("staff_member_departments").insert(righe).then(function(res) {
+        fine(res.error ? res.error : null);
+      });
+    }
+
+    if (daTogliere.length === 0) { passoAggiunta(); return; }
+    supabase
+      .from("staff_member_departments")
+      .delete()
+      .eq("staff_id", staffId)
+      .in("department_id", daTogliere)
+      .then(function(res) {
+        if (res.error) { fine(res.error); return; }
+        passoAggiunta();
       });
   }
 
@@ -531,13 +587,22 @@ export default function StaffForm() {
       : supabase.from("staff_members").insert(payload).select().single();
 
     query.then(function(result) {
-      setSaving(false);
       if (result.error) {
+        setSaving(false);
         alert("Errore nel salvataggio: " + result.error.message);
         return;
       }
       var targetId = isEdit ? params.id : result.data.id;
-      navigate("/staff/" + targetId);
+      // Il reparto principale non finisce mai fra gli aggiuntivi.
+      var principale = payload.department_id;
+      var desiderati = repartiExtra.filter(function(id) { return id !== principale; });
+      sincronizzaRepartiExtra(targetId, desiderati, function(err) {
+        setSaving(false);
+        if (err) {
+          alert("Dipendente salvato, ma i reparti aggiuntivi non sono stati aggiornati: " + err.message);
+        }
+        navigate("/staff/" + targetId);
+      });
     });
   }
 
@@ -860,6 +925,39 @@ export default function StaffForm() {
                 })}
               </select>
             </div>
+          </div>
+
+          {/* Reparti aggiuntivi (migrazione 45) */}
+          <div className="mt-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Collabora anche con</label>
+            <p className="text-xs text-gray-500 mb-2">
+              Comparira nella disponibilita di questi reparti nella pagina Turni, oltre al suo reparto
+              principale. Il turno appartiene sempre al reparto in cui viene creato. Puoi sceglierne
+              quanti vuoi.
+            </p>
+            {!form.department_id && (
+              <p className="text-sm text-gray-400">Scegli prima il reparto principale.</p>
+            )}
+            {form.department_id && (
+              <div className="flex flex-wrap gap-2">
+                {departments.filter(function(d) {
+                  return d.is_active !== false && d.id.toString() !== form.department_id;
+                }).map(function(d) {
+                  var attivo = repartiExtra.indexOf(d.id) !== -1;
+                  return (
+                    <button
+                      key={d.id}
+                      type="button"
+                      onClick={function() { toggleRepartoExtra(d.id); }}
+                      className={"px-3 py-2 rounded-lg text-sm border transition-colors flex items-center gap-2 " + (attivo ? "bg-wine-700 text-white border-wine-700" : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50")}
+                    >
+                      <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: d.color || "#9ca3af" }} />
+                      {d.name}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Flag personale extra */}
