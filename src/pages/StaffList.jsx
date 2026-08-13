@@ -29,7 +29,7 @@ function daysUntilExpiry(dateStr) {
 
 export default function StaffList() {
   var navigate = useNavigate();
-  var { hasRole } = useAuth();
+  var { canEdit } = useAuth();
 
   var [staff, setStaff] = useState([]);
   var [departments, setDepartments] = useState([]);
@@ -41,7 +41,9 @@ export default function StaffList() {
   var [filterActive, setFilterActive] = useState("active");
   var [filterType, setFilterType] = useState("all");
 
-  var canManage = hasRole(["super_admin", "direttore"]);
+  // Permesso granulare, non ruolo rigido: cosi' vale anche per chi entra
+  // con l'elevazione PIN, che hasRole ignora per progetto.
+  var canManage = canEdit("staff");
 
   useEffect(function() {
     loadDepartments();

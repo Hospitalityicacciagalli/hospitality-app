@@ -65,7 +65,7 @@ function leaveDays(start, end) {
 export default function StaffDetail() {
   var navigate = useNavigate();
   var params = useParams();
-  var { hasRole, profile } = useAuth();
+  var { canEdit, profile } = useAuth();
 
   var [member, setMember] = useState(null);
   var [availability, setAvailability] = useState([]);
@@ -82,8 +82,10 @@ export default function StaffDetail() {
 
   var [showPastLeaves, setShowPastLeaves] = useState(false);
 
-  var canManage = hasRole(["super_admin", "direttore"]);
-  var canApprove = hasRole(["super_admin", "direttore"]);
+  // Permesso granulare, non ruolo rigido: cosi' vale anche per chi entra
+  // con l'elevazione PIN, che hasRole ignora per progetto.
+  var canManage = canEdit("staff");
+  var canApprove = canEdit("staff");
 
   useEffect(function() {
     loadMember();

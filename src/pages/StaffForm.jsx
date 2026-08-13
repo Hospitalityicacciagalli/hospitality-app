@@ -129,7 +129,7 @@ function parseUnilav(fullText) {
 export default function StaffForm() {
   var navigate = useNavigate();
   var params = useParams();
-  var { hasRole } = useAuth();
+  var { canEdit } = useAuth();
 
   var isEdit = !!params.id;
 
@@ -157,7 +157,9 @@ export default function StaffForm() {
   var [cessazioneSaving, setCessazioneSaving] = useState(false);
   var [cessazioneDone, setCessazioneDone] = useState(false);
 
-  var canManage = hasRole(["super_admin", "direttore"]);
+  // Permesso granulare, non ruolo rigido: cosi' vale anche per chi entra
+  // con l'elevazione PIN, che hasRole ignora per progetto.
+  var canManage = canEdit("staff");
 
   useEffect(function() {
     loadConfigOptions();
