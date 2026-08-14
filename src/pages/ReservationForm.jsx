@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, Save, Search, AlertTriangle, UserPlus, Check, Users, ChevronRight, Gift } from 'lucide-react'
+import { ArrowLeft, Save, Search, AlertTriangle, UserPlus, Check, Users, ChevronRight, Gift, Edit3 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import AllergeniEditor, { validaAllergeni, salvaAllergeni, campiConsensoSalute, salvaConsensoSalute, caricaAllergeniCliente, severitaLabel } from '../components/AllergeniEditor'
 import { useAuth } from '../lib/AuthContext'
 import ConfermaPin from '../components/ConfermaPin'
 
@@ -56,6 +57,11 @@ var categoryLabels = {
   hotel_guest: 'Ospite Hotel'
 }
 
+// Derivato da categoryLabels: le etichette restano in una copia sola.
+var CATEGORIE_CLIENTE = Object.keys(categoryLabels).map(function(k) {
+  return { value: k, label: categoryLabels[k] }
+})
+
 function ReservationForm() {
   var params = useParams()
   var id = params.id
@@ -101,6 +107,15 @@ function ReservationForm() {
   var [selectedMinute, setSelectedMinute] = useState('00')
 
   var [showQuickCustomer, setShowQuickCustomer] = useState(false)
+  // La modale cliente serve sia a CREARE sia a MODIFICARE: una modale sola,
+  // altrimenti due quasi-gemelle divergono al primo campo aggiunto.
+  var [quickMode, setQuickMode] = useState('crea')
+  var [quickCustomerId, setQuickCustomerId] = useState(null)
+  var [elencoAllergeni, setElencoAllergeni] = useState([])
+  var [quickAllergeni, setQuickAllergeni] = useState({})
+  var [quickConsensoSalute, setQuickConsensoSalute] = useState(false)
+  // Testo libero allergie del cliente selezionato, per il riquadro rosso
+  var [allergieLibereCliente, setAllergieLibereCliente] = useState('')
   var [quickForm, setQuickForm] = useState({ first_name: '', last_name: '', phone: '', email: '', category: 'standard', notes: '' })
   var [quickLoading, setQuickLoading] = useState(false)
   var [quickError, setQuickError] = useState(null)
@@ -369,6 +384,9 @@ function ReservationForm() {
     loadCustomerAllergens(customer.id)
   }
 
+  // Carica ENTRAMBI i livelli di allergeni: quelli strutturati e il testo
+  // libero. Sono complementari, non doppioni: il testo libero contiene proprio
+  // cio' che nell'elenco di legge non ci sta.
   function loadCustomerAllergens(customerId) {
     supabase.from('customer_allergens')
       .select('severity, allergens(id, name, icon)')
@@ -376,6 +394,21 @@ function ReservationForm() {
       .then(function(result) {
         if (!result.error) setCustomerAllergens(result.data || [])
       })
+    supabase.from('customers')
+      .select('allergie_cliente')
+      .eq('id', customerId)
+      .single()
+      .then(function(result) {
+        if (!result.error && result.data) setAllergieLibereCliente(result.data.allergie_cliente || '')
+        else setAllergieLibereCliente('')
+      })
+  }
+
+  function caricaElencoAllergeni() {
+    if (elencoAllergeni.length > 0) return
+    supabase.from('allergens').select('*').order('id').then(function(result) {
+      if (!result.error) setElencoAllergeni(result.data || [])
+    })
   }
 
   function checkAvailability() {
@@ -460,36 +493,106 @@ function ReservationForm() {
   }
 
   function openQuickCustomer() {
-    setQuickForm({ first_name: '', last_name: '', phone: '', email: '', category: 'standard', notes: '' })
+    setQuickMode('crea')
+    setQuickCustomerId(null)
+    setQuickForm({ first_name: '', last_name: '', phone: '', email: '', category: 'standard', notes: '', allergie_cliente: '' })
+    setQuickAllergeni({})
+    setQuickConsensoSalute(false)
     setQuickError(null)
+    caricaElencoAllergeni()
     setShowQuickCustomer(true)
+  }
+
+  // Modifica di un cliente esistente senza uscire dalla prenotazione in corso.
+  function openEditCustomer(customer) {
+    setQuickMode('modifica')
+    setQuickCustomerId(customer.id)
+    setQuickError(null)
+    setQuickAllergeni({})
+    setQuickConsensoSalute(false)
+    caricaElencoAllergeni()
+    setShowListaClienti(false)
+    setShowQuickCustomer(true)
+    setQuickLoading(true)
+    // Riga completa e fresca: gli elenchi in memoria hanno solo alcune colonne.
+    supabase.from('customers').select('*').eq('id', customer.id).single().then(function(result) {
+      if (result.error || !result.data) {
+        setQuickLoading(false)
+        setQuickError('Cliente non trovato.')
+        return
+      }
+      var c = result.data
+      setQuickForm({
+        first_name: c.first_name || '',
+        last_name:  c.last_name || '',
+        phone:      c.phone || '',
+        email:      c.email || '',
+        category:   c.category || 'standard',
+        notes:      c.notes || '',
+        allergie_cliente: c.allergie_cliente || ''
+      })
+      caricaAllergeniCliente(supabase, customer.id).then(function(stato) {
+        setQuickAllergeni(stato.selected)
+        setQuickConsensoSalute(stato.consensoSalute)
+        setQuickLoading(false)
+      })
+    })
   }
 
   function handleQuickCustomerSubmit(e) {
     e.preventDefault()
     setQuickError(null)
     if (!quickForm.first_name.trim() || !quickForm.last_name.trim()) { setQuickError('Nome e Cognome sono obbligatori.'); return }
-    setQuickLoading(true)
-    supabase.from('customers').insert({
+
+    // Regola sul consenso sanitario: UNA copia sola, in AllergeniEditor.
+    var erroreAllergeni = validaAllergeni(quickAllergeni, quickConsensoSalute)
+    if (erroreAllergeni) { setQuickError(erroreAllergeni); return }
+
+    var dati = {
       first_name: quickForm.first_name.trim(),
       last_name: quickForm.last_name.trim(),
       phone: quickForm.phone.trim() || null,
       email: quickForm.email.trim() || null,
       category: quickForm.category,
       notes: quickForm.notes.trim() || null,
-      is_active: true,
-      source: 'manual'
-    }).select().single()
-      .then(function(result) {
+      allergie_cliente: (quickForm.allergie_cliente || '').trim() || null
+    }
+    var campiConsenso = campiConsensoSalute(quickConsensoSalute)
+    for (var k in campiConsenso) { dati[k] = campiConsenso[k] }
+
+    setQuickLoading(true)
+
+    var scrittura
+    if (quickMode === 'modifica' && quickCustomerId) {
+      scrittura = supabase.from('customers').update(dati).eq('id', quickCustomerId).select().single()
+    } else {
+      dati.is_active = true
+      dati.source = 'manual'
+      scrittura = supabase.from('customers').insert(dati).select().single()
+    }
+
+    scrittura.then(function(result) {
+      if (result.error) {
         setQuickLoading(false)
-        if (result.error) {
-          setQuickError(result.error.code === '23505' ? 'Esiste gia un cliente con questo telefono o email.' : 'Errore: ' + result.error.message)
+        setQuickError(result.error.code === '23505' ? 'Esiste gia un cliente con questo telefono o email.' : 'Errore: ' + result.error.message)
+        return
+      }
+      var cliente = result.data
+      // Scrittura allergeni e consenso: UNA copia sola, in AllergeniEditor.
+      salvaAllergeni(supabase, cliente.id, quickAllergeni).then(function(esito) {
+        if (esito.error) {
+          setQuickLoading(false)
+          setQuickError('Cliente salvato, ma gli allergeni no: ' + esito.error.message)
           return
         }
-        selectCustomer(result.data)
-        setShowQuickCustomer(false)
-        setListaClienti([])
+        salvaConsensoSalute(supabase, cliente.id, quickConsensoSalute).then(function() {
+          setQuickLoading(false)
+          selectCustomer(cliente)
+          setShowQuickCustomer(false)
+          setListaClienti([])
+        })
       })
+    })
   }
 
   function isSharedDevice() {
@@ -753,26 +856,41 @@ function ReservationForm() {
                   </div>
                   <Check size={20} className="text-green-600 ml-2" />
                 </div>
-                {!isEditing && (
+                <div className="flex items-center gap-3 flex-shrink-0">
                   <button type="button"
-                    onClick={function() { setShowSearch(true); setSelectedCustomer(null); setCustomerAllergens([]) }}
-                    className="text-sm text-wine-600 hover:text-wine-800 font-medium">
-                    Cambia
+                    onClick={function() { openEditCustomer(selectedCustomer) }}
+                    className="flex items-center gap-1 text-sm text-wine-600 hover:text-wine-800 font-medium">
+                    <Edit3 size={14} />
+                    Modifica
                   </button>
-                )}
+                  {!isEditing && (
+                    <button type="button"
+                      onClick={function() { setShowSearch(true); setSelectedCustomer(null); setCustomerAllergens([]); setAllergieLibereCliente('') }}
+                      className="text-sm text-wine-600 hover:text-wine-800 font-medium">
+                      Cambia
+                    </button>
+                  )}
+                </div>
               </div>
 
-              {customerAllergens.length > 0 && (
+              {(customerAllergens.length > 0 || allergieLibereCliente) && (
                 <div className="mt-3 p-3 bg-red-50 rounded-lg border border-red-200">
                   <div className="flex items-center gap-2 mb-2">
                     <AlertTriangle size={16} className="text-red-600" />
                     <span className="text-sm font-medium text-red-800">Allergeni registrati sul profilo cliente</span>
                   </div>
-                  <div className="flex flex-wrap gap-1">
-                    {customerAllergens.map(function(ca, idx) {
-                      return <span key={idx} className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded">{ca.allergens.icon} {ca.allergens.name}</span>
-                    })}
-                  </div>
+                  {customerAllergens.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {customerAllergens.map(function(ca, idx) {
+                        return <span key={idx} className="text-xs bg-red-100 text-red-700 px-2 py-1 rounded">{ca.allergens.icon} {ca.allergens.name} ({severitaLabel(ca.severity)})</span>
+                      })}
+                    </div>
+                  )}
+                  {allergieLibereCliente && (
+                    <p className="text-sm text-red-800 whitespace-pre-wrap mt-2 pt-2 border-t border-red-200">
+                      {allergieLibereCliente}
+                    </p>
+                  )}
                 </div>
               )}
             </div>
@@ -1082,24 +1200,31 @@ function ReservationForm() {
               ) : (
                 clientiFiltrati.map(function(customer) {
                   return (
-                    <button key={customer.id} type="button" onClick={function() { selectCustomer(customer) }}
-                      className="w-full text-left px-5 py-3.5 hover:bg-gray-50 border-b border-gray-100 last:border-0 flex items-center gap-3">
-                      <div className="w-9 h-9 rounded-full bg-wine-100 text-wine-700 flex items-center justify-center text-sm font-bold flex-shrink-0">
-                        {customer.first_name[0]}{customer.last_name[0]}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium text-gray-900">{customer.last_name} {customer.first_name}</p>
-                        <p className="text-xs text-gray-500 truncate">{customer.phone || customer.email || ''}</p>
-                      </div>
-                      <div className="flex items-center gap-2 flex-shrink-0">
-                        {customer.category && customer.category !== 'standard' && (
-                          <span className={"px-2 py-0.5 rounded-full text-xs font-medium " + categoryColors[customer.category]}>
-                            {categoryLabels[customer.category]}
-                          </span>
-                        )}
-                        <ChevronRight size={16} className="text-gray-300" />
-                      </div>
-                    </button>
+                    <div key={customer.id} className="flex items-stretch border-b border-gray-100 last:border-0">
+                      <button type="button" onClick={function() { selectCustomer(customer) }}
+                        className="flex-1 min-w-0 text-left px-5 py-3.5 hover:bg-gray-50 flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full bg-wine-100 text-wine-700 flex items-center justify-center text-sm font-bold flex-shrink-0">
+                          {customer.first_name[0]}{customer.last_name[0]}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-gray-900">{customer.last_name} {customer.first_name}</p>
+                          <p className="text-xs text-gray-500 truncate">{customer.phone || customer.email || ''}</p>
+                        </div>
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          {customer.category && customer.category !== 'standard' && (
+                            <span className={"px-2 py-0.5 rounded-full text-xs font-medium " + categoryColors[customer.category]}>
+                              {categoryLabels[customer.category]}
+                            </span>
+                          )}
+                          <ChevronRight size={16} className="text-gray-300" />
+                        </div>
+                      </button>
+                      <button type="button" onClick={function() { openEditCustomer(customer) }}
+                        title="Modifica cliente"
+                        className="px-4 flex items-center text-gray-400 hover:text-wine-700 hover:bg-gray-50 border-l border-gray-100">
+                        <Edit3 size={16} />
+                      </button>
+                    </div>
                   )
                 })
               )}
@@ -1118,11 +1243,17 @@ function ReservationForm() {
       {/* Modale cliente rapido */}
       {showQuickCustomer && (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md max-h-screen overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
               <div>
-                <h2 className="text-lg font-semibold text-gray-900">Nuovo cliente</h2>
-                <p className="text-xs text-gray-400 mt-0.5">Il cliente verra creato e selezionato automaticamente</p>
+                <h2 className="text-lg font-semibold text-gray-900">
+                  {quickMode === 'modifica' ? 'Modifica cliente' : 'Nuovo cliente'}
+                </h2>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  {quickMode === 'modifica'
+                    ? 'Le correzioni valgono per tutta l anagrafica, non solo per questa prenotazione'
+                    : 'Il cliente verra creato e selezionato automaticamente'}
+                </p>
               </div>
               <button type="button" onClick={function() { setShowQuickCustomer(false); setGiftClienteNuovo(false) }}
                 className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
@@ -1156,16 +1287,25 @@ function ReservationForm() {
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
               </div>
               <div>
+                <label className="block text-xs font-medium text-gray-700 mb-1">Email</label>
+                <input type="email" value={quickForm.email}
+                  onChange={function(e) { var v = e.target.value; setQuickForm(function(p) { var u = Object.assign({}, p); u.email = v; return u }) }}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+              </div>
+              <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Categoria</label>
-                <select value={quickForm.category}
-                  onChange={function(e) { var v = e.target.value; setQuickForm(function(p) { var u = Object.assign({}, p); u.category = v; return u }) }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500">
-                  <option value="standard">Standard</option>
-                  <option value="vip">VIP</option>
-                  <option value="press">Stampa</option>
-                  <option value="business">Business</option>
-                  <option value="hotel_guest">Ospite Hotel</option>
-                </select>
+                <div className="flex flex-wrap gap-2">
+                  {CATEGORIE_CLIENTE.map(function(c) {
+                    var attiva = quickForm.category === c.value
+                    return (
+                      <button key={c.value} type="button"
+                        onClick={function() { setQuickForm(function(p) { var u = Object.assign({}, p); u.category = c.value; return u }) }}
+                        className={"px-3 py-2 rounded-lg text-sm border transition-colors " + (attiva ? "bg-wine-700 text-white border-wine-700" : "bg-white border-gray-300 text-gray-700 hover:bg-gray-50")}>
+                        {c.label}
+                      </button>
+                    )
+                  })}
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Note</label>
@@ -1173,13 +1313,25 @@ function ReservationForm() {
                   onChange={function(e) { var v = e.target.value; setQuickForm(function(p) { var u = Object.assign({}, p); u.notes = v; return u }) }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 resize-none" />
               </div>
-              <p className="text-xs text-gray-400">Allergeni e dati completi si aggiungono in seguito da Anagrafica Clienti.</p>
+              <div className="pt-2 border-t border-gray-100">
+                <AllergeniEditor
+                  compatto
+                  allergens={elencoAllergeni}
+                  selected={quickAllergeni}
+                  onSelectedChange={setQuickAllergeni}
+                  testoLibero={quickForm.allergie_cliente}
+                  onTestoLiberoChange={function(v) { setQuickForm(function(p) { var u = Object.assign({}, p); u.allergie_cliente = v; return u }) }}
+                  consensoSalute={quickConsensoSalute}
+                  onConsensoChange={setQuickConsensoSalute}
+                />
+              </div>
+              <p className="text-xs text-gray-400">Indirizzo, marketing e altri consensi si gestiscono da Anagrafica Clienti.</p>
               <div className="flex gap-3 pt-1">
                 <button type="button" onClick={function() { setShowQuickCustomer(false) }}
                   className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">Annulla</button>
                 <button type="submit" disabled={quickLoading}
                   className="flex-1 bg-wine-700 hover:bg-wine-800 disabled:bg-wine-300 text-white px-4 py-2 rounded-lg text-sm font-medium">
-                  {quickLoading ? 'Creazione...' : 'Crea e seleziona'}
+                  {quickLoading ? 'Salvataggio...' : (quickMode === 'modifica' ? 'Salva modifiche' : 'Crea e seleziona')}
                 </button>
               </div>
             </form>

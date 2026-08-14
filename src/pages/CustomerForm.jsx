@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Save, AlertTriangle } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import AllergeniEditor, { validaAllergeni, salvaAllergeni, campiConsensoSalute } from '../components/AllergeniEditor'
 
 function CustomerForm() {
   const { id } = useParams()
@@ -157,29 +158,6 @@ function CustomerForm() {
     setFormData(prev => ({ ...prev, [name]: value }))
   }
 
-  function toggleAllergen(allergenId) {
-    setSelectedAllergens(prev => {
-      const current = prev[allergenId]
-      if (current && current.selected) {
-        const updated = { ...prev }
-        delete updated[allergenId]
-        return updated
-      } else {
-        return {
-          ...prev,
-          [allergenId]: { selected: true, severity: 'allergy', notes: '' }
-        }
-      }
-    })
-  }
-
-  function updateAllergenSeverity(allergenId, severity) {
-    setSelectedAllergens(prev => ({
-      ...prev,
-      [allergenId]: { ...prev[allergenId], severity }
-    }))
-  }
-
   async function handleSubmit(e) {
     e.preventDefault()
 
@@ -199,10 +177,10 @@ function CustomerForm() {
       return
     }
 
-    // Se ci sono allergeni selezionati, serve il consenso dati salute
-    const hasAllergens = Object.keys(selectedAllergens).length > 0
-    if (hasAllergens && !consents.health_data) {
-      alert('Per registrare gli allergeni è necessario il consenso al trattamento dei dati sulla salute.')
+    // Regola sul consenso sanitario: UNA copia sola, in AllergeniEditor.
+    const erroreAllergeni = validaAllergeni(selectedAllergens, consents.health_data)
+    if (erroreAllergeni) {
+      alert(erroreAllergeni)
       return
     }
 
@@ -223,8 +201,7 @@ function CustomerForm() {
         // Aggiorna i flag consenso nella tabella customers per accesso rapido
         consenso_privacy: consents.data_processing,
         consenso_privacy_data: consents.data_processing ? new Date().toISOString() : null,
-        consenso_allergie: consents.health_data,
-        consenso_allergie_data: consents.health_data ? new Date().toISOString() : null,
+        ...campiConsensoSalute(consents.health_data),
         consenso_marketing: consents.marketing,
         consenso_marketing_data: consents.marketing ? new Date().toISOString() : null,
       }
@@ -265,28 +242,9 @@ function CustomerForm() {
         customerId = data.id
       }
 
-      // Gestione allergeni: cancella tutti e reinserisci
-      await supabase
-        .from('customer_allergens')
-        .delete()
-        .eq('customer_id', customerId)
-
-      const allergenRecords = Object.entries(selectedAllergens)
-        .filter(([_, value]) => value.selected)
-        .map(([allergenId, value]) => ({
-          customer_id: customerId,
-          allergen_id: parseInt(allergenId),
-          severity: value.severity,
-          notes: value.notes || null,
-        }))
-
-      if (allergenRecords.length > 0) {
-        const { error: allergenError } = await supabase
-          .from('customer_allergens')
-          .insert(allergenRecords)
-
-        if (allergenError) throw allergenError
-      }
+      // Scrittura allergeni: UNA copia sola, in AllergeniEditor.
+      const esitoAllergeni = await salvaAllergeni(supabase, customerId, selectedAllergens)
+      if (esitoAllergeni.error) throw esitoAllergeni.error
 
       // Gestione consensi GDPR
       for (const [consentType, granted] of Object.entries(consents)) {
@@ -485,77 +443,15 @@ function CustomerForm() {
           </div>
         </details>
 
-        {/* Allergeni */}
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center gap-2 mb-4">
-            <AlertTriangle size={20} className="text-orange-500" />
-            <h2 className="text-lg font-semibold text-gray-900">Allergeni / Intolleranze</h2>
-          </div>
-          <p className="text-sm text-gray-500 mb-4">
-            Seleziona gli allergeni che il cliente deve evitare (Reg. UE 1169/2011)
-          </p>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {allergens.map((allergen) => {
-              const isSelected = selectedAllergens[allergen.id]?.selected
-              return (
-                <div
-                  key={allergen.id}
-                  className={`border rounded-lg p-3 transition-all ${
-                    isSelected
-                      ? 'border-red-300 bg-red-50'
-                      : 'border-gray-200 hover:border-gray-300'
-                  }`}
-                >
-                  <label className="flex items-center gap-3 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={isSelected || false}
-                      onChange={() => toggleAllergen(allergen.id)}
-                      className="w-5 h-5 rounded border-gray-300 text-wine-600 focus:ring-wine-500"
-                    />
-                    <span className="text-xl">{allergen.icon}</span>
-                    <span className="font-medium text-gray-900">{allergen.name}</span>
-                  </label>
-
-                  {/* Selettore severità visibile solo se allergene selezionato */}
-                  {isSelected && (
-                    <div className="mt-2 ml-8">
-                      <select
-                        value={selectedAllergens[allergen.id]?.severity || 'allergy'}
-                        onChange={(e) => updateAllergenSeverity(allergen.id, e.target.value)}
-                        className="text-sm px-3 py-1.5 border border-gray-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-wine-500"
-                      >
-                        <option value="allergy">Allergia</option>
-                        <option value="intolerance">Intolleranza</option>
-                        <option value="preference">Preferenza alimentare</option>
-                      </select>
-                    </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-
-        {/* Allergie / Note aggiuntive testo libero */}
-        <div className="bg-orange-50 rounded-xl shadow-sm border border-orange-200 p-6">
-          <div className="flex items-center gap-2 mb-2">
-            <AlertTriangle size={18} className="text-orange-500" />
-            <h2 className="text-lg font-semibold text-gray-900">Note allergie aggiuntive</h2>
-          </div>
-          <p className="text-sm text-gray-500 mb-3">
-            Descrizione libera di allergie, intolleranze o esigenze dietetiche particolari (es. "celiaco grave + intollerante lattosio, vegano").
-            Questa nota apparirà nelle stampe di cucina.
-          </p>
-          <textarea
-            value={allergieLibere}
-            onChange={(e) => setAllergieLibere(e.target.value)}
-            rows={3}
-            className="w-full px-4 py-3 border border-orange-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-400 text-base bg-white"
-            placeholder="es. 1 celiaco grave, 2 intolleranti al lattosio, 1 vegano..."
-          />
-        </div>
+        {/* Allergeni: componente condiviso con la modale di ReservationForm */}
+        <AllergeniEditor
+          allergens={allergens}
+          selected={selectedAllergens}
+          onSelectedChange={setSelectedAllergens}
+          testoLibero={allergieLibere}
+          onTestoLiberoChange={setAllergieLibere}
+          consensoSalute={consents.health_data}
+        />
 
         {/* Consensi GDPR */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
