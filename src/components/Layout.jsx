@@ -259,16 +259,20 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
-        {/* Dashboard HotelInCloud. L'etichetta dice "Camere" e non
-            "Prenotazioni" apposta: in questo programma Prenotazioni e' il
-            RISTORANTE, e chi arriva nuovo non deve poterle confondere. */}
+        {/* Dashboard HotelInCloud. I nomi delle due voci camere si
+            distinguono per USO, non per tecnologia: questa e' l'analisi
+            (fatturato, occupazione, canali), la futura "Situazione camere"
+            sara' l'operativo del giorno (chi c'e' stanotte, colazioni).
+            Entrambe leggono i dati di Hotel in Cloud, quindi mettere "HiC"
+            nel nome di una sola direbbe il falso. E "Prenotazioni", qui
+            dentro, e' il RISTORANTE: chi arriva nuovo non deve confondersi. */}
         {vediHic && (
           <NavLink
             to="/camere"
             className={function(p) { return navClass(p.isActive); }}
             onClick={function() { setMobileOpen(false); }}>
             <span className="text-base">🛏️</span>
-            Camere · HiC
+            Dashboard Camere
           </NavLink>
         )}
 
@@ -575,10 +579,10 @@ export default function Layout({ children }) {
               <span className="text-sm">🔄</span>
             )}
             {hicMai
-              ? 'HiC mai aggiornato'
+              ? 'Camere: mai aggiornate'
               : (hicFermo
-                  ? 'HiC fermo da ' + daQuanto(hicOre)
-                  : 'HiC · ' + quandoBreve(hicUltimo))}
+                  ? 'Camere: dati fermi da ' + daQuanto(hicOre)
+                  : 'Camere agg. ' + quandoBreve(hicUltimo))}
           </NavLink>
         )}
 
@@ -713,7 +717,7 @@ export default function Layout({ children }) {
                     : 'I dati di Hotel in Cloud non si aggiornano da ' + daQuanto(hicOre) + '.'}
                 </span>
                 <span className="ml-1">
-                  Quello che vedi nella pagina Camere e' vecchio. Vai a un computer dove e'
+                  Quello che vedi in Dashboard Camere e' vecchio. Vai a un computer dove e'
                   installato l'aggiornamento, apri la finestra Sincronizzazione HotelInCloud
                   e premi Aggiorna ora.
                 </span>
