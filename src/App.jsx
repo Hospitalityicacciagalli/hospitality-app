@@ -34,6 +34,7 @@ import WineTourPage from './pages/WineTourPage';
 import CookingClassPage from './pages/CookingClassPage';
 import ImportPrenotazioniPage from './pages/ImportPrenotazioniPage';
 import LimitiPage from './pages/LimitiPage';
+import HicDashboardPage from './pages/hic/HicDashboardPage';
 import CampagnaImportaPage from './pages/CampagnaImportaPage';
 import CampagnaRiepilogoPage from './pages/CampagnaRiepilogoPage';
 import CampagnaStipendiPage from './pages/CampagnaStipendiPage';
@@ -70,6 +71,18 @@ function CassaIndexRedirect() {
   if (canView('cassa_reception')) return <Navigate to="/cassa/reception" replace />;
   if (canView('cassa_ristorante')) return <Navigate to="/cassa/ristorante" replace />;
   return <Navigate to="/" replace />;
+}
+
+// Dashboard HotelInCloud: si apre con hic_operativo OPPURE con
+// hic_economico. La pagina filtra da se' le schede da mostrare, quindi
+// chi ha un permesso solo entra lo stesso e vede le sue. Chi non ne ha
+// nessuno dei due torna a home.
+function HicRoute() {
+  var { canView } = useAuth();
+  if (!canView('hic_operativo') && !canView('hic_economico')) {
+    return <Navigate to="/" replace />;
+  }
+  return <HicDashboardPage />;
 }
 
 function AppRoutes() {
@@ -154,6 +167,15 @@ function AppRoutes() {
         <Route path="/limiti" element={
           <ProtectedRoute feature="limiti">
             <LimitiPage />
+          </ProtectedRoute>
+        } />
+
+        {/* Dashboard HotelInCloud — specchio di camere e soggiorni, sola
+            lettura. Le aggregazioni arrivano gia' fatte dalle funzioni SQL
+            delle migrazioni 32, 33 e 34: la pagina non somma niente. */}
+        <Route path="/camere" element={
+          <ProtectedRoute>
+            <HicRoute />
           </ProtectedRoute>
         } />
 

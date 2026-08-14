@@ -4,6 +4,44 @@ import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase';
 import ConfermaPin from './ConfermaPin';
 
+// ============================================================
+// SOGLIA DI ALLARME SINCRONIZZAZIONE HOTEL IN CLOUD
+//
+// Il PC della reception aggiorna da solo alle 07, 11, 15, 19 e 23.
+// Il piu' lungo silenzio LEGITTIMO e' la notte: 8 ore fra le 23:00 e
+// le 07:00. Se pero' il risveglio dallo standby delle 23:00 non
+// funziona, il buco vero diventa 19:00 -> 07:00, cioe' 12 ore.
+//
+// 14 e' il numero piu' basso che regge ANCHE quel caso: sotto le 12
+// suonerebbe il falso allarme ogni mattina, e un avviso che grida al
+// lupo ogni giorno smette di essere letto. Sopra le 18 un blocco
+// iniziato la sera si scoprirebbe a meta' del giorno dopo.
+// ============================================================
+var SOGLIA_HIC_ORE = 14;
+
+function pad2(n) {
+  return n < 10 ? '0' + n : '' + n;
+}
+
+// Ore trascorse dall'ultimo giro andato a buon fine. null = mai.
+function oreDaAggiornamento(valore) {
+  if (!valore) return null;
+  var d = new Date(valore);
+  if (isNaN(d.getTime())) return null;
+  return (Date.now() - d.getTime()) / 3600000;
+}
+
+function quandoBreve(valore) {
+  var d = new Date(valore);
+  if (isNaN(d.getTime())) return '';
+  return pad2(d.getDate()) + '/' + pad2(d.getMonth() + 1) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes());
+}
+
+function daQuanto(ore) {
+  if (ore >= 48) return Math.floor(ore / 24) + ' giorni';
+  return Math.floor(ore) + ' ore';
+}
+
 export default function Layout({ children }) {
   var {
     profile, signOut, canView, canEdit,
@@ -32,6 +70,14 @@ export default function Layout({ children }) {
   // Modale PIN per elevazione / rinnovo.
   var [showPinModal, setShowPinModal] = useState(false);
 
+  // Ultimo giro di sincronizzazione HiC andato a buon fine.
+  // NON lo calcoliamo qui: lo chiediamo alla funzione SQL
+  // hic_ultimo_aggiornamento(), che e' l'unica copia della regola
+  // (max(finito_il) dove esito = 'ok'). Se un giorno la regola cambia,
+  // cambia in un posto solo.
+  var [hicUltimo, setHicUltimo] = useState(null);
+  var [hicLetto, setHicLetto] = useState(false);
+
   useEffect(function() {
     // Rileggo il flag "dispositivo condiviso" a ogni cambio pagina:
     // cosi' se lo attivi/disattivi nel profilo, il pulsante compare/sparisce.
@@ -50,6 +96,30 @@ export default function Layout({ children }) {
         }
       });
   }, []);
+
+  // Lettura della freschezza dei dati HiC: una volta all'apertura e poi
+  // ogni 15 minuti. Non a ogni cambio pagina: sarebbe una richiesta a
+  // vuoto ogni clic per un dato che cambia cinque volte al giorno.
+  var vediHic = canView('hic_operativo') || canView('hic_economico');
+
+  useEffect(function() {
+    if (!vediHic) return;
+
+    function leggiHic() {
+      supabase.rpc('hic_ultimo_aggiornamento').then(function(res) {
+        setHicLetto(true);
+        if (res.error) {
+          setHicUltimo(null);
+          return;
+        }
+        setHicUltimo(res.data ? res.data : null);
+      });
+    }
+
+    leggiHic();
+    var timer = setInterval(leggiHic, 15 * 60 * 1000);
+    return function() { clearInterval(timer); };
+  }, [vediHic]);
 
   function handleSignOut() {
     signOut().then(function() {
@@ -132,6 +202,14 @@ export default function Layout({ children }) {
 
   var showAdminSection = canView('impostazioni');
 
+  // Stato della sincronizzazione HiC.
+  // hicMai = nessun giro andato mai a buon fine (la funzione torna vuoto).
+  // hicFermo = superata la soglia. Il colore compare SOLO in questo caso:
+  // se fosse sempre acceso diventerebbe arredamento e nessuno lo leggerebbe.
+  var hicOre = oreDaAggiornamento(hicUltimo);
+  var hicMai = vediHic && hicLetto && hicOre === null;
+  var hicFermo = vediHic && hicLetto && (hicMai || hicOre > SOGLIA_HIC_ORE);
+
   // Percentuale della barra del timer (residuo su totale).
   var totaleSec = minutiElevazione * 60;
   var pct = (elevato && totaleSec > 0) ? Math.max(0, Math.min(100, Math.round(secondiResidui / totaleSec * 100))) : 0;
@@ -178,6 +256,19 @@ export default function Layout({ children }) {
             onClick={function() { setMobileOpen(false); }}>
             <span className="text-base">🪑</span>
             Limiti coperti
+          </NavLink>
+        )}
+
+        {/* Dashboard HotelInCloud. L'etichetta dice "Camere" e non
+            "Prenotazioni" apposta: in questo programma Prenotazioni e' il
+            RISTORANTE, e chi arriva nuovo non deve poterle confondere. */}
+        {vediHic && (
+          <NavLink
+            to="/camere"
+            className={function(p) { return navClass(p.isActive); }}
+            onClick={function() { setMobileOpen(false); }}>
+            <span className="text-base">🛏️</span>
+            Camere · HiC
           </NavLink>
         )}
 
@@ -466,6 +557,31 @@ export default function Layout({ children }) {
       {/* Sezione profilo utente in fondo */}
       <div className="px-3 py-3 border-t border-wine-800">
 
+        {/* Freschezza dei dati HiC. Grigia e discreta quando va tutto bene,
+            ambra quando supera la soglia. E' anche una scorciatoia: portando
+            alla pagina Camere fa da secondo ingresso. */}
+        {vediHic && hicLetto && (
+          <NavLink
+            to="/camere"
+            onClick={function() { setMobileOpen(false); }}
+            className={
+              hicFermo
+                ? 'flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold bg-amber-500 text-white hover:bg-amber-600 transition-colors mb-2'
+                : 'flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-medium text-wine-400 hover:bg-wine-800 hover:text-wine-200 transition-colors mb-2'
+            }>
+            {hicFermo ? (
+              <span className="text-sm">⚠️</span>
+            ) : (
+              <span className="text-sm">🔄</span>
+            )}
+            {hicMai
+              ? 'HiC mai aggiornato'
+              : (hicFermo
+                  ? 'HiC fermo da ' + daQuanto(hicOre)
+                  : 'HiC · ' + quandoBreve(hicUltimo))}
+          </NavLink>
+        )}
+
         {/* Elevazione: entra / torna al base (solo su dispositivo condiviso) */}
         {elevato ? (
           <button
@@ -578,6 +694,31 @@ export default function Layout({ children }) {
                 La sessione sta per scadere. Premi <span className="font-semibold">Estendi</span> e reinserisci il PIN per continuare.
               </div>
             )}
+          </div>
+        )}
+
+        {/* Fascia AGGIORNAMENTO HiC FERMO.
+            Compare su ogni pagina, non solo dentro la Dashboard: un avviso
+            che vive in una pagina sola si vede solo se qualcuno apre quella
+            pagina. Il programma NON lancia e NON prenota niente: legge
+            hic_sync_log tramite la funzione SQL e avvisa. Sola lettura. */}
+        {vediHic && hicFermo && (
+          <div className="bg-amber-500 text-white">
+            <div className="px-4 py-2 flex items-start gap-2">
+              <span className="text-base flex-shrink-0">⚠️</span>
+              <div className="text-sm">
+                <span className="font-semibold">
+                  {hicMai
+                    ? 'I dati di Hotel in Cloud non sono mai stati aggiornati.'
+                    : 'I dati di Hotel in Cloud non si aggiornano da ' + daQuanto(hicOre) + '.'}
+                </span>
+                <span className="ml-1">
+                  Quello che vedi nella pagina Camere e' vecchio. Vai a un computer dove e'
+                  installato l'aggiornamento, apri la finestra Sincronizzazione HotelInCloud
+                  e premi Aggiorna ora.
+                </span>
+              </div>
+            </div>
           </div>
         )}
 
