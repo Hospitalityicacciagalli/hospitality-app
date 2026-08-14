@@ -35,6 +35,7 @@ import CookingClassPage from './pages/CookingClassPage';
 import ImportPrenotazioniPage from './pages/ImportPrenotazioniPage';
 import LimitiPage from './pages/LimitiPage';
 import HicDashboardPage from './pages/hic/HicDashboardPage';
+import CamereOggiPage from './pages/hic/CamereOggiPage';
 import CampagnaImportaPage from './pages/CampagnaImportaPage';
 import CampagnaRiepilogoPage from './pages/CampagnaRiepilogoPage';
 import CampagnaStipendiPage from './pages/CampagnaStipendiPage';
@@ -176,6 +177,19 @@ function AppRoutes() {
         <Route path="/camere" element={
           <ProtectedRoute>
             <HicRoute />
+          </ProtectedRoute>
+        } />
+
+        {/* Camere e colazioni — l'operativo del giorno, sotto hic_operativo.
+            Distinta da /camere per USO: quella e' analisi ed economia,
+            questa dice chi dorme stanotte e quante colazioni servire.
+            I numeri arrivano gia' fatti dalle funzioni della migrazione
+            46 (hic_camere_notte / hic_camere_notte_totale): la pagina non
+            somma niente e la regola di chi conta come presente resta in
+            hic_perimetro_ok, in una copia sola. */}
+        <Route path="/camere/oggi" element={
+          <ProtectedRoute feature="hic_operativo">
+            <CamereOggiPage />
           </ProtectedRoute>
         } />
 

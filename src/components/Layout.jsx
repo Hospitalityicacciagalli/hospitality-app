@@ -259,20 +259,31 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
-        {/* Dashboard HotelInCloud. I nomi delle due voci camere si
-            distinguono per USO, non per tecnologia: questa e' l'analisi
-            (fatturato, occupazione, canali), la futura "Situazione camere"
-            sara' l'operativo del giorno (chi c'e' stanotte, colazioni).
-            Entrambe leggono i dati di Hotel in Cloud, quindi mettere "HiC"
-            nel nome di una sola direbbe il falso. E "Prenotazioni", qui
-            dentro, e' il RISTORANTE: chi arriva nuovo non deve confondersi. */}
+        {/* Le DUE voci camere si distinguono per USO, non per tecnologia:
+            "Dashboard Camere" e' l'analisi (fatturato, occupazione, canali),
+            "Camere e colazioni" e' l'operativo del giorno (chi dorme stanotte,
+            quante colazioni domattina). Entrambe leggono i dati di Hotel in
+            Cloud, quindi mettere "HiC" nel nome di una sola direbbe il falso.
+            E "Prenotazioni", qui dentro, e' il RISTORANTE: chi arriva nuovo
+            non deve poterle confondere. */}
         {vediHic && (
           <NavLink
             to="/camere"
+            end
             className={function(p) { return navClass(p.isActive); }}
             onClick={function() { setMobileOpen(false); }}>
             <span className="text-base">🛏️</span>
             Dashboard Camere
+          </NavLink>
+        )}
+
+        {canView('hic_operativo') && (
+          <NavLink
+            to="/camere/oggi"
+            className={function(p) { return navClass(p.isActive); }}
+            onClick={function() { setMobileOpen(false); }}>
+            <span className="text-base">🌅</span>
+            Camere e colazioni
           </NavLink>
         )}
 
@@ -717,9 +728,10 @@ export default function Layout({ children }) {
                     : 'I dati di Hotel in Cloud non si aggiornano da ' + daQuanto(hicOre) + '.'}
                 </span>
                 <span className="ml-1">
-                  Quello che vedi in Dashboard Camere e' vecchio. Vai a un computer dove e'
-                  installato l'aggiornamento, apri la finestra Sincronizzazione HotelInCloud
-                  e premi Aggiorna ora.
+                  Quello che vedi in Dashboard Camere e in Camere e colazioni e' vecchio:
+                  chi e' arrivato o partito dopo quell'ora non c'e'. Vai a un computer dove
+                  e' installato l'aggiornamento, apri la finestra Sincronizzazione
+                  HotelInCloud e premi Aggiorna ora.
                 </span>
               </div>
             </div>
