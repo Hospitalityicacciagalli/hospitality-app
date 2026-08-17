@@ -12,15 +12,29 @@ import { supabase } from '../../lib/supabase';
 // Per questo la pagina non elenca le camere libere e non scrive mai
 // la parola "libera": dice quante ne sono occupate, e basta.
 //
-// UNA DOMANDA SOLA, DUE VISTE.
-// La colazione della mattina dopo la fa chi ha dormito la notte
-// prima: e' lo stesso identico insieme di persone. Quindi non ci
-// sono due interrogazioni, ce n'e' una — la notte del giorno scelto —
-// e le due linguette la guardano da due lati.
+// ⚠️ LA DATA SCELTA E' IL GIORNO, NON LA NOTTE — cambiato in v46.
+// La prima versione era ancorata alla NOTTE: si sceglieva il 17 e la
+// linguetta Colazioni mostrava la mattina del 18. Tecnicamente
+// coerente (chi dorme la notte del 17 fa colazione il 18), ma
+// FUORVIANTE all'uso: chi sceglie una data si aspetta quella data.
+// Decisione di Florestano, 17 agosto: il selettore indica IL GIORNO,
+// e ogni linguetta risponde alla propria domanda su quel giorno.
+//
+//   Camere    -> chi dorme la NOTTE del giorno scelto      (notte D)
+//   Colazioni -> chi fa colazione la MATTINA del giorno
+//                scelto, cioe' chi ha dormito la notte prima (notte D-1)
+//
+// ⚠️ CONSEGUENZA DA NON DIMENTICARE: le due linguette NON mostrano
+// piu' le stesse persone. Sono due interrogazioni sfalsate di un
+// giorno, e cambiando linguetta la pagina rilegge. La vecchia frase
+// "una domanda sola, due viste" era vera prima e non lo e' piu': se
+// la trovi scritta da qualche parte, e' rimasta indietro.
 //
 // LE SOMME NON SI FANNO QUI. Arrivano gia' fatte dalla migrazione
 // 46: hic_camere_notte(n) per l'elenco e hic_camere_notte_totale(n)
-// per i numeri. La regola di chi conta come presente vive in
+// per i numeri, dove n e' sempre una NOTTE. La traduzione
+// giorno -> notte avviene in un posto solo, in notteDaLeggere().
+// La regola di chi conta come presente vive in
 // hic_perimetro_ok(..., 'standard') e non e' riscritta qui dentro
 // (regola 31). Se un giorno cambia, cambia in un posto solo.
 //
@@ -68,10 +82,20 @@ function spostaGiorni(s, n) {
   return iso(d);
 }
 
-function notteCorrente() {
+// Il giorno "di adesso" per l'albergo: prima delle cinque del mattino
+// la giornata alberghiera e' ancora quella di ieri.
+function giornoCorrente() {
   var ora = new Date();
   if (ora.getHours() < ORA_CAMBIO_NOTTE) ora.setDate(ora.getDate() - 1);
   return iso(ora);
+}
+
+// UNICA traduzione giorno -> notte di tutta la pagina.
+// Camere: la notte del giorno scelto. Colazioni: la notte prima,
+// perche' la colazione della mattina di D la fa chi ha dormito D-1.
+function notteDaLeggere(giorno, scheda) {
+  if (scheda === 'colazioni') return spostaGiorni(giorno, -1);
+  return giorno;
 }
 
 function dataLunga(s) {
@@ -146,7 +170,7 @@ function Etichetta(props) {
 }
 
 export default function CamereOggiPage() {
-  var [notte, setNotte] = useState(notteCorrente());
+  var [giorno, setGiorno] = useState(giornoCorrente());
   var [scheda, setScheda] = useState('camere');
 
   var [righe, setRighe] = useState([]);
@@ -155,14 +179,19 @@ export default function CamereOggiPage() {
   var [caricamento, setCaricamento] = useState(true);
   var [errore, setErrore] = useState(null);
 
+  // La notte effettivamente letta dal database. Dipende ANCHE dalla
+  // linguetta: cambiando linguetta la pagina rilegge, ed e' voluto —
+  // sono due domande diverse, non due viste della stessa.
+  var notteLetta = notteDaLeggere(giorno, scheda);
+
   useEffect(function() {
     var annullato = false;
     setCaricamento(true);
     setErrore(null);
 
     Promise.all([
-      supabase.rpc('hic_camere_notte', { p_notte: notte }),
-      supabase.rpc('hic_camere_notte_totale', { p_notte: notte }),
+      supabase.rpc('hic_camere_notte', { p_notte: notteLetta }),
+      supabase.rpc('hic_camere_notte_totale', { p_notte: notteLetta }),
       supabase.rpc('hic_ultimo_aggiornamento')
     ]).then(function(risposte) {
       if (annullato) return;
@@ -181,12 +210,13 @@ export default function CamereOggiPage() {
     });
 
     return function() { annullato = true; };
-  }, [notte]);
+  }, [notteLetta]);
 
-  var mattinaDopo = spostaGiorni(notte, 1);
+  var giornoDopo = spostaGiorni(giorno, 1);
   var oggiCalendario = iso(new Date());
-  var stiamoGuardandoIeriPerOrario = (notte !== oggiCalendario) && (notte === notteCorrente());
+  var stiamoGuardandoIeriPerOrario = (giorno !== oggiCalendario) && (giorno === giornoCorrente());
   var timestamp = quandoLungo(aggiornatoAl);
+  var eColazioni = scheda === 'colazioni';
 
   var occupate = totali ? Number(totali.camere_occupate) : 0;
   var totCamere = totali ? Number(totali.camere_totali) : 0;
@@ -236,52 +266,71 @@ export default function CamereOggiPage() {
         </div>
       </div>
 
-      {/* Scelta della notte */}
+      {/* SCELTA DEL GIORNO.
+          La data indica il GIORNO, non la notte: sotto, la riga di
+          servizio dice per esteso cosa si sta guardando, cosi' non c'e'
+          modo di equivocare fra le due linguette. */}
       <div className="bg-white rounded-xl border border-gray-200 p-4 mb-5">
-        <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Notte</div>
+        <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mb-2">Giorno</div>
         <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={function() { setNotte(spostaGiorni(notte, -1)); }}
+            onClick={function() { setGiorno(spostaGiorni(giorno, -1)); }}
             className="px-3 py-2 rounded-lg text-sm font-semibold border bg-white text-gray-700 border-gray-300 hover:border-wine-400 hover:text-wine-800">
             ◀ Giorno prima
           </button>
           <button
             type="button"
-            onClick={function() { setNotte(notteCorrente()); }}
+            onClick={function() { setGiorno(giornoCorrente()); }}
             className="px-3 py-2 rounded-lg text-sm font-semibold border bg-white text-gray-700 border-gray-300 hover:border-wine-400 hover:text-wine-800">
             Oggi
           </button>
           <button
             type="button"
-            onClick={function() { setNotte(spostaGiorni(notte, 1)); }}
+            onClick={function() { setGiorno(spostaGiorni(giorno, 1)); }}
             className="px-3 py-2 rounded-lg text-sm font-semibold border bg-white text-gray-700 border-gray-300 hover:border-wine-400 hover:text-wine-800">
             Giorno dopo ▶
           </button>
           <input
             type="date"
-            value={notte}
-            onChange={function(e) { if (e.target.value) setNotte(e.target.value); }}
+            value={giorno}
+            onChange={function(e) { if (e.target.value) setGiorno(e.target.value); }}
             className="border border-gray-300 rounded-lg px-2 py-2 text-sm"
           />
         </div>
+
         <div className="text-xl font-bold text-gray-900 mt-3">
-          Notte di {dataLunga(notte)}
+          {dataLunga(giorno)}
         </div>
+
+        {/* La riga che toglie ogni ambiguita': dice quale notte si sta
+            leggendo davvero, e cambia con la linguetta. */}
+        {eColazioni ? (
+          <div className="text-sm text-gray-600 mt-1">
+            Colazioni servite <span className="font-semibold">la mattina di {dataLunga(giorno)}</span> —
+            le fa chi ha dormito la notte di {dataLunga(notteLetta)}.
+          </div>
+        ) : (
+          <div className="text-sm text-gray-600 mt-1">
+            Chi dorme <span className="font-semibold">la notte di {dataLunga(giorno)}</span> —
+            dalla sera del {dataBreve(giorno)} alla mattina del {dataBreve(giornoDopo)}.
+          </div>
+        )}
+
         {stiamoGuardandoIeriPerOrario && (
           <div className="text-xs text-amber-700 mt-1">
-            Sono passate da poco le ventiquattro: la notte in corso è ancora questa.
-            Con <span className="font-semibold">Giorno dopo</span> vedi la notte che comincia stasera.
+            Sono passate da poco le ventiquattro: per l'albergo la giornata in corso è ancora questa.
+            Con <span className="font-semibold">Giorno dopo</span> vedi la giornata che comincia stasera.
           </div>
         )}
       </div>
 
       {/* Linguette */}
       <div className="flex flex-wrap gap-2 mb-5">
-        <Pillola attiva={scheda === 'camere'} onClick={function() { setScheda('camere'); }}>
+        <Pillola attiva={!eColazioni} onClick={function() { setScheda('camere'); }}>
           Camere
         </Pillola>
-        <Pillola attiva={scheda === 'colazioni'} onClick={function() { setScheda('colazioni'); }}>
+        <Pillola attiva={eColazioni} onClick={function() { setScheda('colazioni'); }}>
           Colazioni
         </Pillola>
       </div>
@@ -298,15 +347,30 @@ export default function CamereOggiPage() {
 
       {!caricamento && !errore && righe.length === 0 && (
         <div className="bg-white rounded-xl border border-gray-200 p-10 text-center">
-          <div className="text-lg font-semibold text-gray-700">Nessuna camera occupata questa notte</div>
-          <div className="text-sm text-gray-500 mt-2">
-            Nessuna colazione da servire la mattina del {dataLunga(mattinaDopo)}.
-          </div>
+          {eColazioni ? (
+            <div>
+              <div className="text-lg font-semibold text-gray-700">
+                Nessuna colazione da servire la mattina di {dataLunga(giorno)}
+              </div>
+              <div className="text-sm text-gray-500 mt-2">
+                Nessuna camera risulta occupata la notte di {dataLunga(notteLetta)}.
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div className="text-lg font-semibold text-gray-700">
+                Nessuna camera occupata la notte di {dataLunga(giorno)}
+              </div>
+              <div className="text-sm text-gray-500 mt-2">
+                Nessuna colazione da servire la mattina del {dataLunga(giornoDopo)}.
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {/* ---------------- LINGUETTA CAMERE ---------------- */}
-      {!caricamento && !errore && righe.length > 0 && scheda === 'camere' && (
+      {!caricamento && !errore && righe.length > 0 && !eColazioni && (
         <div className="space-y-5">
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -392,22 +456,25 @@ export default function CamereOggiPage() {
         </div>
       )}
 
-      {/* ---------------- LINGUETTA COLAZIONI ---------------- */}
-      {!caricamento && !errore && righe.length > 0 && scheda === 'colazioni' && (
+      {/* ---------------- LINGUETTA COLAZIONI ----------------
+          Attenzione: qui i numeri si riferiscono alla notte PRECEDENTE
+          al giorno scelto. Sono le persone che stamattina siedono a
+          colazione, comprese quelle che oggi lasciano la camera. */}
+      {!caricamento && !errore && righe.length > 0 && eColazioni && (
         <div className="space-y-5">
 
           <div className="bg-white rounded-xl border border-gray-200 p-6">
             <div className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-              Colazioni della mattina di {dataLunga(mattinaDopo)}
+              Colazioni della mattina di {dataLunga(giorno)}
             </div>
             <div className="text-5xl font-bold text-wine-900 mt-2">{n(ospiti)}</div>
             <div className="text-base text-gray-700 mt-1">
               {adulti} adulti e {bambini} bambini, in {occupate} camere
             </div>
             <div className="text-xs text-gray-500 mt-3">
-              Chi ha dormito fa colazione: sono le stesse persone della notte di {dataLunga(notte)},
-              comprese le {partenze} camere che lasciano la struttura in mattinata
-              ({ospitiInPartenza} persone).
+              Chi ha dormito fa colazione: sono le persone che hanno passato qui
+              la notte di {dataLunga(notteLetta)}, comprese le {partenze} camere
+              che lasciano la struttura stamattina ({ospitiInPartenza} persone).
             </div>
           </div>
 
@@ -443,7 +510,7 @@ export default function CamereOggiPage() {
                         <td className="py-2 px-3 text-right tabular-nums text-gray-600">{n(r.adulti)}</td>
                         <td className="py-2 px-3 text-right tabular-nums text-gray-600">{n(r.bambini)}</td>
                         <td className="py-2 pl-3 whitespace-nowrap">
-                          {r.parte_domattina && <Etichetta colore="ambra">parte in mattinata</Etichetta>}
+                          {r.parte_domattina && <Etichetta colore="ambra">parte stamattina</Etichetta>}
                         </td>
                       </tr>
                     );
