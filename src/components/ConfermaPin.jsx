@@ -6,6 +6,31 @@ import { supabase } from '../lib/supabase'
 var MAX_FAILS = 7
 var LOCK_MINUTES = 3
 
+// ============================================================
+// PERCHE' IL CAMPO PIN NON E' type="password"
+//
+// Chrome (e ogni gestore di password) propone di salvare le
+// credenziali quando un <form> che contiene un campo type="password"
+// viene inviato con successo. Non ha modo di distinguere una
+// credenziale di accesso da una FIRMA PERSONALE: per lui sono la
+// stessa cosa. autocomplete="off" su quel campo viene ignorato
+// deliberatamente proprio in questo scenario.
+//
+// ⚠️ Un PIN salvato nel browser e' un PIN che si autocompila da solo
+// su un dispositivo CONDIVISO: chiunque apra la modale firmerebbe a
+// nome di chi lo ha salvato. Sarebbe la fine della tracciabilita' su
+// cui poggiano cassa, chiusure firmate ed elevazione dei permessi.
+//
+// Soluzione: campo type="text" — che il gestore password NON riconosce
+// come credenziale — mascherato via CSS con -webkit-text-security.
+// Le cifre restano nascoste esattamente come prima: cambia solo COME
+// sono nascoste. Su iPad il tastierino numerico continua a uscire
+// grazie a inputMode="numeric".
+// Gli attributi data-lpignore / data-1p-ignore / data-form-type dicono
+// la stessa cosa a LastPass, 1Password e simili.
+// ============================================================
+var MASCHERA_PIN = { WebkitTextSecurity: 'disc' }
+
 function nowMs() { return Date.now() }
 
 export default function ConfermaPin(props) {
@@ -163,7 +188,7 @@ export default function ConfermaPin(props) {
             </div>
           )}
 
-          <form onSubmit={handleVerify}>
+          <form onSubmit={handleVerify} autoComplete="off">
 
             {/* Elenco nomi da toccare (niente menu' nativo: affidabile su iPad) */}
             <label className="block text-xs font-medium text-gray-700 mb-1">Chi sei</label>
@@ -193,9 +218,19 @@ export default function ConfermaPin(props) {
             )}
 
             <label className="block text-xs font-medium text-gray-700 mb-1">PIN</label>
+            {/* Campo NON credenziale: vedi la nota in testa al file. */}
             <input
-              type="password"
+              type="text"
+              name="icg-codice-conferma"
               inputMode="numeric"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
+              style={MASCHERA_PIN}
               value={pin}
               onChange={function(e) { setPin(e.target.value.replace(/[^0-9]/g, '').slice(0, 6)) }}
               maxLength={6}

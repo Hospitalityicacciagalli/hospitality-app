@@ -2,6 +2,35 @@ import { useState } from 'react';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase';
 
+// ============================================================
+// PERCHE' I CAMPI PIN NON SONO type="password"
+//
+// Chrome (e ogni gestore di password) propone di salvare le
+// credenziali quando un <form> che contiene un campo type="password"
+// viene inviato con successo. Non ha modo di distinguere una
+// credenziale di accesso da una FIRMA PERSONALE: per lui sono la
+// stessa cosa. autocomplete="off" su quel campo viene ignorato
+// deliberatamente proprio in questo scenario.
+//
+// ⚠️ Un PIN salvato nel browser e' un PIN che si autocompila da solo
+// su un dispositivo CONDIVISO: chiunque apra la modale di conferma
+// firmerebbe a nome di chi lo ha salvato. Sarebbe la fine della
+// tracciabilita' su cui poggiano cassa, chiusure firmate ed
+// elevazione dei permessi.
+//
+// Soluzione: campo type="text" — che il gestore password NON riconosce
+// come credenziale — mascherato via CSS con -webkit-text-security.
+// Le cifre restano nascoste esattamente come prima: cambia solo COME
+// sono nascoste. Su iPad il tastierino numerico continua a uscire
+// grazie a inputMode="numeric".
+//
+// ⚠️ I TRE CAMPI DELLA SEZIONE «CAMBIA PASSWORD» RESTANO
+// type="password" DI PROPOSITO: quella e' una vera credenziale di
+// accesso, e li' il salvataggio nel browser e' legittimo e utile.
+// La regola vale solo per il PIN, che e' una firma.
+// ============================================================
+var MASCHERA_PIN = { WebkitTextSecurity: 'disc' };
+
 export default function ProfilePage() {
   var { user, profile } = useAuth();
 
@@ -169,7 +198,8 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {/* Cambio password */}
+      {/* Cambio password — qui type="password" e' CORRETTO: e' una credenziale
+          vera, e il salvataggio nel browser e' legittimo. */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-5 mb-6">
         <h2 className="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wide">Cambia password</h2>
         <form onSubmit={handleChangePassword} className="space-y-4">
@@ -234,9 +264,9 @@ export default function ProfilePage() {
           )}
         </div>
         <p className="text-xs text-gray-500 mb-4">
-          Il PIN di 6 cifre ti identifica quando confermi un'operazione o accedi ai tuoi rami su una postazione condivisa. Insieme al tuo nome, è ciò che dice al sistema che sei tu. Non condividerlo con nessuno.
+          Il PIN di 6 cifre ti identifica quando confermi un'operazione o accedi ai tuoi rami su una postazione condivisa. Insieme al tuo nome, è ciò che dice al sistema che sei tu. Non condividerlo con nessuno e non salvarlo nel browser.
         </p>
-        <form onSubmit={handleSetPin} className="space-y-4">
+        <form onSubmit={handleSetPin} className="space-y-4" autoComplete="off">
           {pinError && (
             <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{pinError}</div>
           )}
@@ -245,29 +275,46 @@ export default function ProfilePage() {
           )}
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">{hasPin ? 'Nuovo PIN (6 cifre) *' : 'PIN (6 cifre) *'}</label>
+            {/* Campo NON credenziale: vedi la nota in testa al file. */}
             <input
-              type="password"
+              type="text"
+              name="icg-codice-operazioni"
               inputMode="numeric"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
+              style={MASCHERA_PIN}
               value={pin}
               onChange={function(e) { setPin(e.target.value.replace(/[^0-9]/g, '').slice(0, 6)); }}
               required
               maxLength={6}
               placeholder="••••••"
-              autoComplete="off"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm tracking-widest focus:outline-none focus:ring-2 focus:ring-wine-500"
             />
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">Conferma PIN *</label>
             <input
-              type="password"
+              type="text"
+              name="icg-codice-operazioni-conferma"
               inputMode="numeric"
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
+              style={MASCHERA_PIN}
               value={confirmPin}
               onChange={function(e) { setConfirmPin(e.target.value.replace(/[^0-9]/g, '').slice(0, 6)); }}
               required
               maxLength={6}
               placeholder="••••••"
-              autoComplete="off"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm tracking-widest focus:outline-none focus:ring-2 focus:ring-wine-500"
             />
           </div>
