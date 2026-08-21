@@ -5,7 +5,7 @@ import { useAuth } from "../lib/AuthContext";
 import {
   ArrowLeft, Edit, Phone, Mail, MapPin, Calendar,
   Briefcase, Clock, CheckCircle, XCircle, AlertTriangle,
-  Plus, ChevronDown, ChevronUp, User, UserCheck
+  Plus, ChevronDown, ChevronUp, User, UserCheck, UserX
 } from "lucide-react";
 
 var DAY_NAMES = ["Dom", "Lun", "Mar", "Mer", "Gio", "Ven", "Sab"];
@@ -40,6 +40,26 @@ var MEAL_LABELS = {
 function formatDate(d) {
   if (!d) return "—";
   return new Date(d).toLocaleDateString("it-IT", { day: "2-digit", month: "long", year: "numeric" });
+}
+
+// Data e ora, per dire quando una cessazione e' stata registrata.
+function formatDateTime(ts) {
+  if (!ts) return "—";
+  var d = new Date(ts);
+  if (isNaN(d.getTime())) return String(ts);
+  return d.toLocaleDateString("it-IT", { day: "2-digit", month: "2-digit", year: "numeric" }) +
+    " " + d.toLocaleTimeString("it-IT", { hour: "2-digit", minute: "2-digit" });
+}
+
+// "agosto 2026" — per dire a parole qual e' l'ultima busta paga.
+var MESI_ESTESI = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno",
+  "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"];
+
+function meseAnnoDi(iso) {
+  if (!iso) return "";
+  var p = String(iso).slice(0, 10).split("-");
+  if (p.length !== 3) return "";
+  return MESI_ESTESI[parseInt(p[1], 10) - 1] + " " + p[0];
 }
 
 function formatDateShort(d) {
@@ -360,9 +380,22 @@ export default function StaffDetail() {
             )}
             {member.contract_end_date && (
               <div className="flex justify-between">
-                <dt className="text-gray-500">Scadenza</dt>
+                <dt className="text-gray-500">
+                  {member.data_cessazione ? "Fine rapporto" : "Scadenza"}
+                </dt>
                 <dd className={"font-medium " + (contractExpired ? "text-red-600" : contractExpiring ? "text-amber-600" : "text-gray-800")}>
                   {formatDate(member.contract_end_date)}
+                </dd>
+              </div>
+            )}
+            {/* Il campo MEMORIA (migrazione 47): cosa il contratto prevedeva
+                prima che la cessazione lo accorciasse. Nessun calcolo lo legge,
+                serve solo a non perdere il fatto. */}
+            {member.contract_end_date_prevista && (
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Scadenza prevista</dt>
+                <dd className="text-gray-400 line-through">
+                  {formatDate(member.contract_end_date_prevista)}
                 </dd>
               </div>
             )}
@@ -413,6 +446,68 @@ export default function StaffDetail() {
             </button>
           )}
         </div>
+
+        {/* ─────────────────────────────────────────────────────────────
+            CESSAZIONE (migrazione 47)
+            Compare solo se una cessazione e' registrata. I dati sono campi,
+            non una frase nelle note: si possono leggere, filtrare e correggere.
+        ───────────────────────────────────────────────────────────────── */}
+        {member.data_cessazione && (
+          <div className="bg-white rounded-xl border border-gray-300 p-5">
+            <div className="flex items-center gap-2 mb-4">
+              <UserX size={16} className="text-gray-600" />
+              <h2 className="font-semibold text-gray-800">Cessazione</h2>
+              <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full">
+                {member.cessazione_origine === "unilav" ? "da UniLav" : (member.cessazione_origine === "manuale" ? "registrata a mano" : "origine non nota")}
+              </span>
+            </div>
+            <dl className="space-y-2 text-sm">
+              <div className="flex justify-between">
+                <dt className="text-gray-500">Data di cessazione</dt>
+                <dd className="font-semibold text-gray-900">{formatDate(member.data_cessazione)}</dd>
+              </div>
+              {member.cessazione_motivo && (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-gray-500 flex-shrink-0">Motivo</dt>
+                  <dd className="text-gray-800 text-right">
+                    {member.cessazione_codice && (
+                      <span className="font-mono text-xs bg-gray-100 px-1.5 py-0.5 rounded mr-1.5">
+                        {member.cessazione_codice}
+                      </span>
+                    )}
+                    {member.cessazione_motivo}
+                  </dd>
+                </div>
+              )}
+              {member.cessazione_protocollo && (
+                <div className="flex justify-between">
+                  <dt className="text-gray-500">Protocollo</dt>
+                  <dd className="text-gray-800 font-mono text-xs">{member.cessazione_protocollo}</dd>
+                </div>
+              )}
+              {(member.cessazione_registrata_da || member.cessazione_registrata_il) && (
+                <div className="flex justify-between gap-4">
+                  <dt className="text-gray-500 flex-shrink-0">Registrata</dt>
+                  <dd className="text-gray-400 text-xs text-right">
+                    {member.cessazione_registrata_da}
+                    {member.cessazione_registrata_da && member.cessazione_registrata_il && " — "}
+                    {member.cessazione_registrata_il ? formatDateTime(member.cessazione_registrata_il) : ""}
+                  </dd>
+                </div>
+              )}
+            </dl>
+            <div className="mt-4 pt-4 border-t border-gray-100 text-sm text-gray-500">
+              L&rsquo;ultima busta paga e&rsquo; quella di <strong>{meseAnnoDi(member.data_cessazione)}</strong>.
+            </div>
+            {canManage && (
+              <button
+                onClick={function() { navigate("/staff/cessazione"); }}
+                className="mt-3 text-sm text-wine-600 hover:text-wine-800 underline">
+                Correggi la cessazione
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Note */}
         {member.notes && (

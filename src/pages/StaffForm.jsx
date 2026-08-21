@@ -114,11 +114,11 @@ function parseUnilav(fullText) {
     retribuzione:       grab(text, /Retribuzione\s+([\d.,]+)\s+Lavoro in agricoltura/i)
   };
 
-  if (isCessazione) {
-    common.data_cessazione = toIsoDate(grab(text, /Data cessazione\s+(\d{2}\/\d{2}\/\d{4})/i));
-    common.motivo_cessazione = grab(text, /Motivo cessazione\s+(.+?)\s+Sezione/i);
-    common.hire_date = toIsoDate(grab(text, /Data inizio\s+(\d{2}\/\d{2}\/\d{4})/i));
-  } else {
+  // ⚠️ Qui si legge SOLO l'assunzione. La cessazione ha una pagina sua
+  // (/staff/cessazione, migrazione 47), che scrive data, motivo,
+  // protocollo e origine — cose che questo modulo non ha dove mettere.
+  // Se arriva una cessazione ci si limita a riconoscerla e a indirizzare.
+  if (!isCessazione) {
     common.hire_date = toIsoDate(grab(text, /Data inizio\s+(\d{2}\/\d{2}\/\d{4})/i));
     common.contract_end_date = toIsoDate(grab(text, /Data fine\s+(\d{2}\/\d{2}\/\d{4})/i));
   }
@@ -153,9 +153,9 @@ export default function StaffForm() {
   var [unilavError, setUnilavError] = useState(null);
   var [unilavInfo, setUnilavInfo] = useState(null);
   var [duplicate, setDuplicate] = useState(null);
-  var [cessazione, setCessazione] = useState(null);
-  var [cessazioneSaving, setCessazioneSaving] = useState(false);
-  var [cessazioneDone, setCessazioneDone] = useState(false);
+  // La cessazione NON si registra qui: se il PDF caricato ne e' una,
+  // si accende questo flag e si indirizza alla pagina dedicata.
+  var [cessazioneRilevata, setCessazioneRilevata] = useState(false);
 
   // Permesso granulare, non ruolo rigido: cosi' vale anche per chi entra
   // con l'elevazione PIN, che hasRole ignora per progetto.
@@ -320,8 +320,7 @@ export default function StaffForm() {
     setUnilavError(null);
     setUnilavInfo(null);
     setDuplicate(null);
-    setCessazione(null);
-    setCessazioneDone(false);
+    setCessazioneRilevata(false);
 
     file.arrayBuffer().then(function(buffer) {
       return pdfjsLib.getDocument({ data: buffer }).promise;
@@ -353,7 +352,8 @@ export default function StaffForm() {
       }
 
       if (parsed.tipo_comunicazione === "cessazione") {
-        handleUnilavCessazione(parsed);
+        setUnilavLoading(false);
+        setCessazioneRilevata(true);
       } else {
         applyParsedData(parsed);
         checkDuplicate(parsed);
@@ -364,73 +364,6 @@ export default function StaffForm() {
       setUnilavLoading(false);
       setUnilavError("Errore nella lettura del PDF: " + (err && err.message ? err.message : "file non valido"));
     });
-  }
-
-  function handleUnilavCessazione(parsed) {
-    if (!parsed.fiscal_code) {
-      setUnilavLoading(false);
-      setUnilavError("La UniLav di cessazione non contiene un codice fiscale leggibile.");
-      return;
-    }
-    supabase
-      .from("staff_members")
-      .select("id, first_name, last_name, is_active, contract_end_date")
-      .eq("fiscal_code", parsed.fiscal_code)
-      .then(function(result) {
-        setUnilavLoading(false);
-        if (result.error || !result.data || result.data.length === 0) {
-          setUnilavError("Nessun dipendente trovato con codice fiscale " + parsed.fiscal_code + ". Inserisci prima il dipendente in anagrafica.");
-          return;
-        }
-        var d = result.data[0];
-        setCessazione({
-          staff_id:           d.id,
-          name:               d.first_name + " " + d.last_name,
-          is_active:          d.is_active !== false,
-          previous_end_date:  d.contract_end_date,
-          data_cessazione:    parsed.data_cessazione,
-          motivo_cessazione:  parsed.motivo_cessazione
-        });
-      });
-  }
-
-  function confirmCessazione() {
-    if (!cessazione) return;
-    setCessazioneSaving(true);
-
-    var noteCessazione = "Cessazione registrata da UniLav: " + formatIsoToIt(cessazione.data_cessazione);
-    if (cessazione.motivo_cessazione) {
-      noteCessazione += " - " + cessazione.motivo_cessazione;
-    }
-
-    supabase
-      .from("staff_members")
-      .select("notes")
-      .eq("id", cessazione.staff_id)
-      .single()
-      .then(function(readRes) {
-        var existingNotes = (readRes.data && readRes.data.notes) ? readRes.data.notes : "";
-        var newNotes = existingNotes
-          ? (existingNotes + "\n" + noteCessazione)
-          : noteCessazione;
-
-        return supabase
-          .from("staff_members")
-          .update({
-            contract_end_date: cessazione.data_cessazione,
-            is_active:         false,
-            notes:             newNotes
-          })
-          .eq("id", cessazione.staff_id);
-      })
-      .then(function(updRes) {
-        setCessazioneSaving(false);
-        if (updRes && updRes.error) {
-          alert("Errore: " + updRes.error.message);
-          return;
-        }
-        setCessazioneDone(true);
-      });
   }
 
   function applyParsedData(parsed) {
@@ -654,10 +587,10 @@ export default function StaffForm() {
               <h2 className="font-semibold text-gray-800">Compilazione automatica da UniLav</h2>
             </div>
             <p className="text-sm text-gray-500 mb-4">
-              Carica il PDF della ricevuta di Comunicazione Obbligatoria (UniLav). Il sistema
-              riconosce automaticamente se si tratta di un'assunzione o di una cessazione:
-              nel primo caso precompila il modulo, nel secondo aggiorna la scheda del dipendente
-              esistente. Potrai controllare e correggere tutto prima di confermare.
+              Carica il PDF della ricevuta di Comunicazione Obbligatoria (UniLav) di
+              <strong> assunzione</strong>: il modulo si precompila da solo e potrai controllare
+              e correggere tutto prima di salvare. Se carichi una UniLav di cessazione te lo dico
+              e ti mando alla pagina giusta.
             </p>
 
             <label className="inline-flex items-center gap-2 bg-wine-700 text-white px-4 py-2.5 rounded-lg hover:bg-wine-800 transition-colors font-medium text-sm cursor-pointer">
@@ -673,71 +606,29 @@ export default function StaffForm() {
               </div>
             )}
 
-            {/* CESSAZIONE — riquadro azzurro per confermare la chiusura del rapporto */}
-            {cessazione && !cessazioneDone && (
+            {/* CESSAZIONE — non si registra qui: si indirizza alla pagina dedicata */}
+            {cessazioneRilevata && (
               <div className="mt-4 p-4 bg-blue-50 border border-blue-300 rounded-lg">
                 <div className="flex items-start gap-2">
                   <UserX size={18} className="text-blue-600 mt-0.5 flex-shrink-0" />
                   <div className="flex-1">
                     <p className="text-sm font-medium text-blue-800">
-                      UniLav di cessazione riconosciuta
+                      Questa e&rsquo; una UniLav di cessazione, non di assunzione
                     </p>
-                    <div className="text-sm text-blue-700 mt-2 space-y-1">
-                      <p><span className="text-blue-500">Dipendente:</span> <span className="font-medium">{cessazione.name}</span></p>
-                      <p><span className="text-blue-500">Data cessazione:</span> <span className="font-medium">{formatIsoToIt(cessazione.data_cessazione)}</span></p>
-                      {cessazione.motivo_cessazione && (
-                        <p><span className="text-blue-500">Motivo:</span> {cessazione.motivo_cessazione}</p>
-                      )}
-                      {!cessazione.is_active && (
-                        <p className="text-amber-700 mt-2">Nota: il dipendente risulta gia' non attivo.</p>
-                      )}
-                    </div>
-                    <p className="text-sm text-blue-600 mt-3">
-                      Confermando aggiornero' la sua scheda: scadenza contratto = data cessazione,
-                      stato = non attivo, e aggiungero' una nota con motivo e data.
+                    <p className="text-sm text-blue-700 mt-1">
+                      Le cessazioni si registrano nella pagina dedicata, dove vengono salvati
+                      anche motivo, numero di protocollo e scadenza prevista del contratto.
                     </p>
                     <div className="flex gap-2 mt-3 flex-wrap">
                       <button
-                        onClick={confirmCessazione}
-                        disabled={cessazioneSaving}
-                        className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-blue-700 transition-colors disabled:opacity-50">
-                        {cessazioneSaving ? "Salvataggio..." : "Conferma cessazione"}
+                        onClick={function() { navigate("/staff/cessazione"); }}
+                        className="bg-blue-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-blue-700 transition-colors">
+                        Vai a Cessazione dipendente
                       </button>
                       <button
-                        onClick={function() { navigate("/staff/" + cessazione.staff_id); }}
-                        className="border border-blue-300 text-blue-700 px-3 py-1.5 rounded-lg text-sm hover:bg-blue-100 transition-colors">
-                        Apri la scheda
-                      </button>
-                      <button
-                        onClick={function() { setCessazione(null); }}
+                        onClick={function() { setCessazioneRilevata(false); }}
                         className="border border-gray-300 text-gray-700 px-3 py-1.5 rounded-lg text-sm hover:bg-gray-50 transition-colors">
                         Annulla
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* CESSAZIONE — conferma avvenuta */}
-            {cessazioneDone && cessazione && (
-              <div className="mt-4 p-4 bg-green-50 border border-green-300 rounded-lg">
-                <div className="flex items-start gap-2">
-                  <CheckCircle size={18} className="text-green-600 mt-0.5 flex-shrink-0" />
-                  <div className="flex-1">
-                    <p className="text-sm font-medium text-green-800">
-                      Cessazione registrata con successo per {cessazione.name}
-                    </p>
-                    <div className="flex gap-2 mt-3">
-                      <button
-                        onClick={function() { navigate("/staff/" + cessazione.staff_id); }}
-                        className="bg-green-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-green-700 transition-colors">
-                        Apri la scheda
-                      </button>
-                      <button
-                        onClick={function() { navigate("/staff"); }}
-                        className="border border-green-300 text-green-700 px-3 py-1.5 rounded-lg text-sm hover:bg-green-100 transition-colors">
-                        Torna alla lista staff
                       </button>
                     </div>
                   </div>

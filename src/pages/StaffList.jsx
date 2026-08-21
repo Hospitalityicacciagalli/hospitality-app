@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/AuthContext";
-import { Users, Plus, Search, ChevronRight, AlertTriangle, Phone, Mail, UserCheck } from "lucide-react";
+import { Users, Plus, Search, ChevronRight, AlertTriangle, Phone, Mail, UserCheck, UserMinus } from "lucide-react";
 
 var CONTRACT_LABELS = {
   indeterminato: "Indeterminato",
@@ -17,6 +17,33 @@ var CONTRACT_COLORS = {
   stagionale:    "bg-yellow-100 text-yellow-800",
   collaborazione: "bg-purple-100 text-purple-800"
 };
+
+// ⚠️ Una cessazione registrata IN ANTICIPO non e' ancora avvenuta.
+// is_active va a false nel momento in cui la registri, ma se la data e'
+// nel futuro la persona lavora ancora: continua a comparire fra gli
+// attivi, con l'avviso di quando esce. Senza questo, registrare oggi
+// una cessazione del 31 agosto farebbe sparire subito qualcuno che
+// deve lavorare ancora dieci giorni.
+function formatDayMonth(iso) {
+  if (!iso) return "";
+  var p = String(iso).slice(0, 10).split("-");
+  if (p.length !== 3) return String(iso);
+  return p[2] + "/" + p[1] + "/" + p[0];
+}
+
+function cessazioneFutura(m) {
+  if (!m || !m.data_cessazione) return false;
+  var d = new Date();
+  var oggi = d.getFullYear() + "-" +
+    (d.getMonth() + 1 < 10 ? "0" : "") + (d.getMonth() + 1) + "-" +
+    (d.getDate() < 10 ? "0" : "") + d.getDate();
+  return String(m.data_cessazione).slice(0, 10) > oggi;
+}
+
+function inForzaOggi(m) {
+  if (m.is_active) return true;
+  return cessazioneFutura(m);
+}
 
 function daysUntilExpiry(dateStr) {
   if (!dateStr) return null;
@@ -105,8 +132,8 @@ export default function StaffList() {
 
     var matchActive =
       filterActive === "all" ||
-      (filterActive === "active" && s.is_active) ||
-      (filterActive === "inactive" && !s.is_active);
+      (filterActive === "active" && inForzaOggi(s)) ||
+      (filterActive === "inactive" && !inForzaOggi(s));
 
     var matchType =
       filterType === "all" ||
@@ -118,7 +145,7 @@ export default function StaffList() {
 
   var expiringCount = staff.filter(function(s) {
     var days = daysUntilExpiry(s.contract_end_date);
-    return s.is_active && days !== null && days >= 0 && days <= 60;
+    return inForzaOggi(s) && !s.data_cessazione && days !== null && days >= 0 && days <= 60;
   }).length;
 
   if (loading) {
@@ -140,17 +167,27 @@ export default function StaffList() {
           </div>
           <div>
             <h1 className="text-2xl font-bold text-gray-900">Staff</h1>
-            <p className="text-sm text-gray-500">{staff.filter(function(s) { return s.is_active; }).length} dipendenti attivi</p>
+            <p className="text-sm text-gray-500">{staff.filter(function(s) { return inForzaOggi(s); }).length} dipendenti attivi</p>
           </div>
         </div>
         {canManage && (
-          <button
-            onClick={function() { navigate("/staff/nuovo"); }}
-            className="flex items-center gap-2 bg-wine-700 text-white px-4 py-2 rounded-lg hover:bg-wine-800 transition-colors"
-          >
-            <Plus size={18} />
-            Nuovo dipendente
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              onClick={function() { navigate("/staff/cessazione"); }}
+              className="flex items-center gap-2 border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors"
+              title="Registra una cessazione da UniLav o a mano"
+            >
+              <UserMinus size={18} />
+              Cessazione
+            </button>
+            <button
+              onClick={function() { navigate("/staff/nuovo"); }}
+              className="flex items-center gap-2 bg-wine-700 text-white px-4 py-2 rounded-lg hover:bg-wine-800 transition-colors"
+            >
+              <Plus size={18} />
+              Nuovo dipendente
+            </button>
+          </div>
         )}
       </div>
 
@@ -231,14 +268,15 @@ export default function StaffList() {
         <div className="space-y-2">
           {filtered.map(function(member) {
             var days = daysUntilExpiry(member.contract_end_date);
-            var expiring = days !== null && days >= 0 && days <= 60;
-            var expired = days !== null && days < 0;
+            var haCessazione = !!member.data_cessazione;
+            var expiring = !haCessazione && days !== null && days >= 0 && days <= 60;
+            var expired = !haCessazione && days !== null && days < 0;
 
             return (
               <div
                 key={member.id}
                 onClick={function() { navigate("/staff/" + member.id); }}
-                className={"bg-white rounded-xl border cursor-pointer hover:shadow-md transition-all " + (member.is_active ? "border-gray-200" : "border-gray-100 opacity-60")}
+                className={"bg-white rounded-xl border cursor-pointer hover:shadow-md transition-all " + (inForzaOggi(member) ? "border-gray-200" : "border-gray-100 opacity-60")}
               >
                 <div className="flex items-center gap-4 p-4">
 
@@ -262,8 +300,15 @@ export default function StaffList() {
                           Extra
                         </span>
                       )}
-                      {!member.is_active && (
-                        <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Non attivo</span>
+                      {cessazioneFutura(member) && (
+                        <span className="text-xs bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                          Cessa il {formatDayMonth(member.data_cessazione)}
+                        </span>
+                      )}
+                      {!member.is_active && !cessazioneFutura(member) && (
+                        <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+                          {member.data_cessazione ? "Cessato il " + formatDayMonth(member.data_cessazione) : "Non attivo"}
+                        </span>
                       )}
                       {expiring && (
                         <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full flex items-center gap-1">

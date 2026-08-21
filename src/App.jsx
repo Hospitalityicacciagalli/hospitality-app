@@ -11,6 +11,7 @@ import ReservationForm from './pages/ReservationForm';
 import StaffList from './pages/StaffList';
 import StaffForm from './pages/StaffForm';
 import StaffDetail from './pages/StaffDetail';
+import CessazioneDipendentePage from './pages/CessazioneDipendentePage';
 import ShiftsPage from './pages/ShiftsPage';
 import SettingsPage from './pages/SettingsPage';
 import UserManagement from './pages/UserManagement';
@@ -209,6 +210,19 @@ function AppRoutes() {
         <Route path="/staff/nuovo" element={
           <ProtectedRoute feature="staff" requireEdit>
             <StaffForm />
+          </ProtectedRoute>
+        } />
+        {/* ⚠️ Prima di /staff/:id, altrimenti "cessazione" verrebbe
+            interpretata come l'id di un dipendente e la pagina
+            risponderebbe "Dipendente non trovato".
+            Chiude il rapporto di lavoro da UniLav o a mano: scrive data,
+            motivo, protocollo e origine (migrazione 47), sostituisce la
+            scadenza contratto conservando quella prevista, e spegne
+            is_active. NON tocca stip_profili.attivo, perche' l'ultima
+            busta — quella del TFR — si carica il mese dopo. */}
+        <Route path="/staff/cessazione" element={
+          <ProtectedRoute feature="staff" requireEdit>
+            <CessazioneDipendentePage />
           </ProtectedRoute>
         } />
         <Route path="/staff/:id" element={
