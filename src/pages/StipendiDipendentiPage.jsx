@@ -4,10 +4,22 @@ import { supabase } from '../lib/supabase';
 import { Users, Search, Tractor, Hotel, ChevronRight, Settings } from 'lucide-react';
 
 // Pagina elenco dipendenti del modulo Stipendi.
-// Mostra tutti i dipendenti attivi di staff_members e per ciascuno
+// ⚠️ NON filtra su is_active: un cessato ha ancora la busta del suo ultimo
+// mese da caricare, e quella busta si carica il mese DOPO. Il filtro e' la
+// regola contratto (vedi giroApert) — la stessa di StipendiMesePage e
+// StipendiGiornatePage — e si estingue da sola quando la busta arriva.
+// Mostra i dipendenti di staff_members e per ciascuno
 // indica se ha un profilo paghe configurato. Cliccando su una riga
 // si apre la sua scheda dove si imposta tipo, settore, target,
 // storico stipendi/tariffe e ferie.
+
+// Data ISO -> gg/mm/aaaa
+function formatIt(iso) {
+  if (!iso) return '';
+  var p = String(iso).slice(0, 10).split('-');
+  if (p.length !== 3) return String(iso);
+  return p[2] + '/' + p[1] + '/' + p[0];
+}
 
 export default function StipendiDipendentiPage() {
   var navigate = useNavigate();
@@ -15,6 +27,7 @@ export default function StipendiDipendentiPage() {
   var [loading, setLoading] = useState(true);
   var [members, setMembers] = useState([]);
   var [profili, setProfili] = useState({});       // mappa staff_id -> profilo paghe
+  var [buste, setBuste] = useState({});           // mappa staff_id -> { 'AAAA-MM': true }
   var [searchTerm, setSearchTerm] = useState('');
   var [filterTipo, setFilterTipo] = useState('tutti');  // tutti / campagna / resort / senza_profilo
   var [mostraCessati, setMostraCessati] = useState(false);
@@ -30,7 +43,7 @@ export default function StipendiDipendentiPage() {
     // passati serve poter configurare anche la paga di chi non lavora piu'.
     var pStaff = supabase
       .from('staff_members')
-      .select('id, first_name, last_name, is_active, hire_date, contract_end_date, fiscal_code')
+      .select('id, first_name, last_name, is_active, hire_date, contract_end_date, data_cessazione, fiscal_code')
       .order('last_name', { ascending: true });
 
     // Carica profili paghe
@@ -38,9 +51,18 @@ export default function StipendiDipendentiPage() {
       .from('stip_profili')
       .select('*');
 
-    Promise.all([pStaff, pProfili]).then(function(results) {
+    // Buste DEFINITIVE gia' caricate: servono a sapere quando un cessato
+    // ha finito il suo giro e puo' sparire da solo (regola 28: il
+    // discriminante e' busta_definitiva valorizzata, non un flag).
+    var pBuste = supabase
+      .from('stip_mesi')
+      .select('staff_id, anno, mese, busta_definitiva')
+      .not('busta_definitiva', 'is', null);
+
+    Promise.all([pStaff, pProfili, pBuste]).then(function(results) {
       var staffRes = results[0];
       var profRes = results[1];
+      var busteRes = results[2];
 
       if (staffRes.error) {
         alert('Errore caricamento staff: ' + staffRes.error.message);
@@ -60,16 +82,67 @@ export default function StipendiDipendentiPage() {
         map[profData[i].staff_id] = profData[i];
       }
 
+      // Mappa staff_id -> { 'AAAA-MM': true } delle buste definitive
+      var mapBuste = {};
+      var busteData = (busteRes && busteRes.data) ? busteRes.data : [];
+      for (var b = 0; b < busteData.length; b++) {
+        var rb = busteData[b];
+        if (!mapBuste[rb.staff_id]) mapBuste[rb.staff_id] = {};
+        mapBuste[rb.staff_id][rb.anno + '-' + String(rb.mese).padStart(2, '0')] = true;
+      }
+
       setMembers(staffRes.data || []);
       setProfili(map);
+      setBuste(mapBuste);
       setLoading(false);
     });
+  }
+
+  // ── CHI COMPARE, E FINO A QUANDO ────────────────────────────────────────
+  // Un cessato NON sparisce il giorno della cessazione: sparisce quando la
+  // busta del suo ultimo mese e' stata caricata. E' la stessa regola contratto
+  // di StipendiMesePage (lavoraNelMese) e StipendiGiornatePage
+  // (sottoContratto), qui applicata al "giro paghe ancora aperto".
+  //
+  // Motivo: le buste si caricano il mese DOPO. Chi cessa il 13 agosto ha una
+  // busta di agosto — fosse anche solo il TFR — che si carica a settembre.
+  // Farlo sparire il 1 settembre significherebbe nasconderlo esattamente nel
+  // momento in cui serve.
+  function finePeriodo(m) {
+    var c = m.data_cessazione ? String(m.data_cessazione).slice(0, 10) : null;
+    var f = m.contract_end_date ? String(m.contract_end_date).slice(0, 10) : null;
+    if (c && f) return c < f ? c : f;
+    return c || f;
+  }
+
+  // true se il giro paghe di questa persona e' ancora aperto.
+  function giroApert(m) {
+    var fine = finePeriodo(m);
+    if (!fine) return true;                       // nessuna fine nota: in forza
+    var oggi = new Date();
+    var oggiIso = oggi.getFullYear() + '-' + String(oggi.getMonth() + 1).padStart(2, '0') + '-' + String(oggi.getDate()).padStart(2, '0');
+    if (fine >= oggiIso) return true;             // non ancora finito
+    var chiave = fine.slice(0, 7);                // 'AAAA-MM' dell'ultimo mese
+    var sue = buste[m.id] || {};
+    return !sue[chiave];                          // aperto finche' manca quella busta
+  }
+
+  // Cosa manca ancora a questa persona, per l'etichetta ambra.
+  function bustaMancante(m) {
+    var fine = finePeriodo(m);
+    if (!fine) return null;
+    var oggi = new Date();
+    var oggiIso = oggi.getFullYear() + '-' + String(oggi.getMonth() + 1).padStart(2, '0') + '-' + String(oggi.getDate()).padStart(2, '0');
+    if (fine >= oggiIso) return null;
+    var sue = buste[m.id] || {};
+    if (sue[fine.slice(0, 7)]) return null;
+    return fine;
   }
 
   function filtered() {
     var list = members;
     if (!mostraCessati) {
-      list = list.filter(function(m) { return m.is_active !== false; });
+      list = list.filter(function(m) { return giroApert(m); });
     }
     var term = searchTerm.trim().toLowerCase();
     if (term) {
@@ -90,7 +163,7 @@ export default function StipendiDipendentiPage() {
   }
 
   function attivi() {
-    return members.filter(function(m) { return m.is_active !== false; });
+    return members.filter(function(m) { return giroApert(m); });
   }
 
   function totaleConProfilo() {
@@ -126,6 +199,8 @@ export default function StipendiDipendentiPage() {
         <p className="text-gray-500 text-sm mt-1">
           Configura il profilo paghe di ciascun dipendente: tipo (campagna o resort),
           settore, target giornate annue, storico stipendi/tariffe e ferie.
+          Chi ha cessato resta in elenco finch&eacute; non hai caricato la busta del suo
+          ultimo mese, poi sparisce da solo.
         </p>
       </div>
 
@@ -184,7 +259,7 @@ export default function StipendiDipendentiPage() {
               onChange={function(e) { setMostraCessati(e.target.checked); }}
               className="rounded border-gray-300 text-wine-600 focus:ring-wine-500"
             />
-            <span className="text-gray-700">Includi cessati</span>
+            <span className="text-gray-700">Includi cessati chiusi</span>
           </label>
         </div>
       </div>
@@ -220,9 +295,17 @@ export default function StipendiDipendentiPage() {
                       <h3 className="font-semibold text-gray-900">
                         {m.last_name} {m.first_name}
                       </h3>
-                      {m.is_active === false && (
+                      {m.is_active === false && !bustaMancante(m) && (
                         <span className="text-xs px-2 py-0.5 rounded-full font-medium bg-gray-100 text-gray-500">
                           Cessato
+                        </span>
+                      )}
+                      {bustaMancante(m) && (
+                        <span
+                          className="text-xs px-2 py-0.5 rounded-full font-medium bg-amber-100 text-amber-800"
+                          title="Resta in elenco finche' non carichi la busta del suo ultimo mese"
+                        >
+                          Cessato il {formatIt(bustaMancante(m))} — manca l&rsquo;ultima busta
                         </span>
                       )}
                       {hasProfile ? (

@@ -110,6 +110,31 @@ export default function ShiftsPage() {
     });
   }
 
+  // Chi compare nella griglia della settimana mostrata.
+  //
+  // Un dipendente ATTIVO c'e' sempre. Un dipendente NON attivo compare solo
+  // se era sotto contratto in quella settimana: cosi' un cessato sparisce
+  // dalle settimane future — non e' piu' assegnabile — ma i turni che ha
+  // gia' lavorato restano leggibili nelle settimane passate.
+  //
+  // ⚠️ Serve contract_end_date valorizzata: chi e' stato disattivato a mano
+  // senza una data di fine non ricompare mai, esattamente come prima.
+  //
+  // E' la stessa regola contratto degli Stipendi (lavoraNelMese in
+  // StipendiMesePage, sottoContratto in StipendiGiornatePage), applicata
+  // alla settimana invece che al mese.
+  function inForzaNellaSettimana(s, ws) {
+    if (!s) return false;
+    if (s.is_active !== false) return true;
+    var fine = s.contract_end_date ? String(s.contract_end_date).slice(0, 10) : null;
+    if (!fine) return false;
+    var inizio = s.hire_date ? String(s.hire_date).slice(0, 10) : null;
+    var weekEnd = addDays(ws, 6);
+    if (inizio && inizio > weekEnd) return false;
+    if (fine < ws) return false;
+    return true;
+  }
+
   function ordinaStaff(lista) {
     return lista.slice().sort(function(a, b) {
       var an = (a.last_name || "") + " " + (a.first_name || "");
@@ -128,10 +153,13 @@ export default function ShiftsPage() {
       if (!resExtra.error && resExtra.data) {
         resExtra.data.forEach(function(r) { extraIds.push(r.staff_id); });
       }
-      supabase.from("staff_members").select("*").eq("department_id", deptId).eq("is_active", true).then(function(resBase) {
+      // La lettura NON filtra piu' su is_active: chi compare nella griglia lo
+      // decide inForzaNellaSettimana(), che guarda la settimana mostrata.
+      // Una lettura sola, il filtro e' derivato (regola 31).
+      supabase.from("staff_members").select("*").eq("department_id", deptId).then(function(resBase) {
         var base = (!resBase.error && resBase.data) ? resBase.data : [];
         if (extraIds.length === 0) { setStaff(ordinaStaff(base)); return; }
-        supabase.from("staff_members").select("*").in("id", extraIds).eq("is_active", true).then(function(resAgg) {
+        supabase.from("staff_members").select("*").in("id", extraIds).then(function(resAgg) {
           var agg = (!resAgg.error && resAgg.data) ? resAgg.data : [];
           var visti = {};
           var uniti = [];
@@ -406,7 +434,11 @@ export default function ShiftsPage() {
   // Candidati alla duplica: SOLO chi ha questo reparto, principale o aggiuntivo.
   function candidatiDuplica() {
     if (!shiftPanel) return [];
-    return staff.filter(function(s) { return s.id !== shiftPanel.staff_id; });
+    // Mai proporre chi non era in forza nella settimana mostrata: il turno
+    // duplicato finirebbe addosso a un cessato.
+    return staff.filter(function(s) {
+      return s.id !== shiftPanel.staff_id && inForzaNellaSettimana(s, weekStart);
+    });
   }
 
   function duplicaSuSelezionati() {
@@ -468,8 +500,11 @@ export default function ShiftsPage() {
     }
   }
 
-  var fixedStaff = staff.filter(function(s) { return !s.is_extra; });
-  var extraStaff = staff.filter(function(s) { return s.is_extra; });
+  // Le righe della griglia sono i presenti nella settimana mostrata,
+  // non tutti quelli letti dal database.
+  var staffSettimana = staff.filter(function(s) { return inForzaNellaSettimana(s, weekStart); });
+  var fixedStaff = staffSettimana.filter(function(s) { return !s.is_extra; });
+  var extraStaff = staffSettimana.filter(function(s) { return s.is_extra; });
 
   if (loading) {
     return (
@@ -772,6 +807,11 @@ export default function ShiftsPage() {
                       <div className="flex-1 min-w-0">
                         <div className="text-sm font-medium text-gray-800 truncate">
                           {s.last_name} {s.first_name}
+                          {s.is_active === false && (
+                            <span className="ml-1.5 text-xs bg-gray-200 text-gray-600 px-1.5 py-0.5 rounded-full">
+                              non piu&rsquo; in forza
+                            </span>
+                          )}
                           {isAggiuntivo(s) && (
                             <span className="ml-1.5 text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full">
                               in aiuto da {deptName(s.department_id)}
