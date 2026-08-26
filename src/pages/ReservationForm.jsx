@@ -1,10 +1,19 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, Save, Search, AlertTriangle, UserPlus, Check, Users, ChevronRight, Gift, Edit3 } from 'lucide-react'
+import { ArrowLeft, Save, Search, AlertTriangle, UserPlus, Check, Users, ChevronRight, Gift, Edit3, BedDouble } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import AllergeniEditor, { validaAllergeni, salvaAllergeni, campiConsensoSalute, salvaConsensoSalute, caricaAllergeniCliente, severitaLabel } from '../components/AllergeniEditor'
 import { useAuth } from '../lib/AuthContext'
 import ConfermaPin from '../components/ConfermaPin'
+import ComparazioneClienti, { cercaCandidatiForti } from '../components/ComparazioneClienti'
+
+// Etichette dei tre gruppi del pulsante "Camere". L'ordine lo decide gia'
+// hic_ospiti_giorno in SQL (ordine_gruppo 1/2/3): qui si traduce e basta.
+var GRUPPI_CAMERE = [
+  { chiave: 'arriva', titolo: 'Arriva oggi' },
+  { chiave: 'resta',  titolo: 'Gia in casa' },
+  { chiave: 'lascia', titolo: 'Lascia la camera stamattina' }
+]
 
 function pad(n) {
   return n < 10 ? '0' + n : '' + n
@@ -119,6 +128,23 @@ function ReservationForm() {
   var [quickForm, setQuickForm] = useState({ first_name: '', last_name: '', phone: '', email: '', category: 'standard', notes: '' })
   var [quickLoading, setQuickLoading] = useState(false)
   var [quickError, setQuickError] = useState(null)
+
+  // ----------------------------------------------------------
+  // 8-BIS FASE 2 — comparazione N a 1 e pulsante "Camere"
+  //
+  // hicIdInAttesa: l'id cliente di Hotel in Cloud dell'ospite che si sta
+  // promuovendo dal pannello Camere. Vale null in tutti gli altri casi.
+  // Serve a scrivere il legame DOPO che la scheda e' stata creata o
+  // scelta: prima non esiste ancora niente da legare.
+  // ----------------------------------------------------------
+  var [showComparazione, setShowComparazione] = useState(false)
+  var [candidati, setCandidati] = useState([])
+  var [hicIdInAttesa, setHicIdInAttesa] = useState(null)
+
+  var [showCamere, setShowCamere] = useState(false)
+  var [ospitiGiorno, setOspitiGiorno] = useState([])
+  var [loadingCamere, setLoadingCamere] = useState(false)
+  var [erroreCamere, setErroreCamere] = useState(null)
 
   var initialDate = searchParams.get('date') || formatDateISO(new Date())
   var initialMeal = searchParams.get('meal') || 'dinner'
@@ -495,6 +521,8 @@ function ReservationForm() {
   function openQuickCustomer() {
     setQuickMode('crea')
     setQuickCustomerId(null)
+    // Creazione "a mano": nessun ospite di Hotel in Cloud da legare.
+    setHicIdInAttesa(null)
     setQuickForm({ first_name: '', last_name: '', phone: '', email: '', category: 'standard', notes: '', allergie_cliente: '' })
     setQuickAllergeni({})
     setQuickConsensoSalute(false)
@@ -507,6 +535,7 @@ function ReservationForm() {
   function openEditCustomer(customer) {
     setQuickMode('modifica')
     setQuickCustomerId(customer.id)
+    setHicIdInAttesa(null)
     setQuickError(null)
     setQuickAllergeni({})
     setQuickConsensoSalute(false)
@@ -539,6 +568,12 @@ function ReservationForm() {
     })
   }
 
+  // Passo 1 del salvataggio: si controlla quello che si puo' controllare,
+  // poi si CERCA se questa persona e' gia' in archivio.
+  //
+  // ⚠️ Se non c'e' nessun candidato forte — il caso quasi sempre — non
+  // compare niente e si salva dritto. Il pannello si apre solo quando c'e'
+  // davvero qualcosa da guardare.
   function handleQuickCustomerSubmit(e) {
     e.preventDefault()
     setQuickError(null)
@@ -547,6 +582,35 @@ function ReservationForm() {
     // Regola sul consenso sanitario: UNA copia sola, in AllergeniEditor.
     var erroreAllergeni = validaAllergeni(quickAllergeni, quickConsensoSalute)
     if (erroreAllergeni) { setQuickError(erroreAllergeni); return }
+
+    setQuickLoading(true)
+    cercaCandidatiForti(
+      supabase,
+      {
+        first_name: quickForm.first_name.trim(),
+        last_name: quickForm.last_name.trim(),
+        phone: quickForm.phone.trim(),
+        email: quickForm.email.trim()
+      },
+      hicIdInAttesa,
+      // In modifica, la scheda non deve proporre se stessa.
+      quickMode === 'modifica' ? quickCustomerId : null
+    ).then(function(trovati) {
+      if (trovati.length === 0) {
+        eseguiSalvataggioCliente()
+        return
+      }
+      setQuickLoading(false)
+      setCandidati(trovati)
+      setShowComparazione(true)
+    })
+  }
+
+  // Passo 2: la scrittura vera. Ci si arriva o senza aver visto niente,
+  // oppure dopo che l'operatore ha guardato i candidati e ha scelto di
+  // creare comunque una scheda nuova.
+  function eseguiSalvataggioCliente() {
+    setQuickError(null)
 
     var dati = {
       first_name: quickForm.first_name.trim(),
@@ -567,14 +631,22 @@ function ReservationForm() {
       scrittura = supabase.from('customers').update(dati).eq('id', quickCustomerId).select().single()
     } else {
       dati.is_active = true
-      dati.source = 'manual'
+      // Da dove nasce la scheda. "hotel_in_cloud" solo quando la persona
+      // arriva dal pannello Camere: e' un dato che serve a capire, un
+      // domani, quante schede ha prodotto il ponte con HiC.
+      dati.source = hicIdInAttesa ? 'hotel_in_cloud' : 'manual'
       scrittura = supabase.from('customers').insert(dati).select().single()
     }
 
     scrittura.then(function(result) {
       if (result.error) {
         setQuickLoading(false)
-        setQuickError(result.error.code === '23505' ? 'Esiste gia un cliente con questo telefono o email.' : 'Errore: ' + result.error.message)
+        // ⚠️ Il messaggio "esiste gia un cliente con questo telefono o
+        // email" viveva qui ed e' stato tolto: dalla migrazione 48 i
+        // vincoli unique_email / unique_phone non esistono piu', quindi
+        // il codice 23505 non puo' piu' arrivare da un doppione. Il
+        // doppione ora si intercetta PRIMA, con la comparazione.
+        setQuickError('Errore: ' + result.error.message)
         return
       }
       var cliente = result.data
@@ -586,13 +658,160 @@ function ReservationForm() {
           return
         }
         salvaConsensoSalute(supabase, cliente.id, quickConsensoSalute).then(function() {
-          setQuickLoading(false)
-          selectCustomer(cliente)
-          setShowQuickCustomer(false)
-          setListaClienti([])
+          scriviLegameHic(cliente.id).then(function() {
+            setQuickLoading(false)
+            selectCustomer(cliente)
+            setShowQuickCustomer(false)
+            setShowComparazione(false)
+            setCandidati([])
+            setHicIdInAttesa(null)
+            setListaClienti([])
+          })
         })
       })
     })
+  }
+
+  // Costruisce il ponte fra l'ospite di Hotel in Cloud e la scheda del
+  // ristorante. Non fa niente se non si arriva dal pannello Camere.
+  //
+  // ⚠️ Si scrive anche quando la scheda dello specchio non esiste: il
+  // legame punta all'id di HiC, non alla scheda (nessuna chiave esterna,
+  // "legame morbido" della migrazione 48). Cosi' il giorno in cui quella
+  // persona riprenota e rientra nel perimetro, il ponte e' gia' in piedi.
+  //
+  // ⚠️ Non passiamo "origine": la colonna ha gia' il suo valore di
+  // partenza. Firma chi sta agendo davvero, elevazione compresa, usando
+  // firmaCorrente() invece di una seconda copia della stessa regola.
+  function scriviLegameHic(customerId) {
+    if (!hicIdInAttesa || !customerId) return Promise.resolve()
+    var firma = firmaCorrente()
+    return supabase.from('hic_clienti_legame').upsert({
+      hic_customer_id: hicIdInAttesa,
+      customer_id: customerId,
+      creato_da: firma.user_id,
+      creato_da_nome: firma.nome
+    }, { onConflict: 'hic_customer_id' }).then(function(esito) {
+      if (esito.error) {
+        // Il cliente e' salvato: il legame mancante non deve far
+        // sembrare fallita l'operazione. Si annota e si prosegue.
+        console.error('Legame con Hotel in Cloud non scritto:', esito.error)
+      }
+    })
+  }
+
+  // ----------------------------------------------------------
+  // AZIONI DELLA COMPARAZIONE
+  // Due sole, di proposito. Fondere due schede e' un'altra cosa e sta
+  // nella pagina di fusione: senza un verbale non si potrebbe tornare
+  // indietro, e una fusione senza ritorno non si offre di sfuggita
+  // dentro una prenotazione.
+  // ----------------------------------------------------------
+  function usaSchedaTrovata(candidato) {
+    setQuickLoading(true)
+    // Se si arriva dal pannello Camere e la scheda scelta non era gia'
+    // legata, il ponte si costruisce adesso: e' proprio questo il gesto
+    // che collega l'ospite dell'albergo al cliente del ristorante.
+    scriviLegameHic(candidato.customer_id).then(function() {
+      setQuickLoading(false)
+      setShowComparazione(false)
+      setCandidati([])
+      setHicIdInAttesa(null)
+      setShowQuickCustomer(false)
+      setListaClienti([])
+      selectCustomer({
+        id: candidato.customer_id,
+        first_name: candidato.first_name,
+        last_name: candidato.last_name,
+        phone: candidato.phone,
+        email: candidato.email,
+        category: candidato.category
+      })
+    })
+  }
+
+  function creaComunqueNuova() {
+    setShowComparazione(false)
+    setCandidati([])
+    eseguiSalvataggioCliente()
+  }
+
+  function annullaComparazione() {
+    setShowComparazione(false)
+    setCandidati([])
+    setQuickLoading(false)
+  }
+
+  // ----------------------------------------------------------
+  // PULSANTE "CAMERE"
+  //
+  // Chi sta in casa il giorno della prenotazione, in tre gruppi.
+  // ⚠️ La traduzione fra il GIORNO scelto e le NOTTI da leggere sta
+  // dentro hic_ospiti_giorno, in SQL: notte D per chi arriva e chi
+  // resta, notte D-1 per chi lascia la camera stamattina. Qui non si
+  // calcola nessuna data, altrimenti la stessa regola vivrebbe in due
+  // copie e prima o poi divergerebbero.
+  // ----------------------------------------------------------
+  function apriCamere() {
+    setShowCamere(true)
+    setErroreCamere(null)
+    setLoadingCamere(true)
+    supabase.rpc('hic_ospiti_giorno', { p_giorno: formData.reservation_date })
+      .then(function(result) {
+        setLoadingCamere(false)
+        if (result.error) {
+          setErroreCamere('Non riesco a leggere le camere: ' + result.error.message)
+          setOspitiGiorno([])
+          return
+        }
+        setOspitiGiorno(result.data || [])
+      })
+  }
+
+  // Da un ospite dell'albergo a una scheda del ristorante.
+  //
+  // ⚠️ Non crea niente da sola: apre il pannello con i campi gia'
+  // riempiti, che restano modificabili. Una riga su cinque arriva senza
+  // cognome utilizzabile, e quel campo vuoto deve vederlo una persona
+  // prima che la scheda nasca storpia.
+  function promuoviOspite(o) {
+    setShowCamere(false)
+    setQuickMode('crea')
+    setQuickCustomerId(null)
+    setHicIdInAttesa(o.hic_customer_id || null)
+    setQuickForm({
+      first_name: o.nome_proposto || '',
+      last_name: o.cognome_proposto || '',
+      phone: o.telefono_proposto || '',
+      // Un indirizzo di canale identifica una pratica, non una persona:
+      // non lo copiamo nella scheda del cliente.
+      email: (o.email_proposta && !o.email_e_alias) ? o.email_proposta : '',
+      category: 'hotel_guest',
+      notes: '',
+      allergie_cliente: ''
+    })
+    setQuickAllergeni({})
+    setQuickConsensoSalute(false)
+    setQuickError(null)
+    caricaElencoAllergeni()
+    setShowQuickCustomer(true)
+  }
+
+  // Ospite gia' collegato a una scheda: si seleziona e basta.
+  function selezionaOspiteCollegato(o) {
+    setShowCamere(false)
+    supabase.from('customers')
+      .select('id, first_name, last_name, phone, email, category')
+      .eq('id', o.cliente_id)
+      .single()
+      .then(function(result) {
+        if (result.error || !result.data) {
+          setErroreCamere('Scheda collegata non trovata.')
+          setShowCamere(true)
+          return
+        }
+        selectCustomer(result.data)
+      })
   }
 
   function isSharedDevice() {
@@ -942,6 +1161,14 @@ function ReservationForm() {
                   className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-wine-300 text-sm text-wine-700 hover:bg-wine-50 font-medium">
                   <UserPlus size={16} />
                   Nuovo cliente
+                </button>
+                {/* Chi dorme qui il giorno della prenotazione. Il pannello
+                    segue la data scelta sopra: cambiando data cambia
+                    l'elenco. */}
+                <button type="button" onClick={apriCamere}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 font-medium">
+                  <BedDouble size={16} />
+                  Camere
                 </button>
               </div>
             </div>
@@ -1338,6 +1565,112 @@ function ReservationForm() {
           </div>
         </div>
       )}
+
+      {/* Pannello "Camere": chi sta in casa il giorno della prenotazione */}
+      {showCamere && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-end sm:items-center justify-center sm:p-4">
+          <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-lg shadow-2xl flex flex-col max-h-screen sm:max-h-[85vh]">
+
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 flex-shrink-0">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Camere</h2>
+                <p className="text-xs text-gray-400 mt-0.5">
+                  Chi sta in casa il {dataBreve(formData.reservation_date)}
+                </p>
+              </div>
+              <button type="button" onClick={function() { setShowCamere(false) }}
+                className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto">
+              {erroreCamere && (
+                <div className="m-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{erroreCamere}</div>
+              )}
+
+              {loadingCamere ? (
+                <div className="flex items-center justify-center h-32">
+                  <p className="text-gray-400 text-sm">Caricamento...</p>
+                </div>
+              ) : ospitiGiorno.length === 0 && !erroreCamere ? (
+                <div className="text-center py-10 px-6">
+                  <p className="text-gray-500 text-sm">Nessuna camera occupata in questa data.</p>
+                  <p className="text-gray-400 text-xs mt-2">
+                    I dati arrivano dall ultimo aggiornamento di Hotel in Cloud.
+                  </p>
+                </div>
+              ) : (
+                GRUPPI_CAMERE.map(function(g) {
+                  var righe = ospitiGiorno.filter(function(o) { return o.gruppo === g.chiave })
+                  if (righe.length === 0) return null
+                  return (
+                    <div key={g.chiave}>
+                      <div className="px-5 py-2 bg-gray-50 border-b border-gray-100 sticky top-0">
+                        <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">
+                          {g.titolo} <span className="text-gray-400">({righe.length})</span>
+                        </p>
+                      </div>
+                      {righe.map(function(o) {
+                        var collegato = Boolean(o.cliente_id)
+                        var nome = [o.cognome_proposto, o.nome_proposto].filter(Boolean).join(' ')
+                        return (
+                          <button
+                            key={g.chiave + '-' + o.reservation_id}
+                            type="button"
+                            onClick={function() {
+                              if (collegato) { selezionaOspiteCollegato(o) } else { promuoviOspite(o) }
+                            }}
+                            className="w-full text-left px-5 py-3.5 border-b border-gray-100 last:border-0 hover:bg-gray-50 flex items-center gap-3"
+                          >
+                            <div className="w-14 flex-shrink-0">
+                              <span className="inline-block px-2 py-1 rounded bg-gray-100 text-gray-700 text-xs font-medium">
+                                {o.unita || '—'}
+                              </span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium text-gray-900 truncate">
+                                {nome !== '' ? nome : (o.ospite || 'Nome non disponibile')}
+                              </p>
+                              <p className="text-xs text-gray-500 truncate">
+                                {collegato
+                                  ? 'Gia collegato a ' + (o.cliente_nome || 'una scheda')
+                                  : (o.n_ospiti ? o.n_ospiti + ' ospiti in camera' : 'Crea la scheda cliente')}
+                              </p>
+                            </div>
+                            <ChevronRight size={16} className="text-gray-300 flex-shrink-0" />
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )
+                })
+              )}
+            </div>
+
+            <div className="p-4 border-t border-gray-100 flex-shrink-0">
+              <p className="text-xs text-gray-400 text-center">
+                Chi arriva e chi resta dorme la notte di questa data. Chi lascia la camera
+                ha dormito la notte precedente.
+              </p>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      <ComparazioneClienti
+        open={showComparazione}
+        dati={{
+          first_name: quickForm.first_name,
+          last_name: quickForm.last_name,
+          phone: quickForm.phone,
+          email: quickForm.email
+        }}
+        candidati={candidati}
+        salvando={quickLoading}
+        onUsa={usaSchedaTrovata}
+        onCreaComunque={creaComunqueNuova}
+        onAnnulla={annullaComparazione}
+      />
 
       <ConfermaPin
         open={showPinModal}

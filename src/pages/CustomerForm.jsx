@@ -3,6 +3,16 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { ArrowLeft, Save, AlertTriangle } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import AllergeniEditor, { validaAllergeni, salvaAllergeni, campiConsensoSalute } from '../components/AllergeniEditor'
+import ComparazioneClienti, { cercaCandidatiForti } from '../components/ComparazioneClienti'
+
+// ============================================================
+// NOTA SULLO STILE DI QUESTO FILE
+// Il corpo originale usa const e arrow function. Le parti aggiunte per
+// la comparazione (8-bis fase 2) seguono le convenzioni del progetto —
+// var e function — senza riscrivere il resto: riscrivere 500 righe che
+// funzionano per uniformarle avrebbe introdotto rischio senza dare
+// niente in cambio.
+// ============================================================
 
 function CustomerForm() {
   const { id } = useParams()
@@ -52,6 +62,11 @@ function CustomerForm() {
 
   // Note interne (solo staff)
   const [noteInterne, setNoteInterne] = useState('')
+
+  // 8-bis fase 2 — comparazione N a 1. Stessa regola e stesso pannello
+  // della creazione rapida dentro le prenotazioni: una copia sola.
+  var [showComparazione, setShowComparazione] = useState(false)
+  var [candidati, setCandidati] = useState([])
 
   // Carica la lista allergeni al mount
   useEffect(() => {
@@ -167,10 +182,12 @@ function CustomerForm() {
       return
     }
 
-    if (!formData.phone && !formData.email) {
-      alert('Inserisci almeno un telefono o una email per identificare il cliente.')
-      return
-    }
+    // ⚠️ Qui c'era un BLOCCO: senza telefono ne email il salvataggio si
+    // fermava. Non si ferma piu'. Un cliente senza contatti e' legittimo
+    // — nello specchio di Hotel in Cloud ce ne sono 60, e sono persone
+    // che dormono qui — ma e' anche un cliente che al ritorno nessuno
+    // potra' riconoscere. Questo va DETTO, non impedito: l'avviso e'
+    // sotto i campi contatto e resta visibile mentre si scrive.
 
     if (!consents.data_processing) {
       alert('Il consenso al trattamento dati è obbligatorio per registrare il cliente.')
@@ -184,6 +201,35 @@ function CustomerForm() {
       return
     }
 
+    // Prima di scrivere: questa persona e' gia' in archivio?
+    // Se non c'e' nessun candidato forte non compare niente e si salva
+    // dritto. In modifica, la scheda non propone se stessa.
+    setSaving(true)
+    var trovati = await cercaCandidatiForti(
+      supabase,
+      {
+        first_name: formData.first_name.trim(),
+        last_name: formData.last_name.trim(),
+        phone: formData.phone.trim(),
+        email: formData.email.trim()
+      },
+      null,
+      isEditing ? id : null
+    )
+    if (trovati.length > 0) {
+      setSaving(false)
+      setCandidati(trovati)
+      setShowComparazione(true)
+      return
+    }
+
+    await eseguiSalvataggio()
+  }
+
+  // La scrittura vera. Ci si arriva o senza aver visto niente, oppure
+  // dopo che l'operatore ha guardato i candidati e ha scelto di creare
+  // comunque una scheda nuova.
+  async function eseguiSalvataggio() {
     setSaving(true)
     try {
       // Prepara i dati (campi vuoti → null per evitare errori di unicità)
@@ -216,11 +262,11 @@ function CustomerForm() {
           .eq('id', id)
 
         if (error) {
-          if (error.code === '23505') {
-            alert('Esiste già un cliente con questo telefono o email.')
-            setSaving(false)
-            return
-          }
+          // ⚠️ Il controllo sul codice 23505 viveva qui ed e' stato
+          // tolto: dalla migrazione 48 i vincoli unique_email e
+          // unique_phone non esistono piu', quindi quell'errore non puo'
+          // piu' arrivare da un doppione. Il doppione si intercetta
+          // prima, con la comparazione.
           throw error
         }
       } else {
@@ -232,11 +278,6 @@ function CustomerForm() {
           .single()
 
         if (error) {
-          if (error.code === '23505') {
-            alert('Esiste già un cliente con questo telefono o email.')
-            setSaving(false)
-            return
-          }
           throw error
         }
         customerId = data.id
@@ -356,6 +397,16 @@ function CustomerForm() {
               />
             </div>
           </div>
+
+          {/* Avviso, non blocco: prima il salvataggio si fermava qui.
+              Un cliente senza contatti si puo' registrare — ma nessuno
+              potra' riconoscerlo quando tornera'. */}
+          {formData.phone.trim() === '' && formData.email.trim() === '' && (
+            <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+              Senza telefono ne email questa scheda si puo salvare lo stesso, ma alla
+              prossima visita non sara riconoscibile e nascera un doppione.
+            </div>
+          )}
 
           <div className="mt-4">
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -568,6 +619,36 @@ function CustomerForm() {
           </button>
         </div>
       </form>
+
+      <ComparazioneClienti
+        open={showComparazione}
+        dati={{
+          first_name: formData.first_name,
+          last_name: formData.last_name,
+          phone: formData.phone,
+          email: formData.email
+        }}
+        candidati={candidati}
+        salvando={saving}
+        onUsa={function(candidato) {
+          // Qui non si sta prendendo una prenotazione: si sta compilando
+          // l'anagrafica. La cosa utile e' portare l'operatore SULLA
+          // scheda che gia' esiste, non selezionarla per qualcos altro.
+          setShowComparazione(false)
+          setCandidati([])
+          navigate('/clienti/' + candidato.customer_id)
+        }}
+        onCreaComunque={function() {
+          setShowComparazione(false)
+          setCandidati([])
+          eseguiSalvataggio()
+        }}
+        onAnnulla={function() {
+          setShowComparazione(false)
+          setCandidati([])
+          setSaving(false)
+        }}
+      />
     </div>
   )
 }
