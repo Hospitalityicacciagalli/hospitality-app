@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { Plus, ArrowLeft, Users, Clock, Phone, AlertTriangle, CalendarDays, Baby, User, Star, Calendar, TableProperties, X, Check, Printer, ChevronDown } from 'lucide-react'
+import { Plus, ArrowLeft, Users, Clock, Phone, AlertTriangle, CalendarDays, Baby, User, Star, Calendar, TableProperties, X, Check, Printer, ChevronDown, BedDouble } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 
@@ -26,6 +26,18 @@ function esc(testo) {
     .split('&').join('&amp;')
     .split('<').join('&lt;')
     .split('>').join('&gt;')
+}
+
+// Nome del cliente per le stampe di sala, con la camera quando c'e'.
+// Una copia sola: le stampe sono tre e chiamano tutte questa (regola 31).
+// La camera si stampa perche' e' il dato che serve in servizio: sapere
+// che quel tavolo sono gli ospiti di Aorivola cambia come li si tratta.
+function clientePerStampa(res) {
+  var nome = res.customers
+    ? esc(res.customers.last_name + ' ' + res.customers.first_name)
+    : '\u2014'
+  if (res.camera) nome += ' <span class="camera">\u00b7 ' + esc(res.camera) + '</span>'
+  return nome
 }
 
 // Costruisce lista servizi di una tipologia gift card
@@ -397,6 +409,7 @@ function PannelloTavoli(props) {
             <h2 className="text-base font-bold text-gray-900">Assegna Tavoli</h2>
             <p className="text-xs text-gray-500 mt-0.5">
               {customer.last_name + ' ' + customer.first_name + ' \u00b7 ' + totOspiti + ' ospiti (' + (totOspiti - totBambini) + ' adulti + ' + totBambini + ' bambini)'}
+              {prenotazione.camera ? ' \u00b7 camera ' + prenotazione.camera : ''}
             </p>
           </div>
           <button onClick={function() { onClose(false) }} className="text-gray-400 hover:text-gray-600 p-1"><X size={22} /></button>
@@ -559,7 +572,7 @@ function StampaMenu(props) {
     return function() { document.removeEventListener('mousedown', handleClick) }
   }, [])
 
-  var stileBase = '<style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px;} h1{font-size:16px;margin-bottom:4px;} .sub{color:#666;font-size:11px;margin-bottom:16px;} table{width:100%;border-collapse:collapse;margin-bottom:16px;} th{background:#7a1b2e;color:white;padding:6px 8px;text-align:left;font-size:11px;} td{padding:6px 8px;border-bottom:1px solid #eee;vertical-align:top;} .section-title{font-weight:bold;font-size:13px;color:#7a1b2e;margin:18px 0 6px;border-bottom:2px solid #7a1b2e;padding-bottom:3px;} .badge{display:inline-block;background:#fee2e2;color:#991b1b;border-radius:4px;padding:1px 5px;font-size:10px;margin-right:3px;} .badge-bam{display:inline-block;background:#fef9c3;color:#854d0e;border-radius:4px;padding:1px 5px;font-size:10px;} .badge-stato{display:inline-block;border-radius:4px;padding:1px 6px;font-size:10px;margin-right:3px;} .note{color:#666;font-style:italic;font-size:11px;} .avviso{background:#fff7ed;border:1px solid #fed7aa;border-radius:4px;padding:4px 8px;font-size:11px;color:#9a3412;margin-top:3px;} .card{border:1px solid #ddd;border-radius:6px;padding:10px 14px;margin-bottom:10px;page-break-inside:avoid;} .cliente{font-weight:bold;font-size:13px;} .row{display:flex;gap:16px;margin-top:4px;flex-wrap:wrap;align-items:center;} .riepilogo{border:2px solid #7a1b2e;border-radius:6px;padding:8px 12px;margin-bottom:14px;page-break-inside:avoid;} .riep-titolo{font-weight:bold;font-size:12px;color:#7a1b2e;margin-bottom:5px;} table.riep{width:auto;margin:0;} table.riep td{border:none;padding:2px 16px 2px 0;font-size:12px;vertical-align:baseline;} table.riep td.num{font-weight:bold;font-size:15px;text-align:right;} table.riep td.det{color:#555;font-size:11px;} table.riep tr.tot td{border-top:1px solid #7a1b2e;padding-top:5px;font-weight:bold;} table.riep tr.tot td.det{font-weight:normal;} .card-evento{border:1px solid #fcd34d;border-left:4px solid #d97706;background:#fffbeb;border-radius:6px;padding:10px 14px;margin-bottom:10px;page-break-inside:avoid;} tr.riga-totale td{border-top:2px solid #7a1b2e;font-weight:bold;background:#faf5f6;} .totale-blocco{border-top:2px solid #7a1b2e;padding-top:6px;margin-top:4px;font-size:12px;font-weight:bold;page-break-inside:avoid;} @media print{body{padding:8px;}}</style>'
+  var stileBase = '<style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px;} h1{font-size:16px;margin-bottom:4px;} .sub{color:#666;font-size:11px;margin-bottom:16px;} table{width:100%;border-collapse:collapse;margin-bottom:16px;} th{background:#7a1b2e;color:white;padding:6px 8px;text-align:left;font-size:11px;} td{padding:6px 8px;border-bottom:1px solid #eee;vertical-align:top;} .section-title{font-weight:bold;font-size:13px;color:#7a1b2e;margin:18px 0 6px;border-bottom:2px solid #7a1b2e;padding-bottom:3px;} .badge{display:inline-block;background:#fee2e2;color:#991b1b;border-radius:4px;padding:1px 5px;font-size:10px;margin-right:3px;} .badge-bam{display:inline-block;background:#fef9c3;color:#854d0e;border-radius:4px;padding:1px 5px;font-size:10px;} .badge-stato{display:inline-block;border-radius:4px;padding:1px 6px;font-size:10px;margin-right:3px;} .note{color:#666;font-style:italic;font-size:11px;} .avviso{background:#fff7ed;border:1px solid #fed7aa;border-radius:4px;padding:4px 8px;font-size:11px;color:#9a3412;margin-top:3px;} .card{border:1px solid #ddd;border-radius:6px;padding:10px 14px;margin-bottom:10px;page-break-inside:avoid;} .cliente{font-weight:bold;font-size:13px;} .camera{font-weight:normal;color:#7a1b2e;font-size:11px;} .row{display:flex;gap:16px;margin-top:4px;flex-wrap:wrap;align-items:center;} .riepilogo{border:2px solid #7a1b2e;border-radius:6px;padding:8px 12px;margin-bottom:14px;page-break-inside:avoid;} .riep-titolo{font-weight:bold;font-size:12px;color:#7a1b2e;margin-bottom:5px;} table.riep{width:auto;margin:0;} table.riep td{border:none;padding:2px 16px 2px 0;font-size:12px;vertical-align:baseline;} table.riep td.num{font-weight:bold;font-size:15px;text-align:right;} table.riep td.det{color:#555;font-size:11px;} table.riep tr.tot td{border-top:1px solid #7a1b2e;padding-top:5px;font-weight:bold;} table.riep tr.tot td.det{font-weight:normal;} .card-evento{border:1px solid #fcd34d;border-left:4px solid #d97706;background:#fffbeb;border-radius:6px;padding:10px 14px;margin-bottom:10px;page-break-inside:avoid;} tr.riga-totale td{border-top:2px solid #7a1b2e;font-weight:bold;background:#faf5f6;} .totale-blocco{border-top:2px solid #7a1b2e;padding-top:6px;margin-top:4px;font-size:12px;font-weight:bold;page-break-inside:avoid;} @media print{body{padding:8px;}}</style>'
 
   // Eventi che pesano su QUESTO turno: la stessa regola della pagina a
   // schermo (un evento "Giornata intera" vale sia a pranzo sia a cena).
@@ -682,7 +695,7 @@ function StampaMenu(props) {
       nomiTavoli.forEach(function(nomeTavolo) {
         perTavolo[nomeTavolo].forEach(function(item) {
           var res = item.res; var tp = item.tp
-          var cliente = res.customers ? esc(res.customers.last_name + ' ' + res.customers.first_name) : '\u2014'
+          var cliente = clientePerStampa(res)
           var allerge = tp.allergie_tavolo || []
           var allergeLabel = allerge.length > 0 ? allerge.map(function(a) { return '<span class="badge">' + esc(a) + '</span>' }).join('') : '\u2014'
           html += '<tr><td><strong>' + esc(nomeTavolo) + '</strong></td><td>' + cliente + '</td>'
@@ -741,7 +754,7 @@ function StampaMenu(props) {
           tavRighe.forEach(function(r) { bambiniTotRes += r.n_bambini_tavolo || 0 })
           var allergeClienti = res.has_allergen_alerts ? ['\u26a0 vedi scheda cliente'] : []
           html += '<div class="card">'
-          html += '<div class="cliente">' + (res.customers ? esc(res.customers.last_name + ' ' + res.customers.first_name) : '\u2014') + '</div>'
+          html += '<div class="cliente">' + clientePerStampa(res) + '</div>'
           html += '<div class="row">'
           html += '<span>\ud83d\udc65 ' + res.guests_count + ' ospiti (' + (res.adults_count || 0) + ' ad. + ' + (res.children_count || 0) + ' ba.)</span>'
           if (bambiniTotRes > 0) html += '<span class="badge-bam">\ud83c\udf7c ' + bambiniTotRes + ' bambini ai tavoli</span>'
@@ -810,7 +823,7 @@ function StampaMenu(props) {
     html += '<table>'
     html += '<tr><th>Orario</th><th>Cliente</th><th>Ospiti</th><th>Stato</th><th>Allergeni</th><th>Note</th></tr>'
     ordinate.forEach(function(res) {
-      var cliente = res.customers ? esc(res.customers.last_name + ' ' + res.customers.first_name) : '\u2014'
+      var cliente = clientePerStampa(res)
       var cat = res.customers && res.customers.category !== 'standard' ? categoryLabels[res.customers.category] : ''
       var orario = res.requested_time ? res.requested_time.substring(0, 5) : '\u2014'
       var stato = statusLabels[res.status] || res.status
@@ -1313,6 +1326,11 @@ function ReservationDay() {
                     <div className="flex items-center gap-4 mt-2 text-sm text-gray-500 flex-wrap">
                       <span className="flex items-center gap-1"><Users size={14} />{res.guests_count + ' ospiti (' + res.adults_count + ' ad. + ' + res.children_count + ' ba.)'}</span>
                       {timeStr && <span className="flex items-center gap-1"><Clock size={14} />{timeStr}</span>}
+                      {res.camera && (
+                        <span className="flex items-center gap-1 text-wine-700 font-medium">
+                          <BedDouble size={14} />{res.camera}
+                        </span>
+                      )}
                       {customer.phone && (
                         <a href={"tel:" + customer.phone} className="flex items-center gap-1 hover:text-wine-700" onClick={function(e) { e.stopPropagation() }}>
                           <Phone size={14} />{customer.phone}

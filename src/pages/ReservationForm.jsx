@@ -170,6 +170,7 @@ function ReservationForm() {
     adults_count: 2,
     children_count: 0,
     table_info: '',
+    camera: '',
     allergie_prenotazione: '',
     notes: '',
     special_requests: '',
@@ -344,6 +345,7 @@ function ReservationForm() {
           adults_count: res.adults_count || res.guests_count,
           children_count: res.children_count || 0,
           table_info: res.table_info || '',
+          camera: res.camera || '',
           allergie_prenotazione: res.allergie_prenotazione || '',
           notes: res.notes || '',
           special_requests: res.special_requests || '',
@@ -776,6 +778,12 @@ function ReservationForm() {
   // prima che la scheda nasca storpia.
   function promuoviOspite(o) {
     setShowCamere(false)
+    // ⚠️ La camera si scrive SUBITO, prima ancora che la scheda cliente
+    // esista. E' un dato della PRENOTAZIONE, non del cliente: la persona
+    // stasera dorme in Aorivola, fra un mese in un'altra camera o da
+    // nessuna parte. Se aspettassimo il salvataggio del cliente, un
+    // annullamento a meta' strada la farebbe sparire.
+    impostaCamera(o.unita)
     setQuickMode('crea')
     setQuickCustomerId(null)
     setHicIdInAttesa(o.hic_customer_id || null)
@@ -797,9 +805,35 @@ function ReservationForm() {
     setShowQuickCustomer(true)
   }
 
+  // Scrive il nome della camera nel modulo. Se ce n'e' gia' una diversa,
+  // le somma invece di sostituirla: e' il primo mattone della
+  // prenotazione multipla, e intanto evita che selezionare un secondo
+  // ospite cancelli in silenzio la camera del primo.
+  function impostaCamera(nomeCamera) {
+    var pulito = (nomeCamera || '').trim()
+    if (pulito === '') return
+    setFormData(function(p) {
+      var u = Object.assign({}, p)
+      var attuale = (u.camera || '').trim()
+      if (attuale === '') {
+        u.camera = pulito
+        return u
+      }
+      var pezzi = attuale.split(',')
+      for (var i = 0; i < pezzi.length; i++) {
+        if (pezzi[i].trim().toLowerCase() === pulito.toLowerCase()) return u
+      }
+      u.camera = attuale + ', ' + pulito
+      return u
+    })
+  }
+
   // Ospite gia' collegato a una scheda: si seleziona e basta.
   function selezionaOspiteCollegato(o) {
     setShowCamere(false)
+    // Anche qui la camera va portata: che la scheda esistesse gia' non
+    // cambia il fatto che stasera quella persona dorme in quella camera.
+    impostaCamera(o.unita)
     supabase.from('customers')
       .select('id, first_name, last_name, phone, email, category')
       .eq('id', o.cliente_id)
@@ -836,6 +870,10 @@ function ReservationForm() {
       adults_count: formData.adults_count,
       children_count: formData.children_count,
       table_info: formData.table_info || null,
+      // Da quale camera arriva l'ospite. Testo, quindi regge anche piu'
+      // camere insieme. Resta modificabile a mano: il pannello propone,
+      // non impone.
+      camera: (formData.camera || '').trim() || null,
       allergie_prenotazione: (formData.allergie_prenotazione || '').trim() || null,
       notes: formData.notes || null,
       special_requests: formData.special_requests || null,
@@ -1346,6 +1384,24 @@ function ReservationForm() {
                 Questa prenotazione verra segnalata con alert allergeni
               </p>
             )}
+          </div>
+
+          {/* Camera dell albergo.
+              Il pannello "Camere" la propone, ma resta un campo come gli
+              altri: si scrive, si corregge, si svuota. Chi prende una
+              prenotazione al telefono da un ospite in casa puo scriverla
+              a mano senza passare dal pannello. */}
+          <div className="mt-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">Camera</label>
+            <div className="relative">
+              <BedDouble size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input type="text" name="camera" value={formData.camera} onChange={handleInputChange}
+                className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 text-base"
+                placeholder="es. Aorivola" />
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              Da compilare solo se gli ospiti dormono in struttura. Per piu camere, separale con una virgola.
+            </p>
           </div>
 
           {/* Note */}
