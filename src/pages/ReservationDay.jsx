@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import { Plus, ArrowLeft, Users, Clock, Phone, AlertTriangle, CalendarDays, Baby, User, Star, Calendar, TableProperties, X, Check, Printer, ChevronDown, BedDouble } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
+import { severitaLabel } from '../components/AllergeniEditor'
 
 function formatDateDisplay(dateStr) {
   var parts = dateStr.split('-')
@@ -28,16 +29,107 @@ function esc(testo) {
     .split('>').join('&gt;')
 }
 
-// Nome del cliente per le stampe di sala, con la camera quando c'e'.
-// Una copia sola: le stampe sono tre e chiamano tutte questa (regola 31).
-// La camera si stampa perche' e' il dato che serve in servizio: sapere
-// che quel tavolo sono gli ospiti di Aorivola cambia come li si tratta.
-function clientePerStampa(res) {
-  var nome = res.customers
-    ? esc(res.customers.last_name + ' ' + res.customers.first_name)
-    : '\u2014'
-  if (res.camera) nome += ' <span class="camera">\u00b7 ' + esc(res.camera) + '</span>'
-  return nome
+// ----------------------------------------------------------
+// CHI SIEDE A QUESTO TAVOLO (migrazione 52)
+//
+// Una copia sola per tutte e tre le stampe, per la lista del giorno e
+// per il pannello tavoli (regola 31).
+//
+// ⚠️ Queste funzioni servono a MOSTRARE, non a contare. Il numero degli
+// ospiti resta guests_count, scritto a mano: a tavola siede anche chi non
+// ha una scheda, quindi il numero dei clienti collegati non e' e non
+// diventera' mai un numero di coperti.
+// ----------------------------------------------------------
+
+// Se la prenotazione non ha ancora righe di legame si torna esattamente
+// al comportamento di prima della 52: intestatario e camera della
+// prenotazione. Nessuna prenotazione puo' restare senza un nome.
+function clientiDellaPrenotazione(res, clientiTavolo) {
+  var righe = (clientiTavolo && clientiTavolo[res.id]) ? clientiTavolo[res.id] : []
+  if (righe.length > 0) return righe
+  return [{
+    cliente_id: res.customer_id || null,
+    nome: res.customers
+      ? (res.customers.last_name + ' ' + res.customers.first_name)
+      : (res.gift_card ? res.gift_card.codice : '\u2014'),
+    camera: res.camera || '',
+    allergeni: [],
+    allergie_libere: ''
+  }]
+}
+
+// Nomi per le stampe, con la camera di ciascuno quando c'e'. La camera si
+// stampa perche' e' il dato che serve in servizio: sapere che quel tavolo
+// sono gli ospiti di Aorivola cambia come li si tratta.
+function clientiPerStampa(res, clientiTavolo) {
+  var elenco = clientiDellaPrenotazione(res, clientiTavolo)
+  var pezzi = []
+  for (var i = 0; i < elenco.length; i++) {
+    var camera = elenco[i].camera
+    // Le prenotazioni nate prima della 52 hanno la camera nel riepilogo
+    // della prenotazione, non sulla riga della persona.
+    if (!camera && elenco.length === 1) camera = res.camera || ''
+    var t = esc(elenco[i].nome)
+    if (camera) t += ' <span class="camera">\u00b7 ' + esc(camera) + '</span>'
+    pezzi.push(t)
+  }
+  return pezzi.join('<br>')
+}
+
+function etichettaAllergene(a, severita) {
+  if (!a) return ''
+  var testo = (a.icon ? a.icon + ' ' : '') + a.name
+  var sev = severitaLabel(severita)
+  if (sev) testo += ' (' + sev + ')'
+  return testo
+}
+
+// FORMA AGGREGATA — stampa Cucina.
+// In cucina conta COSA non deve uscire, non di chi e'. I doppioni si
+// tolgono: due persone allergiche al glutine sono una riga sola.
+function allergeniAggregati(res, clientiTavolo) {
+  var elenco = clientiDellaPrenotazione(res, clientiTavolo)
+  var visti = {}
+  var out = []
+  for (var i = 0; i < elenco.length; i++) {
+    var lista = elenco[i].allergeni || []
+    for (var j = 0; j < lista.length; j++) {
+      var et = etichettaAllergene(lista[j].allergens, lista[j].severity)
+      if (et !== '' && !visti[et]) { visti[et] = true; out.push(et) }
+    }
+    var libero = (elenco[i].allergie_libere || '').trim()
+    if (libero !== '' && !visti[libero]) { visti[libero] = true; out.push(libero) }
+  }
+  return out
+}
+
+// FORMA PER NOME — stampe Sala e Riepilogo Prenotazioni.
+// Chi accoglie e chi porta il piatto deve poter dire il nome.
+function allergeniPerNome(res, clientiTavolo) {
+  var elenco = clientiDellaPrenotazione(res, clientiTavolo)
+  var righe = []
+  for (var i = 0; i < elenco.length; i++) {
+    var badge = []
+    var lista = elenco[i].allergeni || []
+    for (var j = 0; j < lista.length; j++) {
+      var et = etichettaAllergene(lista[j].allergens, lista[j].severity)
+      if (et !== '') badge.push('<span class="badge">' + esc(et) + '</span>')
+    }
+    var libero = (elenco[i].allergie_libere || '').trim()
+    if (libero !== '') badge.push('<span class="badge">' + esc(libero) + '</span>')
+    if (badge.length === 0) continue
+    if (elenco.length === 1) { righe.push(badge.join('')) }
+    else { righe.push('<strong>' + esc(elenco[i].nome) + '</strong> ' + badge.join('')) }
+  }
+  return righe.join('<br>')
+}
+
+// Nomi per lo schermo (lista del giorno e pannello tavoli).
+function nomiClienti(res, clientiTavolo) {
+  var elenco = clientiDellaPrenotazione(res, clientiTavolo)
+  var nomi = []
+  for (var i = 0; i < elenco.length; i++) { nomi.push(elenco[i].nome) }
+  return nomi
 }
 
 // Costruisce lista servizi di una tipologia gift card
@@ -232,6 +324,7 @@ function PannelloTavoli(props) {
   var dateStr = props.dateStr
   var turno = props.turno
   var onClose = props.onClose
+  var clientiTavolo = props.clientiTavolo || {}
 
   var [sale, setSale] = useState([])
   var [tavoliPerSala, setTavoliPerSala] = useState({})
@@ -408,7 +501,7 @@ function PannelloTavoli(props) {
           <div>
             <h2 className="text-base font-bold text-gray-900">Assegna Tavoli</h2>
             <p className="text-xs text-gray-500 mt-0.5">
-              {customer.last_name + ' ' + customer.first_name + ' \u00b7 ' + totOspiti + ' ospiti (' + (totOspiti - totBambini) + ' adulti + ' + totBambini + ' bambini)'}
+              {nomiClienti(prenotazione, clientiTavolo).join(', ') + ' \u00b7 ' + totOspiti + ' ospiti (' + (totOspiti - totBambini) + ' adulti + ' + totBambini + ' bambini)'}
               {prenotazione.camera ? ' \u00b7 camera ' + prenotazione.camera : ''}
             </p>
           </div>
@@ -560,6 +653,7 @@ function StampaMenu(props) {
   var turno = props.turno
   var reservations = props.reservations
   var sale = props.sale
+  var clientiTavolo = props.clientiTavolo || {}
   var eventi = props.eventi || []
   var [aperto, setAperto] = useState(false)
   var ref = useRef(null)
@@ -695,9 +789,23 @@ function StampaMenu(props) {
       nomiTavoli.forEach(function(nomeTavolo) {
         perTavolo[nomeTavolo].forEach(function(item) {
           var res = item.res; var tp = item.tp
-          var cliente = clientePerStampa(res)
+          var cliente = clientiPerStampa(res, clientiTavolo)
+          // Forma c: ogni nome con il proprio elenco. Si aggiungono gli
+          // allergeni scritti sul tavolo, che non appartengono a nessuna
+          // scheda ma valgono per tutti quelli seduti li'.
+          var pezziAllerg = []
+          var perNome = allergeniPerNome(res, clientiTavolo)
+          if (perNome !== '') pezziAllerg.push(perNome)
           var allerge = tp.allergie_tavolo || []
-          var allergeLabel = allerge.length > 0 ? allerge.map(function(a) { return '<span class="badge">' + esc(a) + '</span>' }).join('') : '\u2014'
+          if (allerge.length > 0) {
+            pezziAllerg.push(allerge.map(function(a) { return '<span class="badge">' + esc(a) + '</span>' }).join(''))
+          }
+          // La spia della prenotazione si stampa solo se non e' gia' stata
+          // sostituita da allergeni veri: meglio un rimando che il nulla.
+          if (pezziAllerg.length === 0 && res.has_allergen_alerts) {
+            pezziAllerg.push('<span class="badge">\u26a0 vedi scheda cliente</span>')
+          }
+          var allergeLabel = pezziAllerg.length > 0 ? pezziAllerg.join('<br>') : '\u2014'
           html += '<tr><td><strong>' + esc(nomeTavolo) + '</strong></td><td>' + cliente + '</td>'
           html += '<td>' + (tp.n_ospiti_assegnati || res.guests_count) + '</td>'
           html += '<td>' + (tp.n_bambini_tavolo || 0) + '</td>'
@@ -752,9 +860,14 @@ function StampaMenu(props) {
           var tavRighe = perPrenotazione[res.id] || []
           var bambiniTotRes = 0
           tavRighe.forEach(function(r) { bambiniTotRes += r.n_bambini_tavolo || 0 })
-          var allergeClienti = res.has_allergen_alerts ? ['\u26a0 vedi scheda cliente'] : []
+          // Forma b: gli allergeni di tutti i clienti, uniti e senza dire
+          // di chi sono. In cucina conta cosa non deve uscire.
+          var allergeClienti = allergeniAggregati(res, clientiTavolo)
+          if (allergeClienti.length === 0 && res.has_allergen_alerts) {
+            allergeClienti = ['\u26a0 vedi scheda cliente']
+          }
           html += '<div class="card">'
-          html += '<div class="cliente">' + clientePerStampa(res) + '</div>'
+          html += '<div class="cliente">' + clientiPerStampa(res, clientiTavolo) + '</div>'
           html += '<div class="row">'
           html += '<span>\ud83d\udc65 ' + res.guests_count + ' ospiti (' + (res.adults_count || 0) + ' ad. + ' + (res.children_count || 0) + ' ba.)</span>'
           if (bambiniTotRes > 0) html += '<span class="badge-bam">\ud83c\udf7c ' + bambiniTotRes + ' bambini ai tavoli</span>'
@@ -764,7 +877,7 @@ function StampaMenu(props) {
             html += '<div class="avviso">\u26a0 Allergeni prenotazione: ' + esc(res.allergie_prenotazione) + '</div>'
           }
           if (allergeClienti.length > 0) {
-            html += '<div class="avviso">\u26a0 Allergeni cliente: ' + allergeClienti.map(function(a) { return '<span class="badge">' + a + '</span>' }).join('') + '</div>'
+            html += '<div class="avviso">\u26a0 Allergeni clienti: ' + allergeClienti.map(function(a) { return '<span class="badge">' + esc(a) + '</span>' }).join('') + '</div>'
           }
           if (res.notes) {
             html += '<div class="note">\ud83d\udcdd ' + esc(res.notes) + '</div>'
@@ -823,7 +936,7 @@ function StampaMenu(props) {
     html += '<table>'
     html += '<tr><th>Orario</th><th>Cliente</th><th>Ospiti</th><th>Stato</th><th>Allergeni</th><th>Note</th></tr>'
     ordinate.forEach(function(res) {
-      var cliente = clientePerStampa(res)
+      var cliente = clientiPerStampa(res, clientiTavolo)
       var cat = res.customers && res.customers.category !== 'standard' ? categoryLabels[res.customers.category] : ''
       var orario = res.requested_time ? res.requested_time.substring(0, 5) : '\u2014'
       var stato = statusLabels[res.status] || res.status
@@ -832,12 +945,15 @@ function StampaMenu(props) {
       if (res.children_count > 0) ospiti += ' + ' + res.children_count + ' ba.'
       ospiti += ')'
 
-      var allergeList = []
-      if (res.has_allergen_alerts) allergeList.push('\u26a0 cliente')
-      if (res.allergie_prenotazione) allergeList.push(res.allergie_prenotazione)
-      var allergeLabel = allergeList.length > 0
-        ? allergeList.map(function(a) { return '<span class="badge">' + esc(a) + '</span>' }).join('')
-        : '\u2014'
+      // Forma c: ogni nome con il proprio elenco.
+      var pezziAll = []
+      var perNomeP = allergeniPerNome(res, clientiTavolo)
+      if (perNomeP !== '') pezziAll.push(perNomeP)
+      if (res.allergie_prenotazione) pezziAll.push('<span class="badge">' + esc(res.allergie_prenotazione) + '</span>')
+      if (pezziAll.length === 0 && res.has_allergen_alerts) {
+        pezziAll.push('<span class="badge">\u26a0 vedi scheda cliente</span>')
+      }
+      var allergeLabel = pezziAll.length > 0 ? pezziAll.join('<br>') : '\u2014'
 
       var noteList = []
       if (res.notes) noteList.push(esc(res.notes))
@@ -927,6 +1043,9 @@ function ReservationDay() {
   var [eventoInModifica, setEventoInModifica] = useState(null)
   var [pannelloTavoli, setPannelloTavoli] = useState(null)
   var [tavoliAssegnati, setTavoliAssegnati] = useState({})
+  // Chi siede a ciascun tavolo: una copia sola, letta qui e passata a
+  // stampe e pannello tavoli (regola 31).
+  var [clientiTavolo, setClientiTavolo] = useState({})
   var [sale, setSale] = useState([])
   var [tipologieGift, setTipologieGift] = useState({})
   var [limiteEffettivo, setLimiteEffettivo] = useState(null)
@@ -1061,6 +1180,62 @@ function ReservationDay() {
       })
   }
 
+  // Chi siede a ciascun tavolo del giorno, con camera e allergeni.
+  //
+  // ⚠️ Due letture e non una: gli allergeni stanno su customer_allergens
+  // e su customers.allergie_cliente, che sono complementari e non
+  // doppioni (regola 34). Chi ne mostra uno solo mente.
+  //
+  // ⚠️ Nessun conteggio nasce qui. Questa lettura serve a stampare nomi,
+  // non a sommare coperti.
+  function caricaClientiTavolo(prenotazioni) {
+    var ids = []
+    for (var i = 0; i < prenotazioni.length; i++) { ids.push(prenotazioni[i].id) }
+    if (ids.length === 0) { setClientiTavolo({}); return }
+    supabase.from('prenotazione_clienti')
+      .select('prenotazione_id, cliente_id, camera, ordine, customers(id, first_name, last_name, allergie_cliente)')
+      .in('prenotazione_id', ids)
+      .order('ordine', { ascending: true })
+      .then(function(result) {
+        if (result.error || !result.data) { setClientiTavolo({}); return }
+        var mappa = {}
+        var clienteIds = []
+        for (var k = 0; k < result.data.length; k++) {
+          var r = result.data[k]
+          var c = r.customers
+          if (!mappa[r.prenotazione_id]) mappa[r.prenotazione_id] = []
+          mappa[r.prenotazione_id].push({
+            cliente_id: r.cliente_id,
+            nome: c ? (c.last_name + ' ' + c.first_name) : '\u2014',
+            camera: r.camera || '',
+            allergeni: [],
+            allergie_libere: c ? (c.allergie_cliente || '') : ''
+          })
+          if (clienteIds.indexOf(r.cliente_id) === -1) clienteIds.push(r.cliente_id)
+        }
+        if (clienteIds.length === 0) { setClientiTavolo(mappa); return }
+        supabase.from('customer_allergens')
+          .select('customer_id, severity, allergens(id, name, icon)')
+          .in('customer_id', clienteIds)
+          .then(function(ris) {
+            if (!ris.error && ris.data) {
+              for (var a = 0; a < ris.data.length; a++) {
+                var riga = ris.data[a]
+                for (var pid in mappa) {
+                  var elenco = mappa[pid]
+                  for (var e = 0; e < elenco.length; e++) {
+                    if (elenco[e].cliente_id === riga.customer_id) {
+                      elenco[e].allergeni = elenco[e].allergeni.concat([{ severity: riga.severity, allergens: riga.allergens }])
+                    }
+                  }
+                }
+              }
+            }
+            setClientiTavolo(mappa)
+          })
+      })
+  }
+
   function loadReservations() {
     setLoading(true)
     supabase.from('reservations')
@@ -1075,10 +1250,13 @@ function ReservationDay() {
             .eq('reservation_date', dateStr).eq('meal_type', selectedMeal)
             .order('requested_time', { ascending: true, nullsFirst: false })
             .then(function(fallback) {
-              setReservations(fallback.error ? [] : (fallback.data || []))
+              var righe = fallback.error ? [] : (fallback.data || [])
+              setReservations(righe)
+              caricaClientiTavolo(righe)
             })
         } else {
           setReservations(result.data || [])
+          caricaClientiTavolo(result.data || [])
         }
       })
       .then(function() {
@@ -1185,7 +1363,7 @@ function ReservationDay() {
           </div>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <StampaMenu dateStr={dateStr} turno={selectedMeal} reservations={activeReservations} sale={sale} eventi={eventi} />
+          <StampaMenu dateStr={dateStr} turno={selectedMeal} reservations={activeReservations} sale={sale} eventi={eventi} clientiTavolo={clientiTavolo} />
           <button onClick={function() { setEventoInModifica(null); setShowFormEvento(true) }}
             className="inline-flex items-center gap-2 bg-amber-500 text-white px-4 py-2.5 rounded-xl hover:bg-amber-600 transition-colors font-medium shadow-sm text-sm">
             <Calendar size={16} />
@@ -1298,6 +1476,9 @@ function ReservationDay() {
             var customer = res.customers || { first_name: 'Gift Card', last_name: res.gift_card ? res.gift_card.codice : '—', phone: null, email: null, category: 'standard' }
             var timeStr = res.requested_time ? res.requested_time.substring(0, 5) : null
             var tavoliInfo = tavoliAssegnati[res.id] || { nomi: [], hasAllergeni: false }
+            // Gli altri commensali con una scheda. Non sono coperti: il
+            // numero degli ospiti resta quello scritto nella prenotazione.
+            var altriNomi = nomiClienti(res, clientiTavolo).slice(1)
             var hasAnyAllergen = res.has_allergen_alerts || tavoliInfo.hasAllergeni || (res.allergie_prenotazione && res.allergie_prenotazione.trim().length > 0)
             return (
               <div key={res.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:border-wine-300 transition-all">
@@ -1305,6 +1486,9 @@ function ReservationDay() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <h3 className="font-semibold text-gray-900">{customer.last_name + ' ' + customer.first_name}</h3>
+                      {altriNomi.length > 0 && (
+                        <span className="text-sm text-gray-500">{'+ ' + altriNomi.join(', ')}</span>
+                      )}
                       {customer.category !== 'standard' && (
                         <span className={"px-2 py-0.5 rounded-full text-xs font-medium " + categoryColors[customer.category]}>{categoryLabels[customer.category]}</span>
                       )}
@@ -1404,7 +1588,7 @@ function ReservationDay() {
       )}
 
       {pannelloTavoli && (
-        <PannelloTavoli prenotazione={pannelloTavoli} dateStr={dateStr} turno={selectedMeal} onClose={handleChiudiPannelloTavoli} />
+        <PannelloTavoli prenotazione={pannelloTavoli} dateStr={dateStr} turno={selectedMeal} clientiTavolo={clientiTavolo} onClose={handleChiudiPannelloTavoli} />
       )}
 
       {showAvvisoModal && (

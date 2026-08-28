@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Save, Search, AlertTriangle, UserPlus, Check, Users, ChevronRight, Gift, Edit3, BedDouble } from 'lucide-react'
 import { supabase } from '../lib/supabase'
@@ -145,6 +145,43 @@ function ReservationForm() {
   var [ospitiGiorno, setOspitiGiorno] = useState([])
   var [loadingCamere, setLoadingCamere] = useState(false)
   var [erroreCamere, setErroreCamere] = useState(null)
+
+  // ----------------------------------------------------------
+  // PRENOTAZIONE A PIU' CLIENTI (migrazione 52)
+  //
+  // L'intestatario resta reservations.customer_id e risponde alla
+  // domanda "chi ha prenotato". La tabella prenotazione_clienti risponde
+  // a una domanda diversa: "chi siede a questo tavolo, e in che camera
+  // dorme". Sono due fatti, non due copie dello stesso fatto.
+  //
+  // ⚠️ I COPERTI NON SI DEDUCONO DA QUI. guests_count resta scritto a
+  // mano e continua a voler dire "quante persone siedono a tavola": a
+  // tavola siede anche chi non ha una scheda. Collegare tre clienti a una
+  // prenotazione da nove non cambia nessuno dei conteggi di capienza.
+  // ----------------------------------------------------------
+  var [clientiCollegati, setClientiCollegati] = useState([])
+  var [cameraIntestatario, setCameraIntestatario] = useState('')
+
+  // Specchio dell'intestatario: le richiamate del pannello Camere
+  // leggerebbero uno selectedCustomer vecchio, e il primo ospite della
+  // fila finirebbe per sovrascrivere se stesso.
+  var intestatarioRef = useRef(null)
+
+  // Fila del pannello Camere: gli ospiti spuntati che non hanno ancora
+  // una scheda si trascrivono UNO ALLA VOLTA, perche' creare una scheda
+  // vuole una persona davanti (una riga su cinque arriva senza cognome
+  // utilizzabile, e la comparazione puo' interrompere).
+  var filaRef = useRef([])
+  var filaTotaleRef = useRef(0)
+  var filaFattiRef = useRef(0)
+  var ospiteCorrenteRef = useRef(null)
+  var [filaInfo, setFilaInfo] = useState(null)
+  var [avvisoFila, setAvvisoFila] = useState(null)
+  var [selezioneCamere, setSelezioneCamere] = useState({})
+
+  // La lista clienti serve a due gesti diversi: scegliere l'intestatario
+  // (come sempre) oppure aggiungere un commensale gia' in archivio.
+  var [modoAggiunta, setModoAggiunta] = useState(false)
 
   var initialDate = searchParams.get('date') || formatDateISO(new Date())
   var initialMeal = searchParams.get('meal') || 'dinner'
@@ -361,8 +398,10 @@ function ReservationForm() {
           else if (mins >= 38 && mins < 53) closest = '45'
           setSelectedMinute(closest)
         }
+        intestatarioRef.current = res.customers
         setSelectedCustomer(res.customers)
         setShowSearch(false)
+        caricaLegamiClienti(res.id, res.customer_id)
         // In modifica la spunta "Ok direttore" parte SEMPRE vuota: e' una
         // decisione fresca a ogni salvataggio. Qui memorizzo solo i coperti
         // di partenza, che servono al log (da X a Y).
@@ -372,6 +411,44 @@ function ReservationForm() {
         setCopertiPrima(prima)
         loadCustomerAllergens(res.customers.id)
         setLoading(false)
+      })
+  }
+
+  // Legge chi siede a questo tavolo. La riga dell'intestatario porta solo
+  // la SUA camera; le altre diventano l'elenco dei collegati.
+  function caricaLegamiClienti(prenotazioneId, intestatarioId) {
+    supabase.from('prenotazione_clienti')
+      .select('cliente_id, camera, ordine, customers(id, first_name, last_name, phone, email, category, allergie_cliente)')
+      .eq('prenotazione_id', prenotazioneId)
+      .order('ordine', { ascending: true })
+      .then(function(result) {
+        if (result.error || !result.data) return
+        var righe = result.data
+        var collegati = []
+        for (var i = 0; i < righe.length; i++) {
+          var r = righe[i]
+          if (r.cliente_id === intestatarioId) {
+            setCameraIntestatario(r.camera || '')
+            continue
+          }
+          var c = r.customers
+          if (!c) continue
+          collegati.push({
+            cliente_id: r.cliente_id,
+            first_name: c.first_name,
+            last_name: c.last_name,
+            phone: c.phone || '',
+            email: c.email || '',
+            category: c.category || 'standard',
+            camera: r.camera || '',
+            allergeni: [],
+            allergie_libere: c.allergie_cliente || ''
+          })
+        }
+        setClientiCollegati(collegati)
+        for (var j = 0; j < collegati.length; j++) {
+          caricaAllergeniCollegato(collegati[j].cliente_id)
+        }
       })
   }
 
@@ -404,12 +481,124 @@ function ReservationForm() {
   }
 
   function selectCustomer(customer) {
+    intestatarioRef.current = customer
     setSelectedCustomer(customer)
     setShowSearch(false)
     setShowListaClienti(false)
     setSearchResults([])
     setCustomerSearch('')
     loadCustomerAllergens(customer.id)
+  }
+
+  // ----------------------------------------------------------
+  // CLIENTI COLLEGATI
+  // ----------------------------------------------------------
+
+  // Aggiunge un cliente all'elenco dei collegati, con la sua camera.
+  // Se e' gia' presente (o e' l'intestatario) non fa nulla: la stessa
+  // persona non si collega due volte, come il vincolo in banca dati.
+  function aggiungiCollegato(cliente, camera) {
+    var intest = intestatarioRef.current
+    if (intest && intest.id === cliente.id) {
+      if (camera) setCameraIntestatario(camera)
+      return
+    }
+    setClientiCollegati(function(prev) {
+      for (var i = 0; i < prev.length; i++) {
+        if (prev[i].cliente_id === cliente.id) {
+          if (camera && !prev[i].camera) {
+            var copia = prev.slice()
+            copia[i] = Object.assign({}, prev[i], { camera: camera })
+            return copia
+          }
+          return prev
+        }
+      }
+      return prev.concat([{
+        cliente_id: cliente.id,
+        first_name: cliente.first_name,
+        last_name: cliente.last_name,
+        phone: cliente.phone || '',
+        email: cliente.email || '',
+        category: cliente.category || 'standard',
+        camera: camera || '',
+        allergeni: [],
+        allergie_libere: (cliente.allergie_cliente || '')
+      }])
+    })
+    caricaAllergeniCollegato(cliente.id)
+  }
+
+  // Gli allergeni di un collegato servono a due cose: mostrarli nel
+  // riquadro rosso e far accendere has_allergen_alerts. Si leggono
+  // ENTRAMBI i livelli, strutturato e testo libero: sono complementari.
+  function caricaAllergeniCollegato(clienteId) {
+    supabase.from('customer_allergens')
+      .select('severity, allergens(id, name, icon)')
+      .eq('customer_id', clienteId)
+      .then(function(result) {
+        if (result.error) return
+        setClientiCollegati(function(prev) {
+          var copia = prev.slice()
+          for (var i = 0; i < copia.length; i++) {
+            if (copia[i].cliente_id === clienteId) {
+              copia[i] = Object.assign({}, copia[i], { allergeni: result.data || [] })
+            }
+          }
+          return copia
+        })
+      })
+    supabase.from('customers')
+      .select('allergie_cliente')
+      .eq('id', clienteId)
+      .single()
+      .then(function(result) {
+        if (result.error || !result.data) return
+        setClientiCollegati(function(prev) {
+          var copia = prev.slice()
+          for (var i = 0; i < copia.length; i++) {
+            if (copia[i].cliente_id === clienteId) {
+              copia[i] = Object.assign({}, copia[i], { allergie_libere: result.data.allergie_cliente || '' })
+            }
+          }
+          return copia
+        })
+      })
+  }
+
+  function togliCollegato(clienteId) {
+    setClientiCollegati(function(prev) {
+      var out = []
+      for (var i = 0; i < prev.length; i++) {
+        if (prev[i].cliente_id !== clienteId) out.push(prev[i])
+      }
+      return out
+    })
+  }
+
+  // Un cliente arriva dal pannello Camere: se non c'e' ancora un
+  // intestatario diventa lui, altrimenti si aggiunge ai collegati.
+  function assegnaClienteDaCamere(cliente, camera) {
+    if (!intestatarioRef.current) {
+      if (camera) setCameraIntestatario(camera)
+      selectCustomer(cliente)
+      return
+    }
+    aggiungiCollegato(cliente, camera)
+  }
+
+  // Almeno uno fra intestatario e collegati ha un allergene registrato?
+  // ⚠️ Prima della migrazione 52 questo controllo guardava SOLO il
+  // cliente selezionato: con tre clienti collegati, un allergene del
+  // secondo non avrebbe acceso la spia in sala.
+  function qualcunoHaAllergeni() {
+    if (customerAllergens.length > 0) return true
+    if (allergieLibereCliente && allergieLibereCliente.trim() !== '') return true
+    for (var i = 0; i < clientiCollegati.length; i++) {
+      if (clientiCollegati[i].allergeni && clientiCollegati[i].allergeni.length > 0) return true
+      if (clientiCollegati[i].allergie_libere && clientiCollegati[i].allergie_libere.trim() !== '') return true
+    }
+    return false
   }
 
   // Carica ENTRAMBI i livelli di allergeni: quelli strutturati e il testo
@@ -661,17 +850,41 @@ function ReservationForm() {
         }
         salvaConsensoSalute(supabase, cliente.id, quickConsensoSalute).then(function() {
           scriviLegameHic(cliente.id).then(function() {
-            setQuickLoading(false)
-            selectCustomer(cliente)
-            setShowQuickCustomer(false)
-            setShowComparazione(false)
-            setCandidati([])
-            setHicIdInAttesa(null)
-            setListaClienti([])
+            dopoClienteAssegnato(cliente)
           })
         })
       })
     })
+  }
+
+  // Unico punto di uscita dalla modale cliente, sia che la scheda sia
+  // appena nata sia che si sia scelta una scheda gia' in archivio.
+  //
+  // ⚠️ Fuori dal pannello Camere il comportamento e' quello di sempre:
+  // il cliente diventa (o torna a essere) l'intestatario. La strada
+  // nuova vale SOLO quando si sta scorrendo la fila delle camere.
+  function dopoClienteAssegnato(cliente) {
+    var o = ospiteCorrenteRef.current
+    setQuickLoading(false)
+    setShowComparazione(false)
+    setCandidati([])
+    setHicIdInAttesa(null)
+    setListaClienti([])
+
+    if (!o) {
+      selectCustomer(cliente)
+      setShowQuickCustomer(false)
+      return
+    }
+
+    assegnaClienteDaCamere(cliente, o.unita || '')
+    ospiteCorrenteRef.current = null
+
+    if (filaRef.current.length > 0) { avanzaFila(); return }
+    setFilaInfo(null)
+    setShowQuickCustomer(false)
+    filaTotaleRef.current = 0
+    filaFattiRef.current = 0
   }
 
   // Costruisce il ponte fra l'ospite di Hotel in Cloud e la scheda del
@@ -715,13 +928,7 @@ function ReservationForm() {
     // legata, il ponte si costruisce adesso: e' proprio questo il gesto
     // che collega l'ospite dell'albergo al cliente del ristorante.
     scriviLegameHic(candidato.customer_id).then(function() {
-      setQuickLoading(false)
-      setShowComparazione(false)
-      setCandidati([])
-      setHicIdInAttesa(null)
-      setShowQuickCustomer(false)
-      setListaClienti([])
-      selectCustomer({
+      dopoClienteAssegnato({
         id: candidato.customer_id,
         first_name: candidato.first_name,
         last_name: candidato.last_name,
@@ -757,6 +964,8 @@ function ReservationForm() {
   function apriCamere() {
     setShowCamere(true)
     setErroreCamere(null)
+    setSelezioneCamere({})
+    setAvvisoFila(null)
     setLoadingCamere(true)
     supabase.rpc('hic_ospiti_giorno', { p_giorno: formData.reservation_date })
       .then(function(result) {
@@ -770,20 +979,124 @@ function ReservationForm() {
       })
   }
 
+  function nomeOspite(o) {
+    var n = [o.cognome_proposto, o.nome_proposto].filter(Boolean).join(' ')
+    if (n !== '') return n
+    return o.ospite || 'Nome non disponibile'
+  }
+
+  // Spunta o toglie la spunta a un ospite. Non fa niente altro: la
+  // decisione si vede prima di uscire, e si conferma tutta insieme.
+  function toggleOspite(chiave, o) {
+    setSelezioneCamere(function(prev) {
+      var u = {}
+      for (var k in prev) { if (k !== chiave) u[k] = prev[k] }
+      if (!prev[chiave]) u[chiave] = o
+      return u
+    })
+  }
+
+  // Conferma della selezione. Chi ha gia' una scheda si collega subito;
+  // per gli altri si apre la fila di trascrizione, una scheda alla volta.
+  function confermaCamere() {
+    var scelti = []
+    for (var k in selezioneCamere) { scelti.push(selezioneCamere[k]) }
+    setShowCamere(false)
+    setAvvisoFila(null)
+    if (scelti.length === 0) return
+
+    // ⚠️ La camera si scrive SUBITO nel riepilogo della prenotazione,
+    // prima ancora che le schede cliente esistano. E' un dato della
+    // PRENOTAZIONE: la persona stasera dorme in Aorivola, fra un mese in
+    // un'altra camera o da nessuna parte. Se aspettassimo il salvataggio
+    // del cliente, un annullamento a meta' strada la farebbe sparire.
+    for (var i = 0; i < scelti.length; i++) { impostaCamera(scelti[i].unita) }
+
+    var conScheda = []
+    var senzaScheda = []
+    for (var j = 0; j < scelti.length; j++) {
+      if (scelti[j].cliente_id) { conScheda.push(scelti[j]) } else { senzaScheda.push(scelti[j]) }
+    }
+
+    collegaConScheda(conScheda, 0, function() {
+      if (senzaScheda.length === 0) return
+      avviaFila(senzaScheda)
+    })
+  }
+
+  // Gli ospiti che hanno gia' una scheda si collegano uno dopo l'altro,
+  // in sequenza e non in parallelo: il primo che arriva puo' diventare
+  // l'intestatario, e l'ordine deve essere quello dell'elenco.
+  function collegaConScheda(elenco, indice, poi) {
+    if (indice >= elenco.length) { poi(); return }
+    var o = elenco[indice]
+    supabase.from('customers')
+      .select('id, first_name, last_name, phone, email, category, allergie_cliente')
+      .eq('id', o.cliente_id)
+      .single()
+      .then(function(result) {
+        if (result.error || !result.data) {
+          console.error('Scheda collegata non trovata:', o.cliente_id)
+        } else {
+          assegnaClienteDaCamere(result.data, o.unita || '')
+        }
+        collegaConScheda(elenco, indice + 1, poi)
+      })
+  }
+
+  function avviaFila(elenco) {
+    filaRef.current = elenco.slice()
+    filaTotaleRef.current = elenco.length
+    filaFattiRef.current = 0
+    avanzaFila()
+  }
+
+  // Prende il prossimo ospite della fila e apre la creazione scheda.
+  // Quando la fila e' finita chiude tutto.
+  function avanzaFila() {
+    if (filaRef.current.length === 0) {
+      ospiteCorrenteRef.current = null
+      setFilaInfo(null)
+      setShowQuickCustomer(false)
+      return
+    }
+    var o = filaRef.current.shift()
+    filaFattiRef.current = filaFattiRef.current + 1
+    ospiteCorrenteRef.current = o
+    setFilaInfo({
+      indice: filaFattiRef.current,
+      totale: filaTotaleRef.current,
+      nome: nomeOspite(o),
+      camera: o.unita || ''
+    })
+    apriCreazioneOspite(o)
+  }
+
+  // Interruzione della fila: quello che e' gia' stato creato RESTA
+  // collegato. Non si torna indietro cancellando schede appena nate: in
+  // questo programma le cancellazioni silenziose non esistono.
+  function interrompiFila() {
+    var mancanti = filaRef.current.length
+    var fatti = filaFattiRef.current > 0 ? filaFattiRef.current - 1 : 0
+    filaRef.current = []
+    ospiteCorrenteRef.current = null
+    setFilaInfo(null)
+    setShowQuickCustomer(false)
+    if (mancanti > 0 || filaTotaleRef.current > 0) {
+      setAvvisoFila('Trascrizione interrotta: ' + fatti + ' schede su ' + filaTotaleRef.current +
+        ' create. Riapri Camere per le altre.')
+    }
+    filaTotaleRef.current = 0
+    filaFattiRef.current = 0
+  }
+
   // Da un ospite dell'albergo a una scheda del ristorante.
   //
   // ⚠️ Non crea niente da sola: apre il pannello con i campi gia'
   // riempiti, che restano modificabili. Una riga su cinque arriva senza
   // cognome utilizzabile, e quel campo vuoto deve vederlo una persona
   // prima che la scheda nasca storpia.
-  function promuoviOspite(o) {
-    setShowCamere(false)
-    // ⚠️ La camera si scrive SUBITO, prima ancora che la scheda cliente
-    // esista. E' un dato della PRENOTAZIONE, non del cliente: la persona
-    // stasera dorme in Aorivola, fra un mese in un'altra camera o da
-    // nessuna parte. Se aspettassimo il salvataggio del cliente, un
-    // annullamento a meta' strada la farebbe sparire.
-    impostaCamera(o.unita)
+  function apriCreazioneOspite(o) {
     setQuickMode('crea')
     setQuickCustomerId(null)
     setHicIdInAttesa(o.hic_customer_id || null)
@@ -828,26 +1141,6 @@ function ReservationForm() {
     })
   }
 
-  // Ospite gia' collegato a una scheda: si seleziona e basta.
-  function selezionaOspiteCollegato(o) {
-    setShowCamere(false)
-    // Anche qui la camera va portata: che la scheda esistesse gia' non
-    // cambia il fatto che stasera quella persona dorme in quella camera.
-    impostaCamera(o.unita)
-    supabase.from('customers')
-      .select('id, first_name, last_name, phone, email, category')
-      .eq('id', o.cliente_id)
-      .single()
-      .then(function(result) {
-        if (result.error || !result.data) {
-          setErroreCamere('Scheda collegata non trovata.')
-          setShowCamere(true)
-          return
-        }
-        selectCustomer(result.data)
-      })
-  }
-
   function isSharedDevice() {
     try {
       return localStorage.getItem('icg_shared_device') === '1'
@@ -859,7 +1152,10 @@ function ReservationForm() {
   function buildReservationData() {
     var requestedTime = null
     if (selectedHour !== '') requestedTime = pad(parseInt(selectedHour)) + ':' + selectedMinute + ':00'
-    var haAllergeni = Boolean(customerAllergens.length > 0 || hasAllergiePrenotazione)
+    // ⚠️ Guarda TUTTI i clienti della prenotazione, non solo
+    // l'intestatario: con tre collegati, l'allergene del secondo deve
+    // accendere la spia in sala come quello del primo.
+    var haAllergeni = Boolean(qualcunoHaAllergeni() || hasAllergiePrenotazione)
     return {
       customer_id: selectedCustomer.id,
       gift_card_id: giftCard ? giftCard.id : (giftCardIdEsistente || null),
@@ -975,11 +1271,66 @@ function ReservationForm() {
     promise.then(function(result) {
       if (result.error) { setSaving(false); alert('Errore nel salvataggio. Riprova.'); return }
       var savedId = (result.data && result.data.id) ? result.data.id : id
-      scriviLog(savedId, firma).then(function() {
-        setSaving(false)
-        navigate('/prenotazioni/giorno/' + formData.reservation_date)
+      salvaLegamiClienti(savedId, firma).then(function() {
+        scriviLog(savedId, firma).then(function() {
+          setSaving(false)
+          navigate('/prenotazioni/giorno/' + formData.reservation_date)
+        })
       })
     })
+  }
+
+  // Scrive chi siede a questo tavolo. L'intestatario e' sempre la riga
+  // con ordine 0: e' la stessa persona di reservations.customer_id, ma
+  // qui ci sta per portarsi dietro la SUA camera e il suo posto in
+  // stampa, non per ripetere il fatto di essere l'intestatario.
+  //
+  // ⚠️ Prima si scrivono le righe nuove, poi si tolgono quelle rimaste
+  // indietro. Nell'ordine inverso, un errore a meta' strada lascerebbe la
+  // prenotazione senza nessun cliente collegato.
+  function salvaLegamiClienti(prenotazioneId, firma) {
+    if (!prenotazioneId || !selectedCustomer) return Promise.resolve()
+
+    var righe = [{
+      prenotazione_id: prenotazioneId,
+      cliente_id: selectedCustomer.id,
+      camera: (cameraIntestatario || '').trim() || null,
+      ordine: 0,
+      creata_da: firma.user_id,
+      creata_da_nome: firma.nome || null
+    }]
+    var ids = ['"' + selectedCustomer.id + '"']
+    for (var i = 0; i < clientiCollegati.length; i++) {
+      var cc = clientiCollegati[i]
+      righe.push({
+        prenotazione_id: prenotazioneId,
+        cliente_id: cc.cliente_id,
+        camera: (cc.camera || '').trim() || null,
+        ordine: i + 1,
+        creata_da: firma.user_id,
+        creata_da_nome: firma.nome || null
+      })
+      ids.push('"' + cc.cliente_id + '"')
+    }
+
+    return supabase.from('prenotazione_clienti')
+      .upsert(righe, { onConflict: 'prenotazione_id,cliente_id' })
+      .then(function(esito) {
+        if (esito.error) {
+          // La prenotazione e' salvata: il legame mancante non deve far
+          // sembrare fallita l'operazione, ma non si nasconde nemmeno.
+          console.error('Clienti collegati non scritti:', esito.error)
+          alert('Prenotazione salvata, ma i clienti collegati no: ' + esito.error.message)
+          return
+        }
+        return supabase.from('prenotazione_clienti')
+          .delete()
+          .eq('prenotazione_id', prenotazioneId)
+          .not('cliente_id', 'in', '(' + ids.join(',') + ')')
+          .then(function(pulizia) {
+            if (pulizia.error) console.error('Legami vecchi non rimossi:', pulizia.error)
+          })
+      })
   }
 
   function handleSubmit(e) {
@@ -1020,6 +1371,22 @@ function ReservationForm() {
   })
 
   var mealLabel = formData.meal_type === 'lunch' ? 'Pranzo' : 'Cena'
+
+  // Quanti ospiti sono spuntati nel pannello Camere, e quanti di questi
+  // dovranno passare dalla creazione scheda.
+  var nSelezionatiCamere = 0
+  var nDaCreareCamere = 0
+  for (var kSel in selezioneCamere) {
+    nSelezionatiCamere = nSelezionatiCamere + 1
+    if (!selezioneCamere[kSel].cliente_id) nDaCreareCamere = nDaCreareCamere + 1
+  }
+
+  // ⚠️ AVVISO, NON BLOCCO, e in una direzione sola.
+  // Nove persone a tavola e tre schede riconosciute e' la normalita': chi
+  // non ha una scheda siede lo stesso. L'unica situazione impossibile e'
+  // l'opposto: piu' schede collegate che coperti dichiarati.
+  var nClientiCollegatiTotali = (selectedCustomer ? 1 : 0) + clientiCollegati.length
+  var avvisoCoperti = nClientiCollegatiTotali > totalGuests
 
   // --- Calcolo stato alert della fascia ---
   var limite = (availability && typeof availability.max_covers === 'number') ? availability.max_covers : null
@@ -1104,7 +1471,11 @@ function ReservationForm() {
                   </div>
                   <div>
                     <p className="font-semibold text-gray-900">{selectedCustomer.first_name} {selectedCustomer.last_name}</p>
-                    <p className="text-sm text-gray-500">{selectedCustomer.phone || selectedCustomer.email || 'Nessun contatto'}</p>
+                    <p className="text-sm text-gray-500">
+                      {cameraIntestatario
+                        ? ('Camera ' + cameraIntestatario)
+                        : (selectedCustomer.phone || selectedCustomer.email || 'Nessun contatto')}
+                    </p>
                     {selectedCustomer.category && selectedCustomer.category !== 'standard' && (
                       <span className={"px-2 py-0.5 rounded-full text-xs font-medium mt-0.5 inline-block " + categoryColors[selectedCustomer.category]}>
                         {categoryLabels[selectedCustomer.category]}
@@ -1122,7 +1493,7 @@ function ReservationForm() {
                   </button>
                   {!isEditing && (
                     <button type="button"
-                      onClick={function() { setShowSearch(true); setSelectedCustomer(null); setCustomerAllergens([]); setAllergieLibereCliente('') }}
+                      onClick={function() { setShowSearch(true); intestatarioRef.current = null; setSelectedCustomer(null); setCustomerAllergens([]); setAllergieLibereCliente(''); setCameraIntestatario('') }}
                       className="text-sm text-wine-600 hover:text-wine-800 font-medium">
                       Cambia
                     </button>
@@ -1150,6 +1521,87 @@ function ReservationForm() {
                   )}
                 </div>
               )}
+
+              {/* Clienti collegati: chi altro siede a questo tavolo.
+                  ⚠️ Non sono coperti. Il numero degli ospiti resta quello
+                  scritto a mano nei Dettagli. */}
+              {clientiCollegati.length > 0 && (
+                <div className="mt-4">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                    Altri clienti a questo tavolo ({clientiCollegati.length})
+                  </p>
+                  <div className="space-y-2">
+                    {clientiCollegati.map(function(cc) {
+                      return (
+                        <div key={cc.cliente_id} className="p-3 bg-gray-50 rounded-lg border border-gray-200">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div className="w-9 h-9 rounded-full bg-wine-100 text-wine-700 flex items-center justify-center font-bold text-xs flex-shrink-0">
+                                {cc.first_name[0]}{cc.last_name[0]}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="font-medium text-gray-900 truncate">
+                                  {cc.first_name} {cc.last_name}
+                                </p>
+                                <p className="text-xs text-gray-500 truncate">
+                                  {cc.camera ? ('Camera ' + cc.camera) : (cc.phone || cc.email || 'Nessun contatto')}
+                                </p>
+                              </div>
+                            </div>
+                            <button type="button" onClick={function() { togliCollegato(cc.cliente_id) }}
+                              className="text-sm text-gray-500 hover:text-red-600 font-medium flex-shrink-0">
+                              Togli
+                            </button>
+                          </div>
+                          {(cc.allergeni.length > 0 || (cc.allergie_libere && cc.allergie_libere.trim() !== '')) && (
+                            <div className="mt-2 pt-2 border-t border-gray-200">
+                              <div className="flex items-center gap-1 mb-1">
+                                <AlertTriangle size={13} className="text-red-600" />
+                                <span className="text-xs font-medium text-red-800">Allergeni</span>
+                              </div>
+                              {cc.allergeni.length > 0 && (
+                                <div className="flex flex-wrap gap-1">
+                                  {cc.allergeni.map(function(ca, idx) {
+                                    return (
+                                      <span key={idx} className="text-xs bg-red-100 text-red-700 px-2 py-0.5 rounded">
+                                        {ca.allergens.icon} {ca.allergens.name} ({severitaLabel(ca.severity)})
+                                      </span>
+                                    )
+                                  })}
+                                </div>
+                              )}
+                              {cc.allergie_libere && cc.allergie_libere.trim() !== '' && (
+                                <p className="text-xs text-red-800 whitespace-pre-wrap mt-1">{cc.allergie_libere}</p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {avvisoFila && (
+                <div className="mt-3 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+                  {avvisoFila}
+                </div>
+              )}
+
+              {/* Da qui si aggiungono gli altri commensali: dal pannello
+                  Camere (chi dorme in casa) o dall anagrafica. */}
+              <div className="flex gap-2 flex-wrap mt-4">
+                <button type="button" onClick={apriCamere}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 font-medium">
+                  <BedDouble size={16} />
+                  Camere
+                </button>
+                <button type="button" onClick={function() { setModoAggiunta(true); apriListaClienti() }}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50 font-medium">
+                  <UserPlus size={16} />
+                  Aggiungi cliente
+                </button>
+              </div>
             </div>
           ) : (
             <div>
@@ -1301,6 +1753,21 @@ function ReservationForm() {
                 <div className="px-4 py-3 bg-wine-100 text-wine-800 rounded-lg font-bold text-lg">{totalGuests}</div>
               </div>
             </div>
+
+            {/* ⚠️ Avviso, non blocco. Piu' schede collegate che coperti
+                dichiarati e' l'unica combinazione impossibile: chi non ha
+                una scheda a tavola ci sta lo stesso, il contrario no. */}
+            {avvisoCoperti && (
+              <div className="mt-3 p-3 bg-amber-50 border border-amber-300 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle size={16} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                  <p className="text-sm text-amber-900">
+                    {'Hai collegato ' + nClientiCollegatiTotali + ' clienti ma gli ospiti dichiarati sono ' +
+                      totalGuests + '. Controlla il numero: i coperti restano quelli scritti qui.'}
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Alert fascia / disponibilita */}
@@ -1462,8 +1929,10 @@ function ReservationForm() {
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4">
           <div className="bg-white rounded-t-2xl sm:rounded-2xl w-full sm:max-w-lg shadow-2xl flex flex-col max-h-screen sm:max-h-[85vh]">
             <div className="flex items-center justify-between px-5 py-4 border-b border-gray-200 flex-shrink-0">
-              <h2 className="text-lg font-semibold text-gray-900">Seleziona cliente</h2>
-              <button type="button" onClick={function() { setShowListaClienti(false) }}
+              <h2 className="text-lg font-semibold text-gray-900">
+                {modoAggiunta ? 'Aggiungi un cliente' : 'Seleziona cliente'}
+              </h2>
+              <button type="button" onClick={function() { setShowListaClienti(false); setModoAggiunta(false) }}
                 className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
             </div>
             <div className="px-4 py-3 border-b border-gray-100 flex-shrink-0">
@@ -1484,7 +1953,15 @@ function ReservationForm() {
                 clientiFiltrati.map(function(customer) {
                   return (
                     <div key={customer.id} className="flex items-stretch border-b border-gray-100 last:border-0">
-                      <button type="button" onClick={function() { selectCustomer(customer) }}
+                      <button type="button" onClick={function() {
+                          if (modoAggiunta) {
+                            aggiungiCollegato(customer, '')
+                            setShowListaClienti(false)
+                            setModoAggiunta(false)
+                            return
+                          }
+                          selectCustomer(customer)
+                        }}
                         className="flex-1 min-w-0 text-left px-5 py-3.5 hover:bg-gray-50 flex items-center gap-3">
                         <div className="w-9 h-9 rounded-full bg-wine-100 text-wine-700 flex items-center justify-center text-sm font-bold flex-shrink-0">
                           {customer.first_name[0]}{customer.last_name[0]}
@@ -1530,15 +2007,22 @@ function ReservationForm() {
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">
-                  {quickMode === 'modifica' ? 'Modifica cliente' : 'Nuovo cliente'}
+                  {filaInfo
+                    ? ('Scheda ' + filaInfo.indice + ' di ' + filaInfo.totale)
+                    : (quickMode === 'modifica' ? 'Modifica cliente' : 'Nuovo cliente')}
                 </h2>
                 <p className="text-xs text-gray-400 mt-0.5">
-                  {quickMode === 'modifica'
-                    ? 'Le correzioni valgono per tutta l anagrafica, non solo per questa prenotazione'
-                    : 'Il cliente verra creato e selezionato automaticamente'}
+                  {filaInfo
+                    ? (filaInfo.nome + (filaInfo.camera ? ' - camera ' + filaInfo.camera : ''))
+                    : (quickMode === 'modifica'
+                      ? 'Le correzioni valgono per tutta l anagrafica, non solo per questa prenotazione'
+                      : 'Il cliente verra creato e selezionato automaticamente')}
                 </p>
               </div>
-              <button type="button" onClick={function() { setShowQuickCustomer(false); setGiftClienteNuovo(false) }}
+              <button type="button" onClick={function() {
+                  if (filaInfo) { interrompiFila(); setGiftClienteNuovo(false); return }
+                  setShowQuickCustomer(false); setGiftClienteNuovo(false)
+                }}
                 className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
             </div>
             <form onSubmit={handleQuickCustomerSubmit} className="p-6 space-y-4">
@@ -1610,7 +2094,10 @@ function ReservationForm() {
               </div>
               <p className="text-xs text-gray-400">Indirizzo, marketing e altri consensi si gestiscono da Anagrafica Clienti.</p>
               <div className="flex gap-3 pt-1">
-                <button type="button" onClick={function() { setShowQuickCustomer(false) }}
+                <button type="button" onClick={function() {
+                    if (filaInfo) { interrompiFila(); return }
+                    setShowQuickCustomer(false)
+                  }}
                   className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">Annulla</button>
                 <button type="submit" disabled={quickLoading}
                   className="flex-1 bg-wine-700 hover:bg-wine-800 disabled:bg-wine-300 text-white px-4 py-2 rounded-lg text-sm font-medium">
@@ -1667,32 +2154,39 @@ function ReservationForm() {
                       </div>
                       {righe.map(function(o) {
                         var collegato = Boolean(o.cliente_id)
-                        var nome = [o.cognome_proposto, o.nome_proposto].filter(Boolean).join(' ')
+                        var chiave = g.chiave + '-' + o.reservation_id
+                        var spuntato = Boolean(selezioneCamere[chiave])
                         return (
                           <button
-                            key={g.chiave + '-' + o.reservation_id}
+                            key={chiave}
                             type="button"
-                            onClick={function() {
-                              if (collegato) { selezionaOspiteCollegato(o) } else { promuoviOspite(o) }
-                            }}
-                            className="w-full text-left px-5 py-3.5 border-b border-gray-100 last:border-0 hover:bg-gray-50 flex items-center gap-3"
+                            onClick={function() { toggleOspite(chiave, o) }}
+                            className={
+                              "w-full text-left px-5 py-3.5 border-b border-gray-100 last:border-0 flex items-center gap-3 " +
+                              (spuntato ? "bg-wine-50" : "hover:bg-gray-50")
+                            }
                           >
+                            <div className={
+                              "w-6 h-6 rounded border flex items-center justify-center flex-shrink-0 " +
+                              (spuntato ? "bg-wine-700 border-wine-700" : "bg-white border-gray-300")
+                            }>
+                              {spuntato && <Check size={14} className="text-white" />}
+                            </div>
                             <div className="w-14 flex-shrink-0">
                               <span className="inline-block px-2 py-1 rounded bg-gray-100 text-gray-700 text-xs font-medium">
-                                {o.unita || '—'}
+                                {o.unita || '-'}
                               </span>
                             </div>
                             <div className="flex-1 min-w-0">
                               <p className="font-medium text-gray-900 truncate">
-                                {nome !== '' ? nome : (o.ospite || 'Nome non disponibile')}
+                                {nomeOspite(o)}
                               </p>
                               <p className="text-xs text-gray-500 truncate">
                                 {collegato
                                   ? 'Gia collegato a ' + (o.cliente_nome || 'una scheda')
-                                  : (o.n_ospiti ? o.n_ospiti + ' ospiti in camera' : 'Crea la scheda cliente')}
+                                  : (o.n_ospiti ? o.n_ospiti + ' ospiti in camera' : 'Serve creare la scheda cliente')}
                               </p>
                             </div>
-                            <ChevronRight size={16} className="text-gray-300 flex-shrink-0" />
                           </button>
                         )
                       })}
@@ -1702,11 +2196,28 @@ function ReservationForm() {
               )}
             </div>
 
-            <div className="p-4 border-t border-gray-100 flex-shrink-0">
+            <div className="p-4 border-t border-gray-100 flex-shrink-0 space-y-3">
               <p className="text-xs text-gray-400 text-center">
                 Chi arriva e chi resta dorme la notte di questa data. Chi lascia la camera
                 ha dormito la notte precedente.
               </p>
+              {nSelezionatiCamere > 0 && nDaCreareCamere > 0 && (
+                <p className="text-xs text-gray-500 text-center">
+                  {nDaCreareCamere === 1
+                    ? 'Una delle persone spuntate non ha una scheda: te la faccio compilare dopo la conferma.'
+                    : ('Di queste, ' + nDaCreareCamere + ' non hanno una scheda: te le faccio compilare una alla volta dopo la conferma.')}
+                </p>
+              )}
+              <div className="flex gap-3">
+                <button type="button" onClick={function() { setShowCamere(false) }}
+                  className="flex-1 px-4 py-2.5 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">
+                  Annulla
+                </button>
+                <button type="button" onClick={confermaCamere} disabled={nSelezionatiCamere === 0}
+                  className="flex-1 bg-wine-700 hover:bg-wine-800 disabled:bg-gray-200 disabled:text-gray-400 text-white px-4 py-2.5 rounded-lg text-sm font-medium">
+                  {nSelezionatiCamere === 0 ? 'Conferma' : ('Conferma (' + nSelezionatiCamere + ')')}
+                </button>
+              </div>
             </div>
 
           </div>
