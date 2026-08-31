@@ -61,19 +61,72 @@ function clientiDellaPrenotazione(res, clientiTavolo) {
 // Nomi per le stampe, con la camera di ciascuno quando c'e'. La camera si
 // stampa perche' e' il dato che serve in servizio: sapere che quel tavolo
 // sono gli ospiti di Aorivola cambia come li si tratta.
+//
+// In coda vengono aggiunte le camere del RIEPILOGO della prenotazione che
+// nessun nome si e' preso: sono le camere scritte a mano per ospiti che
+// una scheda non ce l'hanno. Fino alla prova del 31 agosto sparivano da
+// tutte e tre le stampe appena i nomi erano piu' di uno, perche' il
+// riepilogo si legge solo quando il nome e' uno solo.
+//
+// La regola della 0.4 v55 NON cambia: se una camera sta sia sulla riga di
+// una persona sia nel riepilogo, vince quella per persona e si stampa una
+// volta sola. Qui si stampa soltanto quello che avanza.
 function clientiPerStampa(res, clientiTavolo) {
   var elenco = clientiDellaPrenotazione(res, clientiTavolo)
   var pezzi = []
+  var stampate = {}
   for (var i = 0; i < elenco.length; i++) {
     var camera = elenco[i].camera
     // Le prenotazioni nate prima della 52 hanno la camera nel riepilogo
     // della prenotazione, non sulla riga della persona.
     if (!camera && elenco.length === 1) camera = res.camera || ''
     var t = esc(elenco[i].nome)
-    if (camera) t += ' <span class="camera">\u00b7 ' + esc(camera) + '</span>'
+    if (camera) {
+      t += ' <span class="camera">\u00b7 ' + esc(camera) + '</span>'
+      var suoi = camera.split(',')
+      for (var k = 0; k < suoi.length; k++) {
+        var chiave = suoi[k].trim().toLowerCase()
+        if (chiave !== '') stampate[chiave] = true
+      }
+    }
     pezzi.push(t)
   }
-  return pezzi.join('<br>')
+  var html = pezzi.join('<br>')
+  var avanzo = camereAvanzate(res, stampate)
+  if (avanzo !== '') {
+    // Il <br> davanti non e' cosmetico: la stampa Riepilogo aggancia
+    // l'etichetta di categoria al PRIMO pezzo separato da <br>, e senza
+    // questo l'avanzo finirebbe dentro quel pezzo quando il nome e' uno
+    // solo, rimandando l'etichetta in fondo. E' il difetto della prova B,
+    // che non deve poter rientrare da questa porta.
+    html += '<br><span class="camera-avanzo">Altre camere: ' + esc(avanzo) + '</span>'
+  }
+  return html
+}
+
+// Le camere del riepilogo della prenotazione che nessun nome si e' gia'
+// preso, nell'ordine in cui sono scritte.
+//
+// Corrispondenza esatta su un pezzo intero, mai una ricerca dentro il
+// testo: e' la stessa disciplina di togliCamera() in ReservationForm, e
+// per la stessa ragione. Un nome di camera che e' anche una parola comune
+// non deve poter sparire perche' compare dentro un'altra parola.
+function camereAvanzate(res, stampate) {
+  var riepilogo = (res.camera || '').trim()
+  if (riepilogo === '') return ''
+  var pezzi = riepilogo.split(',')
+  var restano = []
+  var visti = {}
+  for (var i = 0; i < pezzi.length; i++) {
+    var pezzo = pezzi[i].trim()
+    if (pezzo === '') continue
+    var chiave = pezzo.toLowerCase()
+    if (stampate[chiave]) continue
+    if (visti[chiave]) continue
+    visti[chiave] = true
+    restano.push(pezzo)
+  }
+  return restano.join(', ')
 }
 
 function etichettaAllergene(a, severita) {
@@ -666,7 +719,7 @@ function StampaMenu(props) {
     return function() { document.removeEventListener('mousedown', handleClick) }
   }, [])
 
-  var stileBase = '<style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px;} h1{font-size:16px;margin-bottom:4px;} .sub{color:#666;font-size:11px;margin-bottom:16px;} table{width:100%;border-collapse:collapse;margin-bottom:16px;} th{background:#7a1b2e;color:white;padding:6px 8px;text-align:left;font-size:11px;} td{padding:6px 8px;border-bottom:1px solid #eee;vertical-align:top;} .section-title{font-weight:bold;font-size:13px;color:#7a1b2e;margin:18px 0 6px;border-bottom:2px solid #7a1b2e;padding-bottom:3px;} .badge{display:inline-block;background:#fee2e2;color:#991b1b;border-radius:4px;padding:1px 5px;font-size:10px;margin-right:3px;} .badge-bam{display:inline-block;background:#fef9c3;color:#854d0e;border-radius:4px;padding:1px 5px;font-size:10px;} .badge-stato{display:inline-block;border-radius:4px;padding:1px 6px;font-size:10px;margin-right:3px;} .note{color:#666;font-style:italic;font-size:11px;} .avviso{background:#fff7ed;border:1px solid #fed7aa;border-radius:4px;padding:4px 8px;font-size:11px;color:#9a3412;margin-top:3px;} .card{border:1px solid #ddd;border-radius:6px;padding:10px 14px;margin-bottom:10px;page-break-inside:avoid;} .cliente{font-weight:bold;font-size:13px;} .camera{font-weight:normal;color:#7a1b2e;font-size:11px;} .row{display:flex;gap:16px;margin-top:4px;flex-wrap:wrap;align-items:center;} .riepilogo{border:2px solid #7a1b2e;border-radius:6px;padding:8px 12px;margin-bottom:14px;page-break-inside:avoid;} .riep-titolo{font-weight:bold;font-size:12px;color:#7a1b2e;margin-bottom:5px;} table.riep{width:auto;margin:0;} table.riep td{border:none;padding:2px 16px 2px 0;font-size:12px;vertical-align:baseline;} table.riep td.num{font-weight:bold;font-size:15px;text-align:right;} table.riep td.det{color:#555;font-size:11px;} table.riep tr.tot td{border-top:1px solid #7a1b2e;padding-top:5px;font-weight:bold;} table.riep tr.tot td.det{font-weight:normal;} .card-evento{border:1px solid #fcd34d;border-left:4px solid #d97706;background:#fffbeb;border-radius:6px;padding:10px 14px;margin-bottom:10px;page-break-inside:avoid;} tr.riga-totale td{border-top:2px solid #7a1b2e;font-weight:bold;background:#faf5f6;} .totale-blocco{border-top:2px solid #7a1b2e;padding-top:6px;margin-top:4px;font-size:12px;font-weight:bold;page-break-inside:avoid;} @media print{body{padding:8px;}}</style>'
+  var stileBase = '<style>body{font-family:Arial,sans-serif;font-size:12px;padding:20px;} h1{font-size:16px;margin-bottom:4px;} .sub{color:#666;font-size:11px;margin-bottom:16px;} table{width:100%;border-collapse:collapse;margin-bottom:16px;} th{background:#7a1b2e;color:white;padding:6px 8px;text-align:left;font-size:11px;} td{padding:6px 8px;border-bottom:1px solid #eee;vertical-align:top;} .section-title{font-weight:bold;font-size:13px;color:#7a1b2e;margin:18px 0 6px;border-bottom:2px solid #7a1b2e;padding-bottom:3px;} .badge{display:inline-block;background:#fee2e2;color:#991b1b;border-radius:4px;padding:1px 5px;font-size:10px;margin-right:3px;} .badge-bam{display:inline-block;background:#fef9c3;color:#854d0e;border-radius:4px;padding:1px 5px;font-size:10px;} .badge-stato{display:inline-block;border-radius:4px;padding:1px 6px;font-size:10px;margin-right:3px;} .note{color:#666;font-style:italic;font-size:11px;} .avviso{background:#fff7ed;border:1px solid #fed7aa;border-radius:4px;padding:4px 8px;font-size:11px;color:#9a3412;margin-top:3px;} .card{border:1px solid #ddd;border-radius:6px;padding:10px 14px;margin-bottom:10px;page-break-inside:avoid;} .cliente{font-weight:bold;font-size:13px;} .camera{font-weight:normal;color:#7a1b2e;font-size:11px;} .camera-avanzo{font-weight:normal;color:#7a1b2e;font-size:11px;margin-top:2px;} .row{display:flex;gap:16px;margin-top:4px;flex-wrap:wrap;align-items:center;} .riepilogo{border:2px solid #7a1b2e;border-radius:6px;padding:8px 12px;margin-bottom:14px;page-break-inside:avoid;} .riep-titolo{font-weight:bold;font-size:12px;color:#7a1b2e;margin-bottom:5px;} table.riep{width:auto;margin:0;} table.riep td{border:none;padding:2px 16px 2px 0;font-size:12px;vertical-align:baseline;} table.riep td.num{font-weight:bold;font-size:15px;text-align:right;} table.riep td.det{color:#555;font-size:11px;} table.riep tr.tot td{border-top:1px solid #7a1b2e;padding-top:5px;font-weight:bold;} table.riep tr.tot td.det{font-weight:normal;} .card-evento{border:1px solid #fcd34d;border-left:4px solid #d97706;background:#fffbeb;border-radius:6px;padding:10px 14px;margin-bottom:10px;page-break-inside:avoid;} tr.riga-totale td{border-top:2px solid #7a1b2e;font-weight:bold;background:#faf5f6;} .totale-blocco{border-top:2px solid #7a1b2e;padding-top:6px;margin-top:4px;font-size:12px;font-weight:bold;page-break-inside:avoid;} @media print{body{padding:8px;}}</style>'
 
   // Eventi che pesano su QUESTO turno: la stessa regola della pagina a
   // schermo (un evento "Giornata intera" vale sia a pranzo sia a cena).
