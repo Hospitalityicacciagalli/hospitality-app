@@ -962,7 +962,16 @@ function StampaMenu(props) {
 
       html += '<tr>'
       html += '<td>' + orario + '</td>'
-      html += '<td><strong>' + cliente + '</strong>' + (cat ? ' <span class="badge-stato" style="background:#ede9fe;color:#4c1d95;">' + cat + '</span>' : '') + '</td>'
+      // \u26a0\ufe0f La categoria e' dell'INTESTATARIO, non dell'ultimo nome
+      // stampato: va accanto al primo nome, non in fondo al blocco.
+      // Con un cliente solo il risultato e' identico a prima.
+      var clienteCol = cliente
+      if (cat) {
+        var righeNomi = cliente.split('<br>')
+        righeNomi[0] = righeNomi[0] + ' <span class="badge-stato" style="background:#ede9fe;color:#4c1d95;">' + cat + '</span>'
+        clienteCol = righeNomi.join('<br>')
+      }
+      html += '<td><strong>' + clienteCol + '</strong></td>'
       html += '<td>' + ospiti + '</td>'
       html += '<td><span class="badge-stato" style="background:' + statoColor + ';color:#111;">' + stato + '</span></td>'
       html += '<td>' + allergeLabel + '</td>'

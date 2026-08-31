@@ -566,11 +566,47 @@ function ReservationForm() {
       })
   }
 
+  // Toglie una camera dal riepilogo della prenotazione, e solo quella.
+  //
+  // ⚠️ Corrispondenza esatta su un pezzo intero, mai una ricerca dentro il
+  // testo: il riepilogo contiene anche camere scritte a mano per ospiti
+  // che una scheda non ce l'hanno, e quelle non si toccano. Il pannello
+  // ha sempre saputo aggiungere una camera; questo e' il gesto opposto,
+  // che mancava (regola 46 letta al contrario: dove va a finire un dato
+  // quando se ne va).
+  function togliCamera(nomeCamera) {
+    var pulito = (nomeCamera || '').trim()
+    if (pulito === '') return
+    setFormData(function(p) {
+      var u = Object.assign({}, p)
+      var attuale = (u.camera || '').trim()
+      if (attuale === '') return u
+      var pezzi = attuale.split(',')
+      var restano = []
+      for (var i = 0; i < pezzi.length; i++) {
+        var pezzo = pezzi[i].trim()
+        if (pezzo === '') continue
+        if (pezzo.toLowerCase() === pulito.toLowerCase()) continue
+        restano.push(pezzo)
+      }
+      u.camera = restano.join(', ')
+      return u
+    })
+  }
+
   function togliCollegato(clienteId) {
+    // La camera si toglie qui, fuori dall'aggiornamento dell'elenco:
+    // dentro, React puo' rieseguire la funzione e la ripulitura
+    // verrebbe fatta due volte.
+    for (var i = 0; i < clientiCollegati.length; i++) {
+      if (clientiCollegati[i].cliente_id === clienteId && clientiCollegati[i].camera) {
+        togliCamera(clientiCollegati[i].camera)
+      }
+    }
     setClientiCollegati(function(prev) {
       var out = []
-      for (var i = 0; i < prev.length; i++) {
-        if (prev[i].cliente_id !== clienteId) out.push(prev[i])
+      for (var j = 0; j < prev.length; j++) {
+        if (prev[j].cliente_id !== clienteId) out.push(prev[j])
       }
       return out
     })
