@@ -243,12 +243,21 @@ function ReservationForm() {
 
   // Arrivando dall'elenco (?normalizza=1) il pannello si apre da solo:
   // altrimenti l'elenco ti porterebbe qui e dovresti cercare il pulsante.
+  //
+  // ⚠️ La condizione NON puo' essere "loading e' falso": loading nasce
+  // falso e diventa vero solo dentro loadReservation, quindi al primo
+  // giro sarebbe gia' falso con la prenotazione non ancora arrivata, e
+  // la ricerca partirebbe con la data di OGGI invece che con quella
+  // della prenotazione, non trovando niente. Si aspetta il dato vero:
+  // selectedCustomer e la data arrivano insieme, dallo stesso then.
   useEffect(function() {
     if (!isEditing || loading) return
+    if (!selectedCustomer) return
+    if (!formData.reservation_date) return
     if (searchParams.get('normalizza') !== '1') return
     if (normCercata) return
     apriNormalizza()
-  }, [loading])
+  }, [loading, selectedCustomer, formData.reservation_date])
 
   // Carica la gift card di partenza e propone i suoi dati.
   useEffect(function() {
@@ -1219,6 +1228,7 @@ function ReservationForm() {
   // qui la prenotazione la stai gia' guardando, che sia gia' stata
   // guardata prima non deve nasconderla.
   function apriNormalizza() {
+    if (!isEditing || !formData.reservation_date) return
     setNormAperto(true)
     setNormLoading(true)
     setNormErrore('')
