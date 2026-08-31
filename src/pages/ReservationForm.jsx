@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, Save, Search, AlertTriangle, UserPlus, Check, Users, ChevronRight, Gift, Edit3, BedDouble } from 'lucide-react'
+import { ArrowLeft, Save, Search, AlertTriangle, UserPlus, Check, Users, ChevronRight, Gift, Edit3, BedDouble, Wand2, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import AllergeniEditor, { validaAllergeni, salvaAllergeni, campiConsensoSalute, salvaConsensoSalute, caricaAllergeniCliente, severitaLabel } from '../components/AllergeniEditor'
 import { useAuth } from '../lib/AuthContext'
@@ -79,7 +79,7 @@ function ReservationForm() {
   var navigate = useNavigate()
   var isEditing = Boolean(id)
 
-  var { user, profile, elevato, elevazione, attivaElevazione } = useAuth()
+  var { user, profile, elevato, elevazione, attivaElevazione, canEdit } = useAuth()
 
   var [showPinModal, setShowPinModal] = useState(false)
   var [pendingData, setPendingData] = useState(null)
@@ -201,6 +201,26 @@ function ReservationForm() {
   // va conservato, altrimenti il salvataggio lo azzererebbe.
   var [giftCardIdEsistente, setGiftCardIdEsistente] = useState(null)
 
+  // ----------------------------------------------------------
+  // NORMALIZZA PRENOTAZIONE (migrazione 53)
+  //
+  // Il programma riconosce, Florestano decide. Questo pannello non
+  // scrive mai da solo: riempie i campi del modulo, e il salvataggio
+  // resta quello di sempre, con la sua firma e il suo log.
+  //
+  // Il riconoscimento NON e' qui: arriva dalla funzione SQL
+  // prenotazioni_da_normalizzare, la stessa che alimenta la pagina
+  // dell'elenco. Una regola, una copia (regola 31).
+  // ----------------------------------------------------------
+  var [normAperto, setNormAperto] = useState(false)
+  var [normLoading, setNormLoading] = useState(false)
+  var [normErrore, setNormErrore] = useState('')
+  var [normProposte, setNormProposte] = useState(null)
+  var [normCercata, setNormCercata] = useState(false)
+  // Diventa vero appena tocchi qualcosa nel pannello: al salvataggio
+  // scrive normalizzata_il, e la prenotazione esce dall'elenco.
+  var [normSegna, setNormSegna] = useState(false)
+
   var [formData, setFormData] = useState({
     reservation_date: initialDate,
     meal_type: initialMeal,
@@ -220,6 +240,15 @@ function ReservationForm() {
   useEffect(function() {
     if (isEditing) loadReservation()
   }, [id])
+
+  // Arrivando dall'elenco (?normalizza=1) il pannello si apre da solo:
+  // altrimenti l'elenco ti porterebbe qui e dovresti cercare il pulsante.
+  useEffect(function() {
+    if (!isEditing || loading) return
+    if (searchParams.get('normalizza') !== '1') return
+    if (normCercata) return
+    apriNormalizza()
+  }, [loading])
 
   // Carica la gift card di partenza e propone i suoi dati.
   useEffect(function() {
@@ -1185,6 +1214,70 @@ function ReservationForm() {
     }
   }
 
+  // Chiede al database che cosa riconosce in QUESTA prenotazione.
+  // Si passa dalla stessa funzione dell'elenco, con mostra_viste = true:
+  // qui la prenotazione la stai gia' guardando, che sia gia' stata
+  // guardata prima non deve nasconderla.
+  function apriNormalizza() {
+    setNormAperto(true)
+    setNormLoading(true)
+    setNormErrore('')
+    setNormCercata(true)
+    supabase.rpc('prenotazioni_da_normalizzare', {
+      p_dal: formData.reservation_date,
+      p_al: formData.reservation_date,
+      p_mostra_viste: true,
+      p_limite: 500
+    }).then(function(result) {
+      setNormLoading(false)
+      if (result.error) {
+        setNormErrore('Non sono riuscito a leggere: ' + result.error.message)
+        setNormProposte(null)
+        return
+      }
+      var trovata = null
+      var dati = result.data || []
+      for (var i = 0; i < dati.length; i++) {
+        if (dati[i].id === id) { trovata = dati[i]; break }
+      }
+      setNormProposte(trovata)
+    })
+  }
+
+  // La camera si AGGIUNGE: il campo somma senza doppioni, ed e' il gesto
+  // giusto quando una camera c'e' gia'. Chi vuole sostituire lo dice.
+  function normAggiungiCamera(nome) {
+    impostaCamera(nome)
+    setNormSegna(true)
+  }
+
+  function normSostituisciCamera(nome) {
+    setFormData(function(p) {
+      var out = {}; for (var k in p) { out[k] = p[k] }
+      out.camera = nome
+      return out
+    })
+    setNormSegna(true)
+  }
+
+  // ⚠️ Si scrive SOLO il lato prenotazione. La tabella gift_card non si
+  // tocca: li' il legame viaggia insieme a "usata" e alla data di
+  // utilizzo, e marcare come consumato un buono che nessuno ha deciso di
+  // consumare sarebbe un danno silenzioso.
+  function normAgganciaGift(g) {
+    setGiftCardIdEsistente(g.gift_card_id)
+    setNormSegna(true)
+  }
+
+  function normStaccaGift() {
+    setGiftCardIdEsistente(null)
+    setNormSegna(true)
+  }
+
+  function normNienteDaFare() {
+    setNormSegna(true)
+  }
+
   function buildReservationData() {
     var requestedTime = null
     if (selectedHour !== '') requestedTime = pad(parseInt(selectedHour)) + ':' + selectedMinute + ':00'
@@ -1192,7 +1285,7 @@ function ReservationForm() {
     // l'intestatario: con tre collegati, l'allergene del secondo deve
     // accendere la spia in sala come quello del primo.
     var haAllergeni = Boolean(qualcunoHaAllergeni() || hasAllergiePrenotazione)
-    return {
+    var dati = {
       customer_id: selectedCustomer.id,
       gift_card_id: giftCard ? giftCard.id : (giftCardIdEsistente || null),
       reservation_date: formData.reservation_date,
@@ -1212,6 +1305,13 @@ function ReservationForm() {
       source: formData.source,
       has_allergen_alerts: haAllergeni
     }
+    // Regola 46: quello che il pannello mostra finisce nei campi qui
+    // sopra; l'unica cosa che il pannello scrive di suo e' la data in cui
+    // l'hai guardata, che serve solo a togliere la prenotazione
+    // dall'elenco. Nessun conteggio, nessuna data di servizio, nessuno
+    // stato: gli otto punti che contano i coperti non vedono niente.
+    if (normSegna) dati.normalizzata_il = new Date().toISOString()
+    return dati
   }
 
   // Chi firma il salvataggio, adesso:
@@ -1489,6 +1589,193 @@ function ReservationForm() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ============================================================
+          NORMALIZZA PRENOTAZIONE
+          Il pannello propone, tu decidi, e niente e' salvato finche' non
+          premi Salva. Si apre da solo arrivando dall'elenco.
+          ============================================================ */}
+      {isEditing && canEdit('prenotazioni') && (
+        <div className="mb-6">
+          {!normAperto ? (
+            <button type="button" onClick={apriNormalizza}
+              className="w-full inline-flex items-center justify-center gap-2 bg-white border border-wine-300 text-wine-800 px-5 py-3 rounded-xl hover:bg-wine-50 transition-colors font-medium">
+              <Wand2 size={18} />
+              Normalizza questa prenotazione
+            </button>
+          ) : (
+            <div className="bg-white rounded-xl shadow-sm border border-wine-200 p-5">
+
+              <div className="flex items-start justify-between gap-3 mb-3">
+                <div className="flex items-center gap-2">
+                  <Wand2 size={18} className="text-wine-700" />
+                  <h2 className="text-base font-semibold text-gray-900">Cosa riconosco nelle note</h2>
+                </div>
+                <button type="button" onClick={function() { setNormAperto(false) }}
+                  className="p-1 rounded hover:bg-gray-100 text-gray-400">
+                  <X size={18} />
+                </button>
+              </div>
+
+              {normLoading && <p className="text-sm text-gray-500">Leggo...</p>}
+
+              {normErrore !== '' && (
+                <p className="text-sm text-red-600">{normErrore}</p>
+              )}
+
+              {!normLoading && normErrore === '' && !normProposte && (
+                <div>
+                  <p className="text-sm text-gray-600">
+                    Non c e niente da riconoscere in questa prenotazione.
+                  </p>
+                  {!normSegna && (
+                    <button type="button" onClick={normNienteDaFare}
+                      className="mt-3 text-sm text-wine-700 hover:text-wine-900 underline">
+                      Segnala come guardata, cosi non torna nell elenco
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {!normLoading && normProposte && (
+                <div className="space-y-4">
+
+                  {(normProposte.camere_trovate || []).map(function(c, i) {
+                    var giaUguale = (formData.camera || '').toLowerCase().split(',').map(function(x) { return x.trim() }).indexOf(c.nome.toLowerCase()) !== -1
+                    return (
+                      <div key={'nc' + i} className="border border-gray-200 rounded-lg p-3">
+                        <div className="flex items-start gap-2">
+                          <BedDouble size={16} className="text-wine-600 flex-shrink-0 mt-0.5" />
+                          <div className="min-w-0">
+                            <p className="text-sm text-gray-900">
+                              Nelle note c e <span className="font-semibold">{c.nome}</span>: e la camera?
+                            </p>
+                            <p className="text-xs text-gray-400 mt-0.5 break-words">
+                              ...{c.contesto}...
+                            </p>
+                            {formData.camera && !giaUguale && (
+                              <p className="text-xs text-amber-700 mt-1">
+                                Nel campo Camera c e gia: {formData.camera}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        {giaUguale ? (
+                          <p className="text-xs text-green-700 mt-2 flex items-center gap-1">
+                            <Check size={13} /> Gia nel campo Camera
+                          </p>
+                        ) : (
+                          <div className="flex flex-wrap gap-2 mt-3">
+                            <button type="button" onClick={function() { normAggiungiCamera(c.nome) }}
+                              className="px-3 py-2 rounded-lg bg-wine-700 text-white text-sm hover:bg-wine-800">
+                              {formData.camera ? 'Aggiungila' : 'Si, e la camera'}
+                            </button>
+                            {formData.camera && (
+                              <button type="button" onClick={function() { normSostituisciCamera(c.nome) }}
+                                className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50">
+                                Sostituisci quella che c e
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+
+                  {canEdit('gift_card') && (normProposte.gift_trovate || []).map(function(g, i) {
+                    var giaAgganciata = giftCardIdEsistente === g.gift_card_id
+                    var altraAgganciata = Boolean(giftCardIdEsistente) && !giaAgganciata
+                    return (
+                      <div key={'ng' + i} className="border border-gray-200 rounded-lg p-3">
+                        <div className="flex items-start gap-2">
+                          <Gift size={16} className="text-wine-600 flex-shrink-0 mt-0.5" />
+                          <div className="min-w-0">
+                            <p className="text-sm text-gray-900">
+                              Nelle note c e il codice <span className="font-semibold">{g.codice}</span>
+                              {g.tipologia ? ' \u2014 ' + g.tipologia : ''}
+                            </p>
+                            {g.usata && (
+                              <p className="text-xs text-amber-700 mt-1">
+                                Questa gift card risulta gia utilizzata.
+                              </p>
+                            )}
+                            {altraAgganciata && (
+                              <p className="text-xs text-amber-700 mt-1">
+                                A questa prenotazione e gia agganciata un altra gift card: agganciando
+                                questa, quella viene staccata.
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        {giaAgganciata ? (
+                          <div className="flex flex-wrap gap-2 mt-3">
+                            <p className="text-xs text-green-700 flex items-center gap-1">
+                              <Check size={13} /> Gia agganciata
+                            </p>
+                            <button type="button" onClick={normStaccaGift}
+                              className="px-3 py-2 rounded-lg border border-gray-300 text-sm text-gray-700 hover:bg-gray-50">
+                              Staccala
+                            </button>
+                          </div>
+                        ) : (
+                          <button type="button" onClick={function() { normAgganciaGift(g) }}
+                            className="mt-3 px-3 py-2 rounded-lg bg-wine-700 text-white text-sm hover:bg-wine-800">
+                            Aggancia questa gift card
+                          </button>
+                        )}
+                      </div>
+                    )
+                  })}
+
+                  {canEdit('gift_card') && (normProposte.gift_trovate || []).length === 0
+                    && (normProposte.tipologie_trovate || []).map(function(t, i) {
+                    return (
+                      <div key={'nt' + i} className="border border-gray-200 rounded-lg p-3">
+                        <div className="flex items-start gap-2">
+                          <Gift size={16} className="text-gray-400 flex-shrink-0 mt-0.5" />
+                          <p className="text-sm text-gray-700 min-w-0">
+                            Nelle note c e <span className="font-semibold">{t}</span>, ma nessun codice.
+                            Il buono c e, il codice no: va cercato a mano nella pagina Gift Card.
+                          </p>
+                        </div>
+                      </div>
+                    )
+                  })}
+
+                  {normProposte.ospite_hotel_senza_camera && (
+                    <div className="border border-amber-200 bg-amber-50 rounded-lg p-3 flex items-start gap-2">
+                      <AlertTriangle size={16} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                      <p className="text-sm text-amber-800 min-w-0">
+                        Questo cliente e un ospite dell albergo, ma la camera non c e ne nel campo
+                        ne nelle note. Se la sai, scrivila nel campo Camera qui sotto.
+                      </p>
+                    </div>
+                  )}
+
+                  {!normSegna && (
+                    <button type="button" onClick={normNienteDaFare}
+                      className="text-sm text-gray-500 hover:text-gray-700 underline">
+                      Non c e niente da fare qui: segnala come guardata
+                    </button>
+                  )}
+
+                </div>
+              )}
+
+              {normSegna && (
+                <div className="mt-4 pt-3 border-t border-gray-100 flex items-start gap-2">
+                  <AlertTriangle size={15} className="text-wine-700 flex-shrink-0 mt-0.5" />
+                  <p className="text-sm text-wine-800">
+                    Niente e ancora salvato: premi <span className="font-semibold">Salva</span> in fondo
+                    alla pagina.
+                  </p>
+                </div>
+              )}
+
+            </div>
+          )}
         </div>
       )}
 

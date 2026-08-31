@@ -34,6 +34,7 @@ import GiftCardPage from './pages/GiftCardPage';
 import WineTourPage from './pages/WineTourPage';
 import CookingClassPage from './pages/CookingClassPage';
 import ImportPrenotazioniPage from './pages/ImportPrenotazioniPage';
+import NormalizzaPrenotazioniPage from './pages/NormalizzaPrenotazioniPage';
 import LimitiPage from './pages/LimitiPage';
 import HicDashboardPage from './pages/hic/HicDashboardPage';
 import CamereOggiPage from './pages/hic/CamereOggiPage';
@@ -162,6 +163,18 @@ function AppRoutes() {
         <Route path="/prenotazioni/importa" element={
           <ProtectedRoute feature="importa_prenotazioni">
             <ImportPrenotazioniPage />
+          </ProtectedRoute>
+        } />
+
+        {/* Normalizza prenotazioni — l'elenco che indica dove la camera o
+            il codice gift card stanno scritti a mano nelle note. La pagina
+            non normalizza niente: apre la prenotazione, una alla volta.
+            Nessuna chiave di permesso nuova: chi puo' MODIFICARE una
+            prenotazione puo' normalizzarla, e il pannello mostra la parte
+            gift card solo a chi ha anche quel permesso. */}
+        <Route path="/prenotazioni/normalizza" element={
+          <ProtectedRoute feature="prenotazioni" requireEdit>
+            <NormalizzaPrenotazioniPage />
           </ProtectedRoute>
         } />
 

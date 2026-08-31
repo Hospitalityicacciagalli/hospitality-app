@@ -249,6 +249,16 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
+        {canEdit('prenotazioni') && (
+          <NavLink
+            to="/prenotazioni/normalizza"
+            className={function(p) { return navClass(p.isActive); }}
+            onClick={function() { setMobileOpen(false); }}>
+            <span className="text-base">🪄</span>
+            Normalizza prenotazioni
+          </NavLink>
+        )}
+
         {canView('limiti') && (
           <NavLink
             to="/limiti"
