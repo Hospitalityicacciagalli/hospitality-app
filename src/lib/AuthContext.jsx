@@ -5,8 +5,10 @@ var AuthContext = createContext(null)
 
 // ============================================================
 // Elenco delle funzioni/menu' del sistema.
-// type 'standard' = livelli none/read/write
-// type 'cassa'    = livelli none/light/full
+// type 'standard' = livelli none/read/write. E' l'UNICO tipo esistente:
+//                   il vecchio type 'cassa' (none/light/full) non e' piu'
+//                   usato da nessuna voce da quando il permesso cassa e'
+//                   stato spezzato in reception e ristorante.
 // loginReale true = ramo che il PIN NON puo' sbloccare: richiede
 //                   il login vero (il database ricontrolla chi sei).
 //                   Nella matrice permessi viene mostrato con un
@@ -177,10 +179,28 @@ export function AuthProvider(props) {
     }
   }, [])
 
+  // ----------------------------------------------------------
+  // COLONNE DEL PROFILO — elencate per nome, mai select('*').
+  //
+  // In user_profiles vivono anche pin_hash, pin_failed_attempts e
+  // pin_locked_until. La migrazione 56 toglie a chi si collega dal
+  // browser il permesso di leggerle: da quel momento un select('*')
+  // fallirebbe, il profilo non si caricherebbe e l'utente vedrebbe
+  // un'app vuota senza nessun messaggio d'errore.
+  //
+  // Il PIN si legge solo dentro le funzioni del database
+  // (verify_pin_utente, set_pin, reset_pin), che girano coi permessi
+  // del proprietario. Qui non serve, e quindi qui non si chiede.
+  //
+  // ⚠️ Chi aggiunge una colonna a user_profiles e la vuole nel
+  // profilo deve aggiungerla a questo elenco: non arriva da sola.
+  // ----------------------------------------------------------
+  var COLONNE_PROFILO = 'id, first_name, last_name, display_name, role, is_active, created_at, updated_at, permissions'
+
   function loadProfile(userId) {
     supabase
       .from('user_profiles')
-      .select('*')
+      .select(COLONNE_PROFILO)
       .eq('id', userId)
       .single()
       .then(function(result) {
@@ -315,45 +335,27 @@ export function AuthProvider(props) {
   }
 
   // ----------------------------------------------------------
-  // RETROCOMPATIBILITA' — vecchio sistema a ruoli (pagine non migrate)
-  // Nota: hasRole/canWrite guardano SEMPRE il profilo base loggato,
-  // non l'elevazione. I rami che dipendono da questi controlli sono
-  // quelli "login reale" (es. utenti): il PIN non li sblocca, ed e'
-  // esattamente il comportamento voluto.
+  // isSuperAdminReale — l'ULTIMO controllo basato sul ruolo.
+  //
+  // Il vecchio sistema a ruoli (hasRole, canWrite) e' stato rimosso:
+  // ogni pulsante dell'app si protegge con canEdit(feature), che
+  // onora la matrice dei permessi e l'elevazione col PIN (regola 35).
+  //
+  // Resta questa sola funzione, e ha un mestiere preciso: dire se il
+  // PROFILO BASE LOGGATO e' super_admin, ignorando deliberatamente
+  // l'elevazione. Serve dove nemmeno il PIN deve poter aprire, e oggi
+  // c'e' un solo posto: la durata dell'elevazione stessa, dentro
+  // Impostazioni. Senza questo controllo si chiuderebbe un anello:
+  // mi elevo col PIN e la prima cosa che posso fare e' allungare la
+  // durata dell'elevazione.
+  //
+  // ⚠️ Il nome dice che cosa fa apposta. NON usarla per proteggere un
+  // pulsante qualunque: quello e' esattamente il modo in cui era nata
+  // la regola 35. Se serve limitare una funzione, si usa canEdit.
   // ----------------------------------------------------------
-  function hasRole(roles) {
+  function isSuperAdminReale() {
     if (!profile) return false
-    if (typeof roles === 'string') roles = [roles]
-    return roles.indexOf(profile.role) !== -1
-  }
-
-  function canWrite(module) {
-    if (!profile) return false
-    var role = profile.role
-
-    if (role === 'super_admin') return true
-
-    if (module === 'customers' || module === 'reservations' || module === 'customer_allergens') {
-      return ['proprieta', 'direttore', 'reception', 'sala'].indexOf(role) !== -1
-    }
-
-    if (module === 'gdpr_consents') {
-      return ['proprieta', 'direttore', 'reception'].indexOf(role) !== -1
-    }
-
-    if (module === 'restaurant_settings' || module === 'restaurant_closures') {
-      return ['direttore'].indexOf(role) !== -1
-    }
-
-    if (module === 'event_dates') {
-      return ['direttore', 'reception'].indexOf(role) !== -1
-    }
-
-    if (module === 'user_profiles') {
-      return false
-    }
-
-    return false
+    return profile.role === 'super_admin'
   }
 
   var user = session ? session.user : null
@@ -369,8 +371,7 @@ export function AuthProvider(props) {
     canView: canView,
     canEdit: canEdit,
     currentPermissions: currentPermissions,
-    hasRole: hasRole,
-    canWrite: canWrite,
+    isSuperAdminReale: isSuperAdminReale,
     // --- Elevazione (Funzione C) ---
     elevazione: elevazione,
     elevato: elevato,

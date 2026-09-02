@@ -801,7 +801,21 @@ function DepartmentSection() {
 // Sezione autonoma: durata dell'elevazione permessi (Funzione C).
 // Salva su restaurant_settings.elevazione_minuti.
 // ============================================================
+// ============================================================
+// ELEVAZIONE — l'unico pezzo di Impostazioni che il PIN non apre.
+//
+// Questa sezione decide quanti minuti dura l'elevazione col PIN.
+// Se fosse protetta da canEdit('impostazioni'), che il PIN sblocca,
+// si chiuderebbe un anello: mi elevo col PIN e la prima cosa che
+// posso fare e' allungare la durata dell'elevazione.
+//
+// Percio' usa isSuperAdminReale(), che guarda il profilo BASE
+// loggato e ignora l'elevazione di proposito. E' l'unico posto
+// dell'app dove quella funzione va usata (vedi la nota in
+// AuthContext).
+// ============================================================
 function ElevazioneSection() {
+  var { isSuperAdminReale } = useAuth();
   var [rowId, setRowId] = useState(null);
   var [minuti, setMinuti] = useState(5);
   var [loading, setLoading] = useState(true);
@@ -851,6 +865,13 @@ function ElevazioneSection() {
       });
   }
 
+  // La sezione non compare spenta o grigia: non esiste proprio, come
+  // le schede non concesse della Dashboard Camere. Il controllo sta
+  // qui e non dentro useEffect di proposito: il profilo puo' arrivare
+  // dopo il primo disegno, e un controllo fatto una volta sola al
+  // montaggio leggerebbe il vuoto scambiandolo per un no (regola 50).
+  if (!isSuperAdminReale()) return null;
+
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-5">
       <div className="flex items-center gap-2 mb-1">
@@ -898,11 +919,23 @@ function ElevazioneSection() {
 }
 
 export default function SettingsPage() {
-  var { hasRole } = useAuth();
+  // ----------------------------------------------------------
+  // REGOLA 35 — qui era rimasta l'ultima istanza viva.
+  //
+  // Prima: la pagina si proteggeva con hasRole(["super_admin"]),
+  // mentre il menu' e la rotta la aprivano a chiunque avesse
+  // canView('impostazioni'). Risultato: il direttore vedeva la voce,
+  // ci cliccava, e trovava un muro.
+  //
+  // Adesso la pagina onora lo stesso permesso della rotta e del menu'.
+  // L'unico pezzo che resta al super_admin vero e' la durata
+  // dell'elevazione: vedi ElevazioneSection.
+  // ----------------------------------------------------------
+  var { canEdit } = useAuth();
   var [options, setOptions] = useState({});
   var [loading, setLoading] = useState(true);
 
-  var canManage = hasRole(["super_admin"]);
+  var canManage = canEdit("impostazioni");
 
   useEffect(function() {
     loadOptions();
@@ -934,7 +967,7 @@ export default function SettingsPage() {
     return (
       <div className="text-center py-16 text-gray-400">
         <Settings size={48} className="mx-auto mb-3 opacity-30" />
-        <p>Solo il Super Admin pu&ograve; accedere alle impostazioni.</p>
+        <p>Non hai il permesso di modificare le impostazioni.</p>
       </div>
     );
   }
