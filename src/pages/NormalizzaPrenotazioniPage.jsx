@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Search, BedDouble, Gift, AlertTriangle, Eye, RotateCcw, ChevronRight } from 'lucide-react'
+import { Search, BedDouble, Gift, AlertTriangle, Eye, RotateCcw, ChevronRight, CheckCircle2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 
 // ============================================================
@@ -39,6 +39,35 @@ function dataLeggibile(iso) {
   var p = iso.split('-')
   var d = new Date(parseInt(p[0]), parseInt(p[1]) - 1, parseInt(p[2]))
   return d.toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })
+}
+
+// ============================================================
+// «NIENTE DA FARE» — cosa vuol dire, esattamente.
+//
+// Una riga non ha piu' niente da fare quando TUTTE queste cose sono vere:
+//   - ogni camera riconosciuta e' gia' nel campo Camera (gia_nel_campo)
+//   - non c'e' nessun codice gift card riconosciuto nelle note
+//   - non c'e' nessuna tipologia gift card senza codice
+//   - non e' un ospite dell'albergo senza camera
+//
+// ⚠ Il limite dichiarato: la funzione SQL dice se un codice gift card
+// esiste in archivio, NON dice se e' gia' agganciato a QUESTA
+// prenotazione. Percio' una riga con un codice riconosciuto resta
+// sempre "da guardare", anche quando il legame c'e' gia'. E' una
+// prudenza voluta: il verde deve dire il vero sempre, mai "quasi".
+// Cambiarlo vorrebbe dire cambiare la funzione SQL, non questa pagina.
+// ============================================================
+function nienteDaFare(r) {
+  var camere = r.camere_trovate || []
+  var gift = r.gift_trovate || []
+  var tipologie = r.tipologie_trovate || []
+  if (gift.length > 0) return false
+  if (tipologie.length > 0) return false
+  if (r.ospite_hotel_senza_camera) return false
+  for (var i = 0; i < camere.length; i++) {
+    if (!camere[i].gia_nel_campo) return false
+  }
+  return true
 }
 
 function NormalizzaPrenotazioniPage() {
@@ -100,6 +129,13 @@ function NormalizzaPrenotazioniPage() {
   function turnoLabel(m) {
     return m === 'lunch' ? 'Pranzo' : 'Cena'
   }
+
+  // Quante righe hanno ancora lavoro e quante sono gia' a posto.
+  var quanteAPosto = 0
+  for (var q = 0; q < righe.length; q++) {
+    if (nienteDaFare(righe[q])) quanteAPosto = quanteAPosto + 1
+  }
+  var quanteDaGuardare = righe.length - quanteAPosto
 
   return (
     <div className="max-w-4xl mx-auto px-4 py-6">
@@ -178,7 +214,10 @@ function NormalizzaPrenotazioniPage() {
 
       {righe.length > 0 && (
         <p className="text-sm text-gray-500 mb-3">
-          {righe.length} {righe.length === 1 ? 'prenotazione' : 'prenotazioni'} da guardare
+          {righe.length} {righe.length === 1 ? 'prenotazione' : 'prenotazioni'}
+          {quanteAPosto > 0
+            ? ' — ' + quanteDaGuardare + ' da guardare, ' + quanteAPosto + ' gia a posto'
+            : ' da guardare'}
         </p>
       )}
 
@@ -187,9 +226,21 @@ function NormalizzaPrenotazioniPage() {
           var camere = r.camere_trovate || []
           var gift = r.gift_trovate || []
           var tipologie = r.tipologie_trovate || []
+          var aPosto = nienteDaFare(r)
 
           return (
-            <div key={r.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-4">
+            <div key={r.id}
+              className={aPosto
+                ? 'bg-white rounded-xl shadow-sm border border-green-300 p-4'
+                : 'bg-white rounded-xl shadow-sm border border-gray-200 p-4'}>
+
+              {/* Il segno verde: questa riga non chiede niente a nessuno. */}
+              {aPosto && (
+                <div className="mb-2 inline-flex items-center gap-1.5 bg-green-50 border border-green-200 text-green-800 rounded-full px-3 py-1 text-xs font-medium">
+                  <CheckCircle2 size={14} />
+                  Niente da fare
+                </div>
+              )}
 
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -205,7 +256,9 @@ function NormalizzaPrenotazioniPage() {
                   )}
                 </div>
                 <button type="button" onClick={function() { apri(r) }}
-                  className="inline-flex items-center gap-1 bg-wine-700 text-white px-4 py-2 rounded-lg hover:bg-wine-800 transition-colors text-sm font-medium flex-shrink-0">
+                  className={aPosto
+                    ? 'inline-flex items-center gap-1 bg-white text-wine-700 border border-wine-300 px-4 py-2 rounded-lg hover:bg-wine-50 transition-colors text-sm font-medium flex-shrink-0'
+                    : 'inline-flex items-center gap-1 bg-wine-700 text-white px-4 py-2 rounded-lg hover:bg-wine-800 transition-colors text-sm font-medium flex-shrink-0'}>
                   Apri
                   <ChevronRight size={16} />
                 </button>
