@@ -1,23 +1,90 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth, FEATURES, GRUPPI_FEATURE, defaultPermissionsForRole, featureRichiedeLoginReale } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase';
 
 var EDGE_FUNCTION_URL = 'https://ddarqzyymrgqmdwiyzde.supabase.co/functions/v1/admin-user-management';
 
-// Opzioni di livello per i selettori della matrice.
-var LEVEL_OPTIONS_STANDARD = [
+// I tre livelli di permesso. Sono gli unici: il vecchio gruppo
+// none/light/full della cassa non e' piu' usato da nessuna voce da
+// quando il permesso cassa e' stato spezzato in reception e ristorante.
+var LIVELLI = [
   { value: 'none',  label: 'Nessuno' },
-  { value: 'read',  label: 'Solo lettura' },
-  { value: 'write', label: 'Lettura e scrittura' }
+  { value: 'read',  label: 'Lettura' },
+  { value: 'write', label: 'Scrittura' }
 ];
-var LEVEL_OPTIONS_CASSA = [
-  { value: 'none',  label: 'Nessuno' },
-  { value: 'light', label: 'Cassa light' },
-  { value: 'full',  label: 'Cassa completa' }
-];
+
+// ============================================================
+// ListaScelta — elenco di voci da toccare, al posto di <select>.
+//
+// Su iPad il menu' a tendina nativo dentro una finestra sovrapposta
+// blocca la pagina: e' un difetto noto e costante del progetto. Qui
+// dentro c'erano CINQUE tendine native, e una di queste veniva
+// disegnata su ogni riga della matrice, quindi ventisette insieme.
+// Sono tutte diventate elenchi di pulsanti, come nella modale del PIN.
+// ============================================================
+function ListaScelta(props) {
+  var altezza = props.maxHeight ? props.maxHeight : 190;
+  return (
+    <div className="border border-gray-200 rounded-lg divide-y divide-gray-100 overflow-y-auto"
+      style={{ maxHeight: altezza }}>
+      {props.options.length === 0 && (
+        <div className="px-3 py-3 text-sm text-gray-400">{props.emptyLabel || 'Nessuna voce'}</div>
+      )}
+      {props.options.map(function(o) {
+        var attivo = props.value === o.value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            onClick={function() { props.onChange(o.value); }}
+            className={
+              'w-full text-left px-3 py-2.5 text-sm flex items-center justify-between gap-2 ' +
+              (attivo ? 'bg-wine-700 text-white font-medium' : 'bg-white text-gray-800 hover:bg-gray-50')
+            }
+          >
+            <span>{o.label}</span>
+            {attivo && <span className="text-base">&#10003;</span>}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ============================================================
+// SelettoreLivello — i tre livelli affiancati, uno per riga della
+// matrice. Tre pulsanti stanno in larghezza dove stava la tendina,
+// e si toccano al primo colpo invece che in due passaggi.
+// ============================================================
+function SelettoreLivello(props) {
+  return (
+    <div className="flex gap-1 flex-shrink-0">
+      {LIVELLI.map(function(o) {
+        var attivo = (props.value || 'none') === o.value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            onClick={function() { props.onChange(o.value); }}
+            className={
+              'px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors ' +
+              (attivo
+                ? 'bg-wine-700 border-wine-700 text-white'
+                : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50')
+            }
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 export default function UserManagement() {
   var { profile, canView } = useAuth();
+  var navigate = useNavigate();
 
   var [users, setUsers] = useState([]);
   var [loading, setLoading] = useState(true);
@@ -136,11 +203,15 @@ export default function UserManagement() {
     });
   }
 
+  // F2 — is_default non viene piu' letto ne' mostrato. La colonna resta
+  // nel database, ma non era collegata a niente: la Edge Function che
+  // crea gli utenti non la guardava, quindi il "(default)" accanto a un
+  // nome non produceva nessun effetto. Un campo che si vede e non fa
+  // niente e' esattamente il difetto della regola 46.
   function loadProfiles() {
     supabase
       .from('permission_profiles')
-      .select('id, name, is_default, permissions')
-      .order('is_default', { ascending: false })
+      .select('id, name, permissions')
       .order('name', { ascending: true })
       .then(function(result) {
         if (!result.error) {
@@ -364,7 +435,7 @@ export default function UserManagement() {
   function selectAllPermissions() {
     var matrix = {};
     FEATURES.forEach(function(f) {
-      matrix[f.key] = f.type === 'cassa' ? 'full' : 'write';
+      matrix[f.key] = 'write';
     });
     setPermMatrix(matrix);
   }
@@ -495,7 +566,6 @@ export default function UserManagement() {
 
   // Una riga della matrice (voce singola o figlia di un gruppo, indentata).
   function renderRigaFeature(f, dentroGruppo) {
-    var opts = f.type === 'cassa' ? LEVEL_OPTIONS_CASSA : LEVEL_OPTIONS_STANDARD;
     var loginReale = featureRichiedeLoginReale(f.key);
     return (
       <div key={f.key} className={
@@ -514,18 +584,10 @@ export default function UserManagement() {
             </span>
           )}
         </span>
-        <select
-          value={permMatrix[f.key] || 'none'}
-          onChange={function(e) { setFeatureLevel(f.key, e.target.value); }}
-          className={
-            'px-3 py-1.5 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 min-w-[170px] ' +
-            (loginReale ? 'border-amber-300 bg-white' : 'border-gray-300')
-          }
-        >
-          {opts.map(function(o) {
-            return <option key={o.value} value={o.value}>{o.label}</option>;
-          })}
-        </select>
+        <SelettoreLivello
+          value={permMatrix[f.key]}
+          onChange={function(v) { setFeatureLevel(f.key, v); }}
+        />
       </div>
     );
   }
@@ -570,12 +632,20 @@ export default function UserManagement() {
           <h1 className="text-2xl font-bold text-gray-900">Gestione Utenti App</h1>
           <p className="text-gray-500 mt-1 text-sm">Crea, modifica, blocca, gestisci accessi e permessi</p>
         </div>
-        <button
-          onClick={function() { setShowNewUserModal(true); setNewUserError(null); setNewUserSuccess(null); }}
-          className="bg-wine-700 hover:bg-wine-800 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-        >
-          + Nuovo utente
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={function() { navigate('/utenti/profili'); }}
+            className="border border-wine-300 text-wine-700 hover:bg-wine-50 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          >
+            Profili di permessi
+          </button>
+          <button
+            onClick={function() { setShowNewUserModal(true); setNewUserError(null); setNewUserSuccess(null); }}
+            className="bg-wine-700 hover:bg-wine-800 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          >
+            + Nuovo utente
+          </button>
+        </div>
       </div>
 
       {error && (
@@ -725,15 +795,11 @@ export default function UserManagement() {
 
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Ruolo</label>
-                <select
+                <ListaScelta
                   value={editForm.role}
-                  onChange={function(e) { setEditField('role', e.target.value); }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
-                >
-                  {roleOptions.map(function(r) {
-                    return <option key={r.value} value={r.value}>{r.label}</option>;
-                  })}
-                </select>
+                  options={roleOptions}
+                  onChange={function(v) { setEditField('role', v); }}
+                />
                 <p className="text-xs text-gray-400 mt-1">Il ruolo è ormai solo un'etichetta: gli accessi reali si gestiscono dal pulsante "Permessi".</p>
               </div>
 
@@ -792,32 +858,26 @@ export default function UserManagement() {
               {/* Applica un profilo-tipo */}
               <div className="mb-4">
                 <label className="block text-xs font-medium text-gray-700 mb-1">Applica un profilo-tipo</label>
-                <select
+                <ListaScelta
                   value={selectedProfileId}
-                  onChange={function(e) { applyProfile(e.target.value); }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
-                >
-                  <option value="">— Scegli un profilo —</option>
-                  {profiles.map(function(p) {
-                    return <option key={p.id} value={p.id}>{p.name}{p.is_default ? ' (default)' : ''}</option>;
-                  })}
-                </select>
+                  emptyLabel="Nessun profilo salvato. Creane uno qui sotto."
+                  options={profiles.map(function(p) { return { value: p.id, label: p.name }; })}
+                  onChange={function(v) { applyProfile(v); }}
+                />
                 <p className="text-xs text-gray-400 mt-1">Applicare un profilo riempie la matrice qui sotto; puoi comunque modificarla voce per voce prima di salvare.</p>
               </div>
 
               {/* Copia i permessi da un altro utente */}
               <div className="mb-4">
                 <label className="block text-xs font-medium text-gray-700 mb-1">Oppure copia i permessi da un altro utente</label>
-                <select
+                <ListaScelta
                   value={selectedSourceUserId}
-                  onChange={function(e) { copyFromUser(e.target.value); }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
-                >
-                  <option value="">— Scegli un utente da cui copiare —</option>
-                  {users.filter(function(u) { return u.id !== permTarget.id; }).map(function(u) {
-                    return <option key={u.id} value={u.id}>{u.display_name || (u.first_name + ' ' + u.last_name)}</option>;
+                  emptyLabel="Non ci sono altri utenti."
+                  options={users.filter(function(u) { return u.id !== permTarget.id; }).map(function(u) {
+                    return { value: u.id, label: u.display_name || (u.first_name + ' ' + u.last_name) };
                   })}
-                </select>
+                  onChange={function(v) { copyFromUser(v); }}
+                />
                 <p className="text-xs text-gray-400 mt-1">Copia esattamente i permessi di quell'utente nella matrice qui sotto; puoi poi ritoccarli voce per voce prima di salvare.</p>
               </div>
 
@@ -981,15 +1041,11 @@ export default function UserManagement() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Ruolo *</label>
-                <select
+                <ListaScelta
                   value={newUserForm.role}
-                  onChange={function(e) { var v = e.target.value; setNewUserForm(function(p) { var u = {}; for (var k in p) { u[k] = p[k]; } u.role = v; return u; }); }}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500"
-                >
-                  {roleOptions.map(function(r) {
-                    return <option key={r.value} value={r.value}>{r.label}</option>;
-                  })}
-                </select>
+                  options={roleOptions}
+                  onChange={function(v) { setNewUserForm(function(p) { var u = {}; for (var k in p) { u[k] = p[k]; } u.role = v; return u; }); }}
+                />
                 <p className="text-xs text-gray-400 mt-1">Il nuovo utente parte dai permessi predefiniti del ruolo; potrai personalizzarli con il pulsante "Permessi".</p>
               </div>
               <div className="flex gap-3 pt-2">

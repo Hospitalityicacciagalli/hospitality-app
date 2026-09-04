@@ -15,6 +15,7 @@ import CessazioneDipendentePage from './pages/CessazioneDipendentePage';
 import ShiftsPage from './pages/ShiftsPage';
 import SettingsPage from './pages/SettingsPage';
 import UserManagement from './pages/UserManagement';
+import ProfiliPermessiPage from './pages/ProfiliPermessiPage';
 import ProfilePage from './pages/ProfilePage';
 import CassaPage from './pages/CassaPage';
 import CassaNuovaPage from './pages/CassaNuovaPage';
@@ -401,6 +402,16 @@ function AppRoutes() {
         <Route path="/utenti" element={
           <ProtectedRoute feature="utenti">
             <UserManagement />
+          </ProtectedRoute>
+        } />
+
+        {/* Profili di permessi: sotto-pagina di Utenti App, stessa chiave.
+            Non ha una voce di menu' propria: ci si arriva dal pulsante
+            dentro Utenti App. La chiave 'utenti' e' marcata loginReale,
+            quindi il PIN non la sblocca, ne' qui ne' li'. */}
+        <Route path="/utenti/profili" element={
+          <ProtectedRoute feature="utenti">
+            <ProfiliPermessiPage />
           </ProtectedRoute>
         } />
 
