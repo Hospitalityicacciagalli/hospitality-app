@@ -75,7 +75,9 @@ export default function ShiftsPage() {
 
   // Modale assegnazione turno (dentro il pop-up giorno)
   var [showAssign, setShowAssign] = useState(false);
-  var [assignStaffId, setAssignStaffId] = useState("");
+  // SELEZIONE MULTIPLA (v57): lo stesso turno si assegna a piu' persone insieme.
+  // Stessa logica della duplica: si tocca un nome per aggiungerlo o toglierlo.
+  var [assignStaffIds, setAssignStaffIds] = useState([]);
   var [assignTemplateId, setAssignTemplateId] = useState("");
   var [assignStart, setAssignStart] = useState("");
   var [assignEnd, setAssignEnd] = useState("");
@@ -328,7 +330,7 @@ export default function ShiftsPage() {
   // ---- Azioni ----
 
   function openAssignFor() {
-    setAssignStaffId("");
+    setAssignStaffIds([]);
     setAssignTemplateId("");
     setAssignStart("");
     setAssignEnd("");
@@ -343,21 +345,48 @@ export default function ShiftsPage() {
     if (t) { setAssignStart(timeShort(t.start_time)); setAssignEnd(timeShort(t.end_time)); }
   }
 
+  // Aggiunge o toglie un dipendente dalla selezione dell'assegnazione.
+  function toggleAssign(staffId) {
+    setAssignStaffIds(function(prev) {
+      if (prev.indexOf(staffId) !== -1) {
+        return prev.filter(function(x) { return x !== staffId; });
+      }
+      var next = prev.slice();
+      next.push(staffId);
+      return next;
+    });
+  }
+
   function saveAssign() {
-    if (!assignStaffId) { alert("Seleziona un dipendente."); return; }
+    if (assignStaffIds.length === 0) { alert("Seleziona almeno un dipendente."); return; }
     if (!assignStart || !assignEnd) { alert("Imposta orario di inizio e fine."); return; }
-    if (!confermaProblemi(staffName(assignStaffId), problemiTurno(assignStaffId, dayPanel, assignStart, assignEnd, null))) return;
+
+    // I problemi di TUTTI i selezionati in una conferma sola, uno per riga:
+    // stesso comportamento della duplica, stesso unico controllo (regola 31).
+    var conProblemi = [];
+    assignStaffIds.forEach(function(sid) {
+      var p = problemiTurno(sid, dayPanel, assignStart, assignEnd, null);
+      if (p.length > 0) conProblemi.push("- " + staffName(sid) + ": " + p.join("; "));
+    });
+    if (conProblemi.length > 0) {
+      if (!confirm("Attenzione:\n" + conProblemi.join("\n") + "\n\nAssegnare comunque il turno a tutti i selezionati?")) return;
+    }
+
+    var righe = assignStaffIds.map(function(sid) {
+      return {
+        shift_date:    dayPanel,
+        department_id: selectedDept,
+        staff_id:      sid,
+        template_id:   assignTemplateId || null,
+        start_time:    assignStart,
+        end_time:      assignEnd,
+        notes:         assignNotes.trim() || null,
+        entry_type:    "turno"
+      };
+    });
+
     setSavingAssign(true);
-    supabase.from("staff_shifts").insert({
-      shift_date: dayPanel,
-      department_id: selectedDept,
-      staff_id: assignStaffId,
-      template_id: assignTemplateId || null,
-      start_time: assignStart,
-      end_time: assignEnd,
-      notes: assignNotes.trim() || null,
-      entry_type: "turno"
-    }).then(function(result) {
+    supabase.from("staff_shifts").insert(righe).then(function(result) {
       setSavingAssign(false);
       if (result.error) { alert("Errore: " + result.error.message); return; }
       setShowAssign(false);
@@ -710,29 +739,46 @@ export default function ShiftsPage() {
               {showAssign && (
                 <div className="mb-4 bg-gray-50 rounded-lg p-4 space-y-3">
                   <div className="flex gap-2">
-                    <button onClick={function() { setAssignExtra(false); setAssignStaffId(""); }} className={"flex-1 py-2 rounded-lg text-sm font-medium border transition-colors " + (!assignExtra ? "bg-wine-700 text-white border-wine-700" : "border-gray-200 text-gray-600 hover:bg-white")}>
+                    <button onClick={function() { setAssignExtra(false); setAssignStaffIds([]); }} className={"flex-1 py-2 rounded-lg text-sm font-medium border transition-colors " + (!assignExtra ? "bg-wine-700 text-white border-wine-700" : "border-gray-200 text-gray-600 hover:bg-white")}>
                       Dipendente fisso
                     </button>
-                    <button onClick={function() { setAssignExtra(true); setAssignStaffId(""); }} className={"flex-1 py-2 rounded-lg text-sm font-medium border transition-colors " + (assignExtra ? "bg-amber-500 text-white border-amber-500" : "border-gray-200 text-gray-600 hover:bg-white")}>
+                    <button onClick={function() { setAssignExtra(true); setAssignStaffIds([]); }} className={"flex-1 py-2 rounded-lg text-sm font-medium border transition-colors " + (assignExtra ? "bg-amber-500 text-white border-amber-500" : "border-gray-200 text-gray-600 hover:bg-white")}>
                       Personale extra
                     </button>
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">Dipendente</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Dipendenti
+                      <span className="font-normal text-gray-400"> · tocca piu&rsquo; nomi per dare a tutti lo stesso turno</span>
+                    </label>
                     {(assignExtra ? extraStaff : fixedStaff).length === 0 && (
                       <p className="text-sm text-gray-400">Nessuno disponibile in questo reparto.</p>
                     )}
-                    <div className="flex flex-wrap gap-2">
+                    <div className="space-y-1.5">
                       {(assignExtra ? extraStaff : fixedStaff).map(function(s) {
-                        var scelto = assignStaffId === s.id;
+                        var scelto = assignStaffIds.indexOf(s.id) !== -1;
+                        // Gli avvisi compaiono solo quando l'orario c'e': prima non
+                        // ci sarebbe niente da controllare.
+                        var problemi = (assignStart && assignEnd) ? problemiTurno(s.id, dayPanel, assignStart, assignEnd, null) : [];
                         return (
                           <button
                             key={s.id}
-                            onClick={function() { setAssignStaffId(s.id); }}
-                            className={"px-3 py-2 rounded-lg text-sm border transition-colors " + (scelto ? "bg-wine-700 text-white border-wine-700" : "bg-white border-gray-200 text-gray-700 hover:bg-gray-100")}
+                            onClick={function() { toggleAssign(s.id); }}
+                            className={"w-full text-left rounded-lg border px-3 py-2 transition-colors " + (scelto ? (assignExtra ? "bg-amber-50 border-amber-300" : "bg-wine-50 border-wine-300") : "bg-white border-gray-200 hover:bg-gray-50")}
                           >
-                            {s.last_name} {s.first_name}
-                            {isAggiuntivo(s) && <span className={"ml-1 text-xs " + (scelto ? "text-wine-100" : "text-gray-400")}>· in aiuto</span>}
+                            <div className="flex items-center gap-2">
+                              <span className={"w-4 h-4 rounded border flex-shrink-0 " + (scelto ? (assignExtra ? "bg-amber-500 border-amber-500" : "bg-wine-700 border-wine-700") : "border-gray-300")} />
+                              <span className="text-sm font-medium text-gray-800 flex-1 min-w-0 truncate">
+                                {s.last_name} {s.first_name}
+                              </span>
+                              {isAggiuntivo(s) && <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full flex-shrink-0">in aiuto</span>}
+                            </div>
+                            {problemi.length > 0 && (
+                              <div className="flex items-start gap-1.5 mt-1 ml-6 text-xs text-amber-700">
+                                <AlertTriangle size={12} className="flex-shrink-0 mt-0.5" />
+                                <span>{problemi.join(" · ")}</span>
+                              </div>
+                            )}
                           </button>
                         );
                       })}
@@ -778,7 +824,7 @@ export default function ShiftsPage() {
                   </div>
                   <div className="flex gap-2">
                     <button onClick={function() { setShowAssign(false); }} className="flex-1 border border-gray-200 text-gray-600 py-2 rounded-lg text-sm hover:bg-white transition-colors">Annulla</button>
-                    <button onClick={saveAssign} disabled={savingAssign} className="flex-1 bg-wine-700 text-white py-2 rounded-lg text-sm hover:bg-wine-800 transition-colors disabled:opacity-50">{savingAssign ? "Salvataggio..." : "Assegna"}</button>
+                    <button onClick={saveAssign} disabled={savingAssign || assignStaffIds.length === 0} className="flex-1 bg-wine-700 text-white py-2 rounded-lg text-sm hover:bg-wine-800 transition-colors disabled:opacity-50">{savingAssign ? "Salvataggio..." : (assignStaffIds.length > 1 ? "Assegna a " + assignStaffIds.length : "Assegna")}</button>
                   </div>
                 </div>
               )}
