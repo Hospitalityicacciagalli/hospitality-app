@@ -5,6 +5,11 @@ import { supabase } from '../lib/supabase';
 
 var EDGE_FUNCTION_URL = 'https://ddarqzyymrgqmdwiyzde.supabase.co/functions/v1/admin-user-management';
 
+// Controllo di forma dell'email: qualcosa@qualcosa.qualcosa, senza spazi.
+// Lo stesso controllo lo ripete la Edge Function: qui serve solo a non
+// far partire la chiamata con un indirizzo palesemente sbagliato.
+var EMAIL_VALIDA = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 // I tre livelli di permesso. Sono gli unici: il vecchio gruppo
 // none/light/full della cassa non e' piu' usato da nessuna voce da
 // quando il permesso cassa e' stato spezzato in reception e ristorante.
@@ -112,6 +117,16 @@ export default function UserManagement() {
   var [editLoading, setEditLoading] = useState(false);
   var [editError, setEditError] = useState(null);
   var [editSuccess, setEditSuccess] = useState(null);
+
+  // Modifica email (dentro la modale modifica utente).
+  // E' un salvataggio SEPARATO da "Salva modifiche": passa dalla Edge
+  // Function (serve la chiave di servizio per toccare l'account), mentre
+  // nome/cognome/ruolo si scrivono direttamente in user_profiles.
+  var [emailEditMode, setEmailEditMode] = useState(false);
+  var [newEmail, setNewEmail] = useState('');
+  var [emailLoading, setEmailLoading] = useState(false);
+  var [emailError, setEmailError] = useState(null);
+  var [emailSuccess, setEmailSuccess] = useState(null);
 
   // Modale reset password email
   var [showResetModal, setShowResetModal] = useState(false);
@@ -313,6 +328,11 @@ export default function UserManagement() {
       display_name: user.display_name || '',
       role: user.role || 'reception'
     });
+    // La modifica email riparte sempre chiusa e pulita.
+    setEmailEditMode(false);
+    setNewEmail('');
+    setEmailError(null);
+    setEmailSuccess(null);
     setShowEditModal(true);
   }
 
@@ -353,6 +373,49 @@ export default function UserManagement() {
           loadUsers();
         }
       });
+  }
+
+  // --- MODIFICA EMAIL tramite Edge Function ---
+  function startEmailEdit() {
+    setEmailError(null);
+    setEmailSuccess(null);
+    setNewEmail(userEmails[editTarget.id] || '');
+    setEmailEditMode(true);
+  }
+
+  function cancelEmailEdit() {
+    setEmailError(null);
+    setEmailEditMode(false);
+    setNewEmail('');
+  }
+
+  function handleSaveEmail() {
+    setEmailError(null);
+    setEmailSuccess(null);
+
+    var pulita = (newEmail || '').trim().toLowerCase();
+    var attuale = (userEmails[editTarget.id] || '').toLowerCase();
+
+    if (!EMAIL_VALIDA.test(pulita)) {
+      setEmailError('Indirizzo email non valido.');
+      return;
+    }
+    if (pulita === attuale) {
+      setEmailError('La nuova email è uguale a quella attuale.');
+      return;
+    }
+
+    callEdgeFunction(
+      { action: 'update_email', userId: editTarget.id, newEmail: pulita },
+      function(msg) {
+        setEmailSuccess(msg);
+        setEmailEditMode(false);
+        setNewEmail('');
+        loadEmails();
+      },
+      function(err) { setEmailError(err); },
+      setEmailLoading
+    );
   }
 
   // --- RESET PASSWORD VIA EMAIL ---
@@ -624,6 +687,11 @@ export default function UserManagement() {
     );
   }
 
+  // La propria email non si cambia da qui: cambiarla a sessione aperta
+  // rischia di chiudere fuori chi sta operando. Si cambia da un altro
+  // super_admin, oppure dal pannello Supabase.
+  var editIsSelf = editTarget && profile && editTarget.id === profile.id;
+
   return (
     <div className="p-6">
 
@@ -748,7 +816,7 @@ export default function UserManagement() {
       {/* MODALE MODIFICA UTENTE */}
       {showEditModal && editTarget && (
         <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-md">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
               <h2 className="text-lg font-semibold text-gray-900">Modifica utente</h2>
               <button onClick={function() { setShowEditModal(false); }} className="text-gray-400 hover:text-gray-600 text-xl font-light">x</button>
@@ -803,15 +871,72 @@ export default function UserManagement() {
                 <p className="text-xs text-gray-400 mt-1">Il ruolo è ormai solo un'etichetta: gli accessi reali si gestiscono dal pulsante "Permessi".</p>
               </div>
 
-              <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Email</label>
-                <input
-                  type="text"
-                  value={userEmails[editTarget.id] || '—'}
-                  disabled
-                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 text-gray-500"
-                />
-                <p className="text-xs text-gray-400 mt-1">La modifica dell'email sarà disponibile in una fase successiva.</p>
+              {/* EMAIL — salvataggio separato, tramite Edge Function */}
+              <div className="border border-gray-200 rounded-lg p-3 bg-gray-50">
+                <label className="block text-xs font-medium text-gray-700 mb-1">Email di accesso</label>
+
+                {emailError && (
+                  <div className="mb-2 p-2 bg-red-50 border border-red-200 rounded-lg text-xs text-red-800">{emailError}</div>
+                )}
+                {emailSuccess && (
+                  <div className="mb-2 p-2 bg-green-50 border border-green-200 rounded-lg text-xs text-green-800">{'✓ ' + emailSuccess}</div>
+                )}
+
+                {!emailEditMode ? (
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={userEmails[editTarget.id] || '—'}
+                      disabled
+                      className="flex-1 min-w-0 px-3 py-2 border border-gray-200 rounded-lg text-sm bg-white text-gray-500"
+                    />
+                    {!editIsSelf && (
+                      <button
+                        type="button"
+                        onClick={startEmailEdit}
+                        className="flex-shrink-0 px-3 py-2 border border-wine-300 text-wine-700 rounded-lg text-sm hover:bg-wine-50"
+                      >
+                        Modifica email
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <input
+                      type="email"
+                      value={newEmail}
+                      onChange={function(e) { setNewEmail(e.target.value); }}
+                      autoComplete="off"
+                      autoCapitalize="none"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-wine-500"
+                    />
+                    <p className="text-xs text-gray-500">
+                      Email attuale: <strong>{userEmails[editTarget.id] || '—'}</strong>. Dopo il salvataggio l'utente entra con il nuovo indirizzo e la <strong>stessa password</strong> di prima. Non parte nessuna mail di conferma.
+                    </p>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={cancelEmailEdit}
+                        disabled={emailLoading}
+                        className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50"
+                      >
+                        Annulla
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSaveEmail}
+                        disabled={emailLoading}
+                        className="flex-1 bg-wine-700 hover:bg-wine-800 disabled:bg-wine-300 text-white px-3 py-2 rounded-lg text-sm font-medium"
+                      >
+                        {emailLoading ? 'Salvataggio...' : 'Salva email'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {editIsSelf && (
+                  <p className="text-xs text-gray-400 mt-1">La tua email la può cambiare un altro amministratore.</p>
+                )}
               </div>
 
               <div className="flex gap-3 pt-2">
