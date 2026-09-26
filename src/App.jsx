@@ -26,6 +26,7 @@ import SalePage from './pages/SalePage';
 import OrdiniBordoPage from './pages/OrdiniBordoPage';
 import ListinoBordoPage from './pages/ListinoBordoPage';
 import OrdineBordoPubblico from './pages/OrdineBordoPubblico';
+import AggiornaPasswordPage from './pages/AggiornaPasswordPage';
 import StipendiMesePage from './pages/StipendiMesePage';
 import StipendiDipendentiPage from './pages/StipendiDipendentiPage';
 import StipendioDipendenteDetail from './pages/StipendioDipendenteDetail';
@@ -432,6 +433,14 @@ function AppRoutes() {
 export default function App() {
   if (typeof window !== 'undefined' && window.location.pathname === '/ordina') {
     return <OrdineBordoPubblico />;
+  }
+
+  // Pagina su cui arriva il link della mail «Reset password». Come /ordina
+  // vive PRIMA del router e di AuthProvider: dentro l'app, la sessione
+  // aperta dal link porterebbe subito alle Prenotazioni e la pagina non
+  // si vedrebbe mai. Non richiede permessi: basta il link valido.
+  if (typeof window !== 'undefined' && window.location.pathname === '/aggiorna-password') {
+    return <AggiornaPasswordPage />;
   }
 
   return (
