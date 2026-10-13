@@ -20,6 +20,14 @@ import ConfermaPin from '../components/ConfermaPin';
 //     modifica: sarebbe un cambiamento non verificabile a posteriori)
 //   - le chiusure invalidate mostrano una fascia ambra col teorico ricalcolato
 //     La correzione vera si fa registrando una chiusura NUOVA.
+//
+// NAVIGAZIONE DATE (correzione fuso orario):
+//   << -7 giorni · < -1 giorno · > +1 giorno · >> +7 giorni · Oggi
+//   Le date si calcolano SEMPRE in ora locale. Prima si convertivano con
+//   toISOString(), che passa all'ora di Londra: la mezzanotte italiana
+//   diventava le 22 del giorno prima. Effetti: > non avanzava mai,
+//   < tornava indietro di due giorni, e fra mezzanotte e le 2 la cassa
+//   si apriva su ieri.
 // ─────────────────────────────────────────────────────────────
 
 var ID_RECEPTION = 'd375c1de-04b9-490e-ab8f-5f11a6cb969f';
@@ -44,7 +52,26 @@ var PAGAMENTI = [
 
 var TAGLI = [500, 200, 100, 50, 20, 10, 5];
 
-function oggiISO() { return new Date().toISOString().split('T')[0]; }
+// Passo dei pulsanti << e >>
+var PASSO_LUNGO = 7;
+
+// ── date in ORA LOCALE (mai toISOString per le date di calendario) ──
+// Da oggetto Date a 'AAAA-MM-GG' leggendo il calendario locale.
+function isoLocale(d) {
+  var a = d.getFullYear();
+  var m = d.getMonth() + 1;
+  var g = d.getDate();
+  return a + '-' + (m < 10 ? '0' : '') + m + '-' + (g < 10 ? '0' : '') + g;
+}
+// Da 'AAAA-MM-GG' a Date alla mezzanotte locale. Costruita a pezzi e non
+// dalla stringa, perche' alcuni Safari leggono la stringa in ora di Londra.
+function dataDaIso(iso) {
+  var p = String(iso || '').split('-');
+  if (p.length !== 3) return new Date();
+  return new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+}
+
+function oggiISO() { return isoLocale(new Date()); }
 function arrotonda(n) { return Math.round((n || 0) * 100) / 100; }
 function formatEuro(n) { return arrotonda(n).toLocaleString('it-IT', { style: 'currency', currency: 'EUR' }); }
 
@@ -73,12 +100,12 @@ function nuovoUuid() {
 }
 
 function spostaData(iso, giorni) {
-  var d = new Date(iso + 'T00:00:00');
+  var d = dataDaIso(iso || oggiISO());
   d.setDate(d.getDate() + giorni);
-  return d.toISOString().split('T')[0];
+  return isoLocale(d);
 }
 function dataLeggibile(iso) {
-  var d = new Date(iso + 'T00:00:00');
+  var d = dataDaIso(iso);
   return d.toLocaleDateString('it-IT', { weekday: 'short', day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 function oraDa(ts) {
@@ -668,6 +695,15 @@ export default function CassaNuovaPage(props) {
   var [showPinTrasferimento, setShowPinTrasferimento] = useState(false);
   var [datiTrasferimento, setDatiTrasferimento] = useState(null);
 
+  // ── navigazione date ──
+  // Forma "a funzione": ogni tocco parte dalla data piu' recente, anche se
+  // si tocca piu' volte prima che la pagina si sia ridisegnata.
+  function vaiDiGiorni(giorni) {
+    setData(function(prev) { return spostaData(prev, giorni); });
+  }
+  function vaiAOggi() { setData(oggiISO()); }
+  var eOggi = data === oggiISO();
+
   // riferimenti
   useEffect(function() {
     supabase.from('centri_di_costo').select('id, nome').eq('attivo', true).order('nome').then(function(r) {
@@ -971,6 +1007,8 @@ export default function CassaNuovaPage(props) {
     );
   }
 
+  var clsFreccia = 'min-w-[40px] px-2 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 active:bg-gray-100 text-lg leading-none select-none';
+
   return (
     <div className="p-4 lg:p-6 max-w-5xl mx-auto">
 
@@ -986,11 +1024,20 @@ export default function CassaNuovaPage(props) {
           className="px-3 py-1.5 rounded-lg text-sm border border-gray-300 text-gray-600 hover:bg-gray-50">
           ⚙️ Gestisci
         </button>
-        <div className="flex items-center gap-1 ml-auto">
-          <button onClick={function() { setData(spostaData(data, -1)); }} className="px-2 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">&lsaquo;</button>
-          <input type="date" value={data} onChange={function(e) { setData(e.target.value); }}
+        <div className="flex items-center gap-1 ml-auto flex-wrap">
+          <button type="button" title="Indietro di 7 giorni" onClick={function() { vaiDiGiorni(-PASSO_LUNGO); }} className={clsFreccia}>&laquo;</button>
+          <button type="button" title="Giorno precedente" onClick={function() { vaiDiGiorni(-1); }} className={clsFreccia}>&lsaquo;</button>
+          <input type="date" value={data}
+            onChange={function(e) { if (e.target.value) setData(e.target.value); }}
             className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm text-gray-700" />
-          <button onClick={function() { setData(spostaData(data, 1)); }} className="px-2 py-1.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50">&rsaquo;</button>
+          <button type="button" title="Giorno successivo" onClick={function() { vaiDiGiorni(1); }} className={clsFreccia}>&rsaquo;</button>
+          <button type="button" title="Avanti di 7 giorni" onClick={function() { vaiDiGiorni(PASSO_LUNGO); }} className={clsFreccia}>&raquo;</button>
+          {!eOggi && (
+            <button type="button" onClick={vaiAOggi}
+              className="ml-1 px-3 py-1.5 rounded-lg text-sm border border-wine-300 text-wine-700 hover:bg-wine-50">
+              Oggi
+            </button>
+          )}
         </div>
       </div>
 
