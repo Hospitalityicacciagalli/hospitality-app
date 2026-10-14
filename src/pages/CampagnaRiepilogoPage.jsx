@@ -86,16 +86,56 @@ export default function CampagnaRiepilogoPage() {
   // ----------------------------------------------------------
   // Caricamento righe dell'anno selezionato
   // ----------------------------------------------------------
+  // ATTENZIONE: Supabase restituisce al massimo 1000 righe per richiesta.
+  // Un anno intero supera facilmente questo limite (es. 2026 = 1127 righe),
+  // e le righe in eccesso venivano perse in silenzio. Per questo:
+  //   - si carica un mese alla volta (12 richieste in parallelo)
+  //   - dentro ogni mese si chiedono pagine da 1000 finche' non finiscono.
+  var PAGINA = 1000;
+  var [erroreCarico, setErroreCarico] = useState('');
+
+  function caricaMese(a, m) {
+    var tutte = [];
+    function pagina(da) {
+      return supabase
+        .from('stip_ore_campagna')
+        .select('operaio_nome, staff_id, ore, costo, ambito, mese')
+        .eq('anno', a)
+        .eq('mese', m)
+        .order('operaio_nome')
+        .range(da, da + PAGINA - 1)
+        .then(function (res) {
+          if (res.error) throw res.error;
+          var dati = res.data || [];
+          tutte = tutte.concat(dati);
+          if (dati.length === PAGINA) return pagina(da + PAGINA);
+          return tutte;
+        });
+    }
+    return pagina(0);
+  }
+
   useEffect(function () {
+    var annullato = false;
     setLoading(true);
-    supabase
-      .from('stip_ore_campagna')
-      .select('operaio_nome, staff_id, ore, costo, ambito, mese')
-      .eq('anno', anno)
-      .then(function (res) {
-        setRighe(res.data || []);
+    setErroreCarico('');
+    var richieste = [];
+    for (var m = 1; m <= 12; m++) richieste.push(caricaMese(anno, m));
+    Promise.all(richieste)
+      .then(function (perMese) {
+        if (annullato) return;
+        var tutte = [];
+        perMese.forEach(function (arr) { tutte = tutte.concat(arr); });
+        setRighe(tutte);
+        setLoading(false);
+      })
+      .catch(function (err) {
+        if (annullato) return;
+        setRighe([]);
+        setErroreCarico('Errore nel caricamento dei dati: ' + (err && err.message ? err.message : 'sconosciuto'));
         setLoading(false);
       });
+    return function () { annullato = true; };
   }, [anno]);
 
   // ----------------------------------------------------------
@@ -540,6 +580,12 @@ export default function CampagnaRiepilogoPage() {
           </div>
         )}
       </div>
+
+      {erroreCarico && (
+        <div className="bg-red-50 border border-red-200 text-red-700 rounded-xl p-3 mb-4 text-sm">
+          {erroreCarico}
+        </div>
+      )}
 
       {loading ? (
         <div className="bg-white border border-gray-200 rounded-xl p-8 text-center text-gray-400 text-sm">
