@@ -118,7 +118,9 @@ export default function StipendiDipendentiPage() {
   // true se il giro paghe di questa persona e' ancora aperto.
   function giroApert(m) {
     var fine = finePeriodo(m);
-    if (!fine) return true;                       // nessuna fine nota: in forza
+    // Nessuna fine nota: in forza, A MENO CHE sia archiviato (non attivo
+    // senza nessuna data: 30/10/2026). Si rivede con "mostra cessati".
+    if (!fine) return m.is_active !== false;
     var oggi = new Date();
     var oggiIso = oggi.getFullYear() + '-' + String(oggi.getMonth() + 1).padStart(2, '0') + '-' + String(oggi.getDate()).padStart(2, '0');
     if (fine >= oggiIso) return true;             // non ancora finito

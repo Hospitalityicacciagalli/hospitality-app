@@ -229,6 +229,10 @@ export default function StipendiMesePage() {
     var cessato = staff.contract_end_date ? String(staff.contract_end_date).slice(0, 10) : null;
     if (assunto && assunto > ultimo) return false;   // assunto dopo il mese
     if (cessato && cessato < primo) return false;    // cessato prima del mese
+    // Archiviato (30/10/2026): non attivo e senza nessuna data di fine.
+    // Non ha un contratto da cui dedurre i mesi: non viene piu' proposto.
+    // Dove ha gia' dati salvati resta visibile grazie a hasDati.
+    if (staff.is_active === false && !cessato) return false;
     return true;
   }
 

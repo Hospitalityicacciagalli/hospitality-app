@@ -169,6 +169,8 @@ export default function StipendiGiornatePage() {
     var cessato = isoSlice(staff.contract_end_date);
     if (assunto && assunto > ultimo) return false;
     if (cessato && cessato < primo) return false;
+    // Archiviato (30/10/2026): stessa regola di lavoraNelMese in StipendiMesePage.
+    if (staff.is_active === false && !cessato) return false;
     return true;
   }
 

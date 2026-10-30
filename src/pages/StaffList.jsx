@@ -2,7 +2,8 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/AuthContext";
-import { Users, Plus, Search, ChevronRight, AlertTriangle, Phone, Mail, UserCheck, UserMinus } from "lucide-react";
+import { Users, Plus, Search, ChevronRight, AlertTriangle, Phone, Mail, UserCheck, UserMinus, Archive, ArchiveRestore } from "lucide-react";
+import ArchivioDipendente, { statoArchivio } from "../components/ArchivioDipendente";
 
 var CONTRACT_LABELS = {
   indeterminato: "Indeterminato",
@@ -71,6 +72,10 @@ export default function StaffList() {
   // Permesso granulare, non ruolo rigido: cosi' vale anche per chi entra
   // con l'elevazione PIN, che hasRole ignora per progetto.
   var canManage = canEdit("staff");
+  // Archiviare e riattivare (30/10/2026): anche chi gestisce i turni,
+  // perche' e' dai turni che si vede chi non serve piu' in griglia.
+  var canArchive = canEdit("staff") || canEdit("turni");
+  var [azioneArchivio, setAzioneArchivio] = useState(null);
 
   useEffect(function() {
     loadDepartments();
@@ -133,7 +138,8 @@ export default function StaffList() {
     var matchActive =
       filterActive === "all" ||
       (filterActive === "active" && inForzaOggi(s)) ||
-      (filterActive === "inactive" && !inForzaOggi(s));
+      (filterActive === "inactive" && !inForzaOggi(s)) ||
+      (filterActive === "archived" && statoArchivio(s) === "archiviato");
 
     var matchType =
       filterType === "all" ||
@@ -246,6 +252,7 @@ export default function StaffList() {
         >
           <option value="active">Attivi</option>
           <option value="inactive">Non attivi</option>
+          <option value="archived">Solo archiviati</option>
           <option value="all">Tutti</option>
         </select>
       </div>
@@ -307,7 +314,7 @@ export default function StaffList() {
                       )}
                       {!member.is_active && !cessazioneFutura(member) && (
                         <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
-                          {member.data_cessazione ? "Cessato il " + formatDayMonth(member.data_cessazione) : "Non attivo"}
+                          {member.data_cessazione ? "Cessato il " + formatDayMonth(member.data_cessazione) : "Archiviato"}
                         </span>
                       )}
                       {expiring && (
@@ -370,12 +377,44 @@ export default function StaffList() {
                     </span>
                   )}
 
+                  {/* Archivia / Riattiva (non per i cessati: per loro c'e' la Cessazione) */}
+                  {canArchive && statoArchivio(member) === "attivo" && (
+                    <button
+                      onClick={function(e) { e.stopPropagation(); setAzioneArchivio({ member: member, azione: "archivia" }); }}
+                      className="flex items-center gap-1 text-xs border border-gray-200 text-gray-600 px-2.5 py-1.5 rounded-lg hover:bg-gray-50 flex-shrink-0"
+                      title="Nascondi dai turni senza cancellare niente"
+                    >
+                      <Archive size={13} />
+                      <span className="hidden sm:inline">Archivia</span>
+                    </button>
+                  )}
+                  {canArchive && statoArchivio(member) === "archiviato" && (
+                    <button
+                      onClick={function(e) { e.stopPropagation(); setAzioneArchivio({ member: member, azione: "riattiva" }); }}
+                      className="flex items-center gap-1 text-xs border border-green-300 text-green-700 px-2.5 py-1.5 rounded-lg hover:bg-green-50 flex-shrink-0"
+                      title="Rimetti nei turni"
+                    >
+                      <ArchiveRestore size={13} />
+                      <span className="hidden sm:inline">Riattiva</span>
+                    </button>
+                  )}
+
                   <ChevronRight size={18} className="text-gray-300 flex-shrink-0" />
                 </div>
               </div>
             );
           })}
         </div>
+      )}
+
+      {azioneArchivio && (
+        <ArchivioDipendente
+          key={azioneArchivio.member.id + "-" + azioneArchivio.azione}
+          member={azioneArchivio.member}
+          azione={azioneArchivio.azione}
+          onClose={function() { setAzioneArchivio(null); }}
+          onDone={function() { setAzioneArchivio(null); loadStaff(); }}
+        />
       )}
     </div>
   );

@@ -5,8 +5,9 @@ import { useAuth } from "../lib/AuthContext";
 import {
   ArrowLeft, Edit, Phone, Mail, MapPin, Calendar,
   Briefcase, Clock, CheckCircle, XCircle, AlertTriangle,
-  Plus, ChevronDown, ChevronUp, User, UserCheck, UserX
+  Plus, ChevronDown, ChevronUp, User, UserCheck, UserX, Archive, ArchiveRestore, Trash2
 } from "lucide-react";
+import ArchivioDipendente, { statoArchivio } from "../components/ArchivioDipendente";
 
 var DAY_NAMES = ["Dom", "Lun", "Mar", "Mer", "Gio", "Ven", "Sab"];
 var DAY_NAMES_FULL = ["Domenica", "Lunedì", "Martedì", "Mercoledì", "Giovedì", "Venerdì", "Sabato"];
@@ -106,6 +107,9 @@ export default function StaffDetail() {
   // con l'elevazione PIN, che hasRole ignora per progetto.
   var canManage = canEdit("staff");
   var canApprove = canEdit("staff");
+  // Archiviare, riattivare ed eliminare (30/10/2026): anche chi gestisce i turni.
+  var canArchive = canEdit("staff") || canEdit("turni");
+  var [azioneArchivio, setAzioneArchivio] = useState(null);
 
   useEffect(function() {
     loadMember();
@@ -269,7 +273,9 @@ export default function StaffDetail() {
                 </span>
               )}
               {!member.is_active && (
-                <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Non attivo</span>
+                <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">
+                  {statoArchivio(member) === "archiviato" ? "Archiviato" : "Non attivo"}
+                </span>
               )}
             </div>
           </div>
@@ -689,6 +695,63 @@ export default function StaffDetail() {
           </div>
         )}
       </div>
+
+      {/* Archivio: archivia / riattiva / elimina (30/10/2026) */}
+      {canArchive && (
+        <div className="bg-white rounded-xl border border-gray-200 p-6 mt-6 mb-8">
+          <div className="flex items-center gap-2 mb-2">
+            <Archive size={18} className="text-gray-500" />
+            <h2 className="font-semibold text-gray-800">Archivio</h2>
+          </div>
+          <p className="text-sm text-gray-500 mb-4">
+            {statoArchivio(member) === "attivo" && "Archivia chi non viene piu' (per esempio un extra venuto una volta): sparisce dai turni senza cancellare niente. Elimina solo una scheda inserita per errore."}
+            {statoArchivio(member) === "archiviato" && "Questa scheda e' archiviata: non compare nei turni. Riattivala se la persona torna a lavorare."}
+            {statoArchivio(member) === "cessato" && "Questa persona e' cessata: per lei vale la Cessazione. Eliminare serve solo se la scheda e' stata inserita per errore."}
+          </p>
+          <div className="flex gap-2 flex-wrap">
+            {statoArchivio(member) === "attivo" && (
+              <button
+                onClick={function() { setAzioneArchivio("archivia"); }}
+                className="flex items-center gap-2 bg-gray-700 text-white px-4 py-2 rounded-lg hover:bg-gray-800 transition-colors text-sm"
+              >
+                <Archive size={15} />
+                Archivia
+              </button>
+            )}
+            {statoArchivio(member) === "archiviato" && (
+              <button
+                onClick={function() { setAzioneArchivio("riattiva"); }}
+                className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition-colors text-sm"
+              >
+                <ArchiveRestore size={15} />
+                Riattiva
+              </button>
+            )}
+            <button
+              onClick={function() { setAzioneArchivio("elimina"); }}
+              className="flex items-center gap-2 border border-red-300 text-red-700 px-4 py-2 rounded-lg hover:bg-red-50 transition-colors text-sm"
+            >
+              <Trash2 size={15} />
+              Elimina dipendente
+            </button>
+          </div>
+        </div>
+      )}
+
+      {azioneArchivio && (
+        <ArchivioDipendente
+          key={azioneArchivio}
+          member={member}
+          azione={azioneArchivio}
+          onClose={function() { setAzioneArchivio(null); }}
+          onCambiaAzione={function(a) { setAzioneArchivio(a); }}
+          onDone={function(esito) {
+            setAzioneArchivio(null);
+            if (esito === "eliminato") { navigate("/staff"); return; }
+            loadMember();
+          }}
+        />
+      )}
 
     </div>
   );

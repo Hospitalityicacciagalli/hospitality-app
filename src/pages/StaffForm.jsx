@@ -1,8 +1,10 @@
 import { useState, useEffect } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { useNavigate, useParams, useLocation } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/AuthContext";
 import { ArrowLeft, Save, UserPlus, Calendar, Briefcase, Phone, MapPin, Plus, Trash2, UserCheck, FileText, AlertTriangle, CheckCircle, UserX } from "lucide-react";
+import { cercaSimili, haLettereSufficienti } from "../lib/nomiSimili";
+import { statoArchivio } from "../components/ArchivioDipendente";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
@@ -157,6 +159,32 @@ export default function StaffForm() {
   // si accende questo flag e si indirizza alla pagina dedicata.
   var [cessazioneRilevata, setCessazioneRilevata] = useState(false);
 
+  // ── DOPPIONI (30/10/2026, caso AMHED / Ahmed Juned) ──
+  // Tutto lo staff, anche archiviati e cessati: si legge una volta sola
+  // e serve a riconoscere i nomi simili PRIMA che nasca una scheda nuova.
+  var [tuttoStaff, setTuttoStaff] = useState(null);
+  // Dopo la UniLav, se nessuno ha quel codice fiscale: nomi simili e
+  // schede provvisorie (senza codice fiscale) che potrebbero essere lui.
+  var [proposte, setProposte] = useState(null);
+  // Al salvataggio a mano: nomi simili gia' in anagrafica.
+  var [similiSalvataggio, setSimiliSalvataggio] = useState(null);
+  // "E' un'altra persona": non si chiede una seconda volta.
+  var [nuovaConfermata, setNuovaConfermata] = useState(false);
+
+  // ── COMPLETARE UNA SCHEDA PROVVISORIA CON LA UNILAV ──
+  // Si arriva qui in modifica con location.state.unilav: i dati letti
+  // dal PDF si applicano alla scheda esistente, che diventa quella
+  // ufficiale e si tiene i turni gia' assegnati. Si applicano solo
+  // quando la scheda E i tipi di contratto sono arrivati davvero
+  // (regola 50: si aspetta il dato, non una spia).
+  var location = useLocation();
+  var unilavDaApplicare = isEdit && location.state && location.state.unilav ? location.state.unilav : null;
+  var [recordCaricato, setRecordCaricato] = useState(false);
+  var [configCaricata, setConfigCaricata] = useState(false);
+  var [unilavApplicata, setUnilavApplicata] = useState(false);
+  var [eraArchiviata, setEraArchiviata] = useState(false);
+  var [cfAltrui, setCfAltrui] = useState(null);
+
   // Permesso granulare, non ruolo rigido: cosi' vale anche per chi entra
   // con l'elevazione PIN, che hasRole ignora per progetto.
   var canManage = canEdit("staff");
@@ -165,7 +193,36 @@ export default function StaffForm() {
     loadConfigOptions();
     loadDepartments();
     if (isEdit) loadStaffMember();
+    if (!isEdit) caricaTuttoStaff();
   }, []);
+
+  useEffect(function() {
+    if (!unilavDaApplicare || unilavApplicata) return;
+    if (!recordCaricato || !configCaricata) return;
+    applyParsedData(unilavDaApplicare);
+    // Una UniLav di assunzione dice che lavora: se era archiviata torna attiva.
+    handleChange("is_active", true);
+    setUnilavInfo(unilavDaApplicare);
+    setUnilavApplicata(true);
+    controllaCfAltrui(unilavDaApplicare.fiscal_code);
+  }, [recordCaricato, configCaricata]);
+
+  function caricaTuttoStaff() {
+    return supabase
+      .from("staff_members")
+      .select("id, first_name, last_name, fiscal_code, is_active, is_extra, data_cessazione, staff_departments(name)")
+      .order("last_name")
+      .then(function(result) {
+        var lista = result.error ? [] : (result.data || []);
+        setTuttoStaff(lista);
+        return lista;
+      });
+  }
+
+  function conTuttoStaff(fn) {
+    if (tuttoStaff) { fn(tuttoStaff); return; }
+    caricaTuttoStaff().then(fn);
+  }
 
   function loadConfigOptions() {
     supabase
@@ -174,7 +231,7 @@ export default function StaffForm() {
       .eq("is_active", true)
       .order("sort_order")
       .then(function(result) {
-        if (result.error) return;
+        if (result.error) { setConfigCaricata(true); return; }
         var data = result.data || [];
         var meals     = data.filter(function(o) { return o.category === "meal_type"; });
         var contracts = data.filter(function(o) { return o.category === "contract_type"; });
@@ -183,6 +240,7 @@ export default function StaffForm() {
         setContractTypes(contracts);
         setJobTitles(jobs);
         if (meals.length > 0) setNewMeal(meals[0].value);
+        setConfigCaricata(true);
       });
   }
 
@@ -230,6 +288,8 @@ export default function StaffForm() {
           is_active:         d.is_active !== false,
           is_extra:          d.is_extra === true
         });
+        setEraArchiviata(d.is_active === false && !d.data_cessazione);
+        setRecordCaricato(true);
         loadAvailability(d.id);
         loadRepartiExtra(d.id);
         setLoading(false);
@@ -320,6 +380,9 @@ export default function StaffForm() {
     setUnilavError(null);
     setUnilavInfo(null);
     setDuplicate(null);
+    setProposte(null);
+    setSimiliSalvataggio(null);
+    setNuovaConfermata(false);
     setCessazioneRilevata(false);
 
     file.arrayBuffer().then(function(buffer) {
@@ -417,27 +480,87 @@ export default function StaffForm() {
             var d = result.data[0];
             setDuplicate({ id: d.id, name: d.first_name + " " + d.last_name, is_active: d.is_active !== false, byName: false });
           } else {
-            checkDuplicateByName(parsed);
+            proponiSchedeEsistenti(parsed);
           }
         });
     } else {
-      checkDuplicateByName(parsed);
+      proponiSchedeEsistenti(parsed);
     }
   }
 
-  function checkDuplicateByName(parsed) {
-    if (!parsed.first_name || !parsed.last_name) return;
+  // Nessuno ha questo codice fiscale: prima di creare una scheda nuova
+  // si propongono i nomi simili e le schede inserite a mano (senza
+  // codice fiscale), che possono essere la stessa persona scritta male.
+  function proponiSchedeEsistenti(parsed) {
+    conTuttoStaff(function(lista) {
+      var simili = cercaSimili(parsed.first_name, parsed.last_name, lista);
+      var idSimili = simili.map(function(x) { return x.id; });
+      var provvisorie = lista.filter(function(x) {
+        return !x.fiscal_code && idSimili.indexOf(x.id) === -1;
+      });
+      if (simili.length === 0 && provvisorie.length === 0) return;
+      setProposte({ simili: simili, provvisorie: provvisorie });
+    });
+  }
+
+  function completaConUnilav(staffId) {
+    navigate("/staff/" + staffId + "/modifica", { state: { unilav: unilavInfo } });
+  }
+
+  // In modifica con UniLav: il codice fiscale appartiene gia' a un'altra scheda?
+  function controllaCfAltrui(cf) {
+    if (!cf) { setCfAltrui(null); return; }
     supabase
       .from("staff_members")
-      .select("id, first_name, last_name, is_active")
-      .ilike("first_name", parsed.first_name)
-      .ilike("last_name", parsed.last_name)
+      .select("id, first_name, last_name")
+      .eq("fiscal_code", cf)
+      .neq("id", params.id)
       .then(function(result) {
         if (!result.error && result.data && result.data.length > 0) {
           var d = result.data[0];
-          setDuplicate({ id: d.id, name: d.first_name + " " + d.last_name, is_active: d.is_active !== false, byName: true });
+          setCfAltrui({ id: d.id, name: d.first_name + " " + d.last_name });
+        } else {
+          setCfAltrui(null);
         }
       });
+  }
+
+  function etichettePersona(x) {
+    var st = statoArchivio(x);
+    return (
+      <span>
+        {x.is_extra && <span className="ml-2 text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full">Extra</span>}
+        {st === "archiviato" && <span className="ml-2 text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Archiviato</span>}
+        {st === "cessato" && <span className="ml-2 text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded-full">Cessato</span>}
+      </span>
+    );
+  }
+
+  function rigaPersona(x, conCompleta) {
+    return (
+      <div key={x.id} className="flex items-center gap-2 py-2 border-b border-amber-100 flex-wrap">
+        <div className="flex-1 min-w-0">
+          <span className="text-sm font-medium text-gray-900">{x.last_name} {x.first_name}</span>
+          {etichettePersona(x)}
+          <div className="text-xs text-gray-500">
+            {x.staff_departments ? x.staff_departments.name : "senza reparto"}
+            {!x.fiscal_code && " - senza codice fiscale"}
+          </div>
+        </div>
+        {conCompleta && !x.fiscal_code && (
+          <button
+            onClick={function() { completaConUnilav(x.id); }}
+            className="bg-amber-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-amber-700 transition-colors">
+            Completa con questa UniLav
+          </button>
+        )}
+        <button
+          onClick={function() { navigate("/staff/" + x.id); }}
+          className="border border-amber-300 text-amber-700 px-3 py-1.5 rounded-lg text-sm hover:bg-amber-100 transition-colors">
+          Apri la scheda
+        </button>
+      </div>
+    );
   }
 
   function getMealLabel(value) {
@@ -490,10 +613,35 @@ export default function StaffForm() {
   }
 
   function handleSubmit() {
-    if (!form.first_name.trim() || !form.last_name.trim()) {
-      alert("Nome e Cognome sono obbligatori.");
+    // Un trattino o un'iniziale non sono un nome: senza nome e cognome veri
+    // il programma non riconosce la persona quando arriva la sua UniLav.
+    if (!haLettereSufficienti(form.first_name) || !haLettereSufficienti(form.last_name)) {
+      alert("Nome e Cognome sono obbligatori e devono avere almeno due lettere ciascuno. Un trattino o un'iniziale non bastano: senza il nome vero il programma non riconosce la persona quando arriva la sua UniLav.");
       return;
     }
+    if (!isEdit && !nuovaConfermata) {
+      setSaving(true);
+      conTuttoStaff(function(lista) {
+        var simili = cercaSimili(form.first_name, form.last_name, lista);
+        if (simili.length > 0) {
+          setSaving(false);
+          setSimiliSalvataggio(simili);
+          return;
+        }
+        eseguiSalvataggio();
+      });
+      return;
+    }
+    eseguiSalvataggio();
+  }
+
+  function salvaComunque() {
+    setNuovaConfermata(true);
+    setSimiliSalvataggio(null);
+    eseguiSalvataggio();
+  }
+
+  function eseguiSalvataggio() {
     setSaving(true);
 
     var payload = {
@@ -659,7 +807,7 @@ export default function StaffForm() {
                         Apri la scheda esistente
                       </button>
                       <button
-                        onClick={function() { setDuplicate(null); }}
+                        onClick={function() { setDuplicate(null); setNuovaConfermata(true); }}
                         className="border border-amber-300 text-amber-700 px-3 py-1.5 rounded-lg text-sm hover:bg-amber-100 transition-colors">
                         Ignora e crea comunque
                       </button>
@@ -669,8 +817,48 @@ export default function StaffForm() {
               </div>
             )}
 
+            {/* SCHEDE ESISTENTI CHE POTREBBERO ESSERE LUI (30/10/2026) */}
+            {proposte && !duplicate && (
+              <div className="mt-4 p-4 bg-amber-50 border border-amber-300 rounded-lg">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle size={18} className="text-amber-600 mt-0.5 flex-shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-amber-800">
+                      Prima di creare una scheda nuova: e&rsquo; gia&rsquo; in anagrafica?
+                    </p>
+                    <p className="text-sm text-amber-700 mt-1">
+                      Nessuna scheda ha questo codice fiscale. Se la persona era gia&rsquo; stata
+                      inserita a mano (per esempio per darle i turni), completa quella scheda con la
+                      UniLav: diventa la scheda ufficiale e si tiene i turni gia&rsquo; assegnati.
+                    </p>
+                    {proposte.simili.length > 0 && (
+                      <div className="mt-3">
+                        <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide">Nomi simili</p>
+                        {proposte.simili.map(function(x) { return rigaPersona(x, true); })}
+                      </div>
+                    )}
+                    {proposte.provvisorie.length > 0 && (
+                      <div className="mt-3">
+                        <p className="text-xs font-semibold text-amber-800 uppercase tracking-wide">
+                          Altre schede senza codice fiscale (inserite a mano)
+                        </p>
+                        <div className="max-h-64 overflow-y-auto">
+                          {proposte.provvisorie.map(function(x) { return rigaPersona(x, true); })}
+                        </div>
+                      </div>
+                    )}
+                    <button
+                      onClick={function() { setProposte(null); setNuovaConfermata(true); }}
+                      className="mt-3 border border-amber-300 text-amber-700 px-3 py-1.5 rounded-lg text-sm hover:bg-amber-100 transition-colors">
+                      Nessuna di queste: e&rsquo; una persona nuova
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* CONFERMA ASSUNZIONE */}
-            {unilavInfo && unilavInfo.tipo_comunicazione === "assunzione" && !duplicate && (
+            {unilavInfo && unilavInfo.tipo_comunicazione === "assunzione" && !duplicate && !proposte && (
               <div className="mt-4 p-3 bg-green-50 border border-green-200 rounded-lg">
                 <p className="text-sm text-green-800 flex items-center gap-2">
                   <CheckCircle size={16} className="flex-shrink-0" />
@@ -704,6 +892,39 @@ export default function StaffForm() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Scheda provvisoria completata con la UniLav (30/10/2026) */}
+        {isEdit && unilavApplicata && (
+          <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+            <p className="text-sm font-medium text-green-800 flex items-center gap-2">
+              <CheckCircle size={16} className="flex-shrink-0" />
+              Dati della UniLav inseriti in questa scheda
+            </p>
+            <p className="text-sm text-green-700 mt-1">
+              Controlla i campi e premi &laquo;Salva modifiche&raquo;. I turni gia&rsquo; assegnati
+              restano collegati.
+              {eraArchiviata && " La scheda era archiviata: salvando torna attiva."}
+              {form.is_extra && " E' segnata come Extra: togli la spunta se ora ha un contratto."}
+            </p>
+          </div>
+        )}
+        {isEdit && cfAltrui && (
+          <div className="bg-amber-50 border border-amber-300 rounded-xl p-4">
+            <p className="text-sm font-medium text-amber-800 flex items-center gap-2">
+              <AlertTriangle size={16} className="flex-shrink-0" />
+              Questo codice fiscale e&rsquo; gia&rsquo; sulla scheda di {cfAltrui.name}
+            </p>
+            <p className="text-sm text-amber-700 mt-1">
+              Probabilmente quella e&rsquo; la scheda ufficiale e questa e&rsquo; il doppione. In quel caso
+              non salvare: apri questa scheda ed eliminala (se non ha storia) o archiviala.
+            </p>
+            <button
+              onClick={function() { navigate("/staff/" + cfAltrui.id); }}
+              className="mt-3 border border-amber-300 text-amber-700 px-3 py-1.5 rounded-lg text-sm hover:bg-amber-100 transition-colors">
+              Apri la scheda di {cfAltrui.name}
+            </button>
           </div>
         )}
 
@@ -981,16 +1202,49 @@ export default function StaffForm() {
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-300"
                 placeholder="Note interne sul dipendente..." />
             </div>
+            {/* La vecchia spunta "Dipendente attivo" e' stata tolta il 30/10/2026:
+                archiviare e riattivare si fa dai pulsanti della scheda, che
+                prima controllano contratto in corso e turni futuri. Il valore
+                di is_active viaggia comunque nel salvataggio, invariato. */}
             {isEdit && (
-              <div className="flex items-center gap-3">
-                <input type="checkbox" id="is_active" checked={form.is_active}
-                  onChange={function(e) { handleChange("is_active", e.target.checked); }}
-                  className="w-4 h-4 accent-wine-700" />
-                <label htmlFor="is_active" className="text-sm font-medium text-gray-700">Dipendente attivo</label>
-              </div>
+              <p className="text-sm text-gray-500">
+                {form.is_active ? "Dipendente attivo." : "Dipendente non attivo."} Per archiviarlo, riattivarlo
+                o eliminarlo usa i pulsanti in fondo alla sua scheda.
+              </p>
             )}
           </div>
         </div>
+
+        {/* Nomi simili trovati al salvataggio (30/10/2026) */}
+        {similiSalvataggio && (
+          <div className="bg-amber-50 border border-amber-300 rounded-xl p-4">
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={18} className="text-amber-600 mt-0.5 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-amber-800">Forse e&rsquo; gia&rsquo; in anagrafica</p>
+                <p className="text-sm text-amber-700 mt-1">
+                  Questi nomi somigliano a quello che stai inserendo. Se e&rsquo; la stessa persona, apri
+                  la sua scheda (se e&rsquo; archiviata potrai riattivarla) invece di crearne una nuova.
+                </p>
+                <div className="mt-2">
+                  {similiSalvataggio.map(function(x) { return rigaPersona(x, false); })}
+                </div>
+                <div className="flex gap-2 mt-3 flex-wrap">
+                  <button
+                    onClick={salvaComunque}
+                    className="bg-amber-600 text-white px-3 py-1.5 rounded-lg text-sm hover:bg-amber-700 transition-colors">
+                    E&rsquo; un&rsquo;altra persona: crea comunque
+                  </button>
+                  <button
+                    onClick={function() { setSimiliSalvataggio(null); }}
+                    className="border border-amber-300 text-amber-700 px-3 py-1.5 rounded-lg text-sm hover:bg-amber-100 transition-colors">
+                    Annulla
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Bottoni */}
         <div className="flex gap-3 pb-8">
