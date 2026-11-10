@@ -269,7 +269,7 @@ export default function Layout({ children }) {
           </NavLink>
         )}
 
-        {canEdit('prenotazioni') && (
+        {canEdit('normalizza_prenotazioni') && (
           <NavLink
             to="/prenotazioni/normalizza"
             className={function(p) { return navClass(p.isActive); }}

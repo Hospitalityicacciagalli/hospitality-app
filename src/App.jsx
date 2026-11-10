@@ -189,11 +189,13 @@ function AppRoutes() {
         {/* Normalizza prenotazioni — l'elenco che indica dove la camera o
             il codice gift card stanno scritti a mano nelle note. La pagina
             non normalizza niente: apre la prenotazione, una alla volta.
-            Nessuna chiave di permesso nuova: chi puo' MODIFICARE una
-            prenotazione puo' normalizzarla, e il pannello mostra la parte
-            gift card solo a chi ha anche quel permesso. */}
+            Permesso dedicato normalizza_prenotazioni (nato il 10/11/2026,
+            migrazione 61): di base solo il super admin. Prima bastava poter
+            modificare le prenotazioni, e la voce compariva a reception e
+            sala. Il pannello mostra la parte gift card solo a chi ha anche
+            quel permesso. */}
         <Route path="/prenotazioni/normalizza" element={
-          <ProtectedRoute feature="prenotazioni" requireEdit>
+          <ProtectedRoute feature="normalizza_prenotazioni" requireEdit>
             <NormalizzaPrenotazioniPage />
           </ProtectedRoute>
         } />

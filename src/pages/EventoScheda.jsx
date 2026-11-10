@@ -23,7 +23,9 @@ import {
 // DUE SCRITTURE DISTINTE, come nel database (migrazione 60):
 //   - "Salva" (evento_salva): titolo, tipologia, cliente, note e TUTTI i
 //     servizi con i loro spazi, in un colpo solo. I servizi tolti dalla
-//     scheda spariscono. Stato e scadenza si scelgono solo alla nascita.
+//     scheda spariscono. Lo stato si sceglie solo alla nascita; la
+//     scadenza di un'opzione si puo' correggere anche da qui (migrazione
+//     62), e non puo' mai essere dopo il primo servizio.
 //   - I pulsanti di STATO (evento_cambia_stato): opzione con scadenza
 //     (vale anche come proroga), conferma, ritorno a richiesta,
 //     annullamento con motivo, riapertura di un annullato. Si usano solo
@@ -60,6 +62,29 @@ function aStringa(v) {
 
 function soloCifre(v) {
   return String(v || '').replace(/[^0-9]/g, '').slice(0, 5)
+}
+
+// La data del primo servizio. Le date sono AAAA-MM-GG: si confrontano
+// come testo.
+function primaDataServizi(servizi) {
+  var p = ''
+  var elenco = servizi || []
+  for (var i = 0; i < elenco.length; i++) {
+    var d = elenco[i].data
+    if (d && (!p || d < p)) p = d
+  }
+  return p
+}
+
+// REGOLA (verbale Eventi fase 1, passo 25): la scadenza di un'opzione
+// non puo' essere DOPO il primo servizio. Un'opzione che scade a evento
+// gia' cominciato non ha senso, e un evento spostato o accorciato non
+// deve lasciarla indietro. Lo stesso controllo vive nel database
+// (migrazione 62, eventi_controlla_scadenza): questo serve a dirlo
+// chiaramente prima di provare a salvare.
+function messaggioScadenza(scadenza, primo) {
+  return 'La scadenza dell\'opzione (' + formatData(scadenza) + ') e\' dopo il primo servizio (' +
+    formatData(primo) + '). Anticipa la scadenza oppure correggi le date dei servizi: finche\' non sono coerenti l\'evento non si salva.'
 }
 
 function fasciaValida(f) {
@@ -130,7 +155,62 @@ export default function EventoScheda() {
 
   var [spazioPer, setSpazioPer] = useState(null)
 
+  // Uscita dalla scheda con modifiche non salvate (verbale passo 23).
+  // uscitaVerso = la pagina dove volevi andare, in attesa di conferma.
+  // modificatoRef tiene "ci sono modifiche?" per gli ascoltatori qui
+  // sotto, che nascono una volta sola e non vedono le variabili nuove.
+  var [uscitaVerso, setUscitaVerso] = useState(null)
+  var modificatoRef = useRef(false)
+
   useEffect(function() { carica() }, [id])
+
+  // Due strade per perdere le modifiche:
+  //  - chiudere o ricaricare la scheda del browser: il browser mostra il
+  //    suo avviso (il testo lo decide lui, non si puo' cambiare);
+  //  - toccare una voce del menu' laterale: il clic si ferma prima che
+  //    arrivi al menu' e si apre la finestra «Modifiche non salvate».
+  // La freccia "indietro" del browser NON si puo' fermare con il router
+  // che usa il programma: resta l'unica uscita senza avviso.
+  useEffect(function() {
+    function primaDiChiudere(e) {
+      if (!modificatoRef.current) return
+      e.preventDefault()
+      e.returnValue = ''
+      return ''
+    }
+    function suClick(e) {
+      if (!modificatoRef.current) return
+      if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return
+      var a = e.target && e.target.closest ? e.target.closest('a[href]') : null
+      if (!a) return
+      if (a.getAttribute('target') === '_blank') return
+      var url = new URL(a.href, window.location.href)
+      if (url.origin !== window.location.origin) return
+      if (url.pathname === window.location.pathname && url.search === window.location.search) return
+      e.preventDefault()
+      e.stopPropagation()
+      setUscitaVerso(url.pathname + url.search)
+    }
+    window.addEventListener('beforeunload', primaDiChiudere)
+    document.addEventListener('click', suClick, true)
+    return function() {
+      window.removeEventListener('beforeunload', primaDiChiudere)
+      document.removeEventListener('click', suClick, true)
+    }
+  }, [])
+
+  function vai(percorso) {
+    if (modificatoRef.current) { setUscitaVerso(percorso); return }
+    navigate(percorso)
+  }
+
+  // La scadenza che vale per il controllo: quella scelta alla nascita
+  // per un evento nuovo in opzione, quella della scheda per un evento
+  // esistente che e' in opzione. Negli altri stati non c'e' scadenza.
+  function scadenzaVigente(f) {
+    if (nuovo) return f.stato === 'opzione' ? f.scadenza : ''
+    return evento && evento.stato === 'opzione' ? f.scadenza : ''
+  }
 
   // ----------------------------------------------------------
   // CARICAMENTO
@@ -388,6 +468,13 @@ export default function EventoScheda() {
       return
     }
 
+    var scadControllo = scadenzaVigente(f)
+    var primoControllo = primaDataServizi(f.servizi)
+    if (scadControllo && primoControllo && scadControllo > primoControllo) {
+      setErrore(messaggioScadenza(scadControllo, primoControllo))
+      return
+    }
+
     if (f.servizi.length === 0) { setErrore('Serve almeno un servizio.'); return }
 
     var servizi = []
@@ -423,6 +510,11 @@ export default function EventoScheda() {
     if (nuovo) {
       dati.stato = f.stato
       dati.scadenza_opzione = f.stato === 'opzione' ? f.scadenza : ''
+    } else if (evento && evento.stato === 'opzione') {
+      // Dalla migrazione 62 la scadenza di un'opzione si puo' correggere
+      // anche dalla scheda, insieme ai servizi: e' l'unico modo di
+      // spostare in un colpo solo l'evento e la sua scadenza.
+      dati.scadenza_opzione = f.scadenza
     }
 
     setSalvando(true)
@@ -461,6 +553,11 @@ export default function EventoScheda() {
     if (stato === 'opzione') {
       if (!scadenzaInput) { setErroreModale('Scegli la data di scadenza dell\'opzione.'); return }
       scad = scadenzaInput
+      var primoSalvato = primaDataServizi(evento ? evento.eventi_servizi : [])
+      if (primoSalvato && scad > primoSalvato) {
+        setErroreModale('La scadenza non puo\' essere dopo il primo servizio (' + formatData(primoSalvato) + '): scegli una data entro quel giorno.')
+        return
+      }
     }
     if (stato === 'annullato') {
       if (!motivoInput.trim()) { setErroreModale('Scrivi il motivo dell\'annullamento.'); return }
@@ -495,7 +592,14 @@ export default function EventoScheda() {
   // ----------------------------------------------------------
   // DISEGNO
   // ----------------------------------------------------------
-  if (loading || !form) {
+  // ⚠️ "!nuovo && !evento": dopo «Crea evento» si passa da /eventi/nuovo
+  // a /eventi/<id>. Le due pagine sono lo STESSO componente, che React
+  // non smonta: per un attimo c'e' gia' l'id ma l'evento non e' ancora
+  // caricato, e il disegno leggeva evento.stato su null. Pagina bianca
+  // (verbale Eventi fase 1, passo 20). Finche' l'evento non arriva si
+  // mostra «Caricamento...».
+  if (loading || !form || (!nuovo && !evento)) {
+    modificatoRef.current = false
     return (
       <div className="p-4 lg:p-6 max-w-3xl mx-auto">
         {errore ? (
@@ -514,10 +618,15 @@ export default function EventoScheda() {
   }
 
   var modificato = JSON.stringify(form) !== fotografia
+  modificatoRef.current = modificato
   var disab = !puoModificare
   var oggi = oggiIso()
   var statoAttuale = nuovo ? null : evento.stato
   var scaduta = statoAttuale === 'opzione' && evento.scadenza_opzione && evento.scadenza_opzione < oggi
+  var primaServizio = primaDataServizi(form.servizi)
+  var scadForm = scadenzaVigente(form)
+  var scadenzaIncoerente = !!(scadForm && primaServizio && scadForm > primaServizio)
+  var scadenzaCambiata = !nuovo && statoAttuale === 'opzione' && form.scadenza !== (evento.scadenza_opzione || '')
 
   var tipologieAttive = tipologie.filter(function(t) { return t.attiva !== false })
   var tipUguale = tipologiaUguale(form.tipologiaTesto, tipologie)
@@ -567,7 +676,7 @@ export default function EventoScheda() {
     <div className="p-4 lg:p-6 max-w-3xl mx-auto pb-28">
 
       <div className="flex items-center justify-between gap-3 mb-4">
-        <button type="button" onClick={function() { navigate('/eventi') }}
+        <button type="button" onClick={function() { vai('/eventi') }}
           className="text-sm text-wine-700 hover:text-wine-900">
           ← Eventi
         </button>
@@ -611,6 +720,26 @@ export default function EventoScheda() {
           {scaduta && (
             <div className="text-sm text-red-700 mt-1">
               L'opzione e' scaduta e continua a tenere occupati i posti: va chiusa (proroga, conferma o annullamento).
+            </div>
+          )}
+          {statoAttuale === 'opzione' && puoModificare && (scadenzaIncoerente || scadenzaCambiata) && (
+            <div className={'mt-3 p-3 rounded-lg border text-sm ' + (scadenzaIncoerente ? 'bg-red-50 border-red-300 text-red-800' : 'bg-amber-50 border-amber-300 text-amber-900')}>
+              {scadenzaIncoerente ? (
+                <div className="mb-2">
+                  <div className="font-semibold">La scadenza dell'opzione e' dopo il primo servizio.</div>
+                  <div>
+                    Scadenza {formatData(scadForm)}, primo servizio {formatData(primaServizio)}. Scegli tu:
+                    anticipa qui la scadenza, oppure correggi le date dei servizi. Finche' non sono coerenti
+                    l'evento non si salva.
+                  </div>
+                </div>
+              ) : (
+                <div className="mb-2 font-semibold">Scadenza cambiata: si salva con «Salva», insieme al resto.</div>
+              )}
+              <label className="block text-xs font-medium mb-1">Scadenza dell'opzione</label>
+              <input type="date" value={form.scadenza} max={primaServizio || undefined}
+                onChange={function(e) { imposta('scadenza', e.target.value) }}
+                className={inputClasse} />
             </div>
           )}
           {puoModificare && (
@@ -769,9 +898,14 @@ export default function EventoScheda() {
             {form.stato === 'opzione' && (
               <div className="mt-2">
                 <label className="block text-xs font-medium text-gray-700 mb-1">Scadenza dell'opzione</label>
-                <input type="date" value={form.scadenza} disabled={disab}
+                <input type="date" value={form.scadenza} disabled={disab} max={primaServizio || undefined}
                   onChange={function(e) { imposta('scadenza', e.target.value) }}
                   className={inputClasse} />
+                {scadenzaIncoerente && (
+                  <div className="mt-2 p-3 bg-red-50 border border-red-300 rounded-lg text-sm text-red-800">
+                    {messaggioScadenza(scadForm, primaServizio)}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -985,10 +1119,12 @@ export default function EventoScheda() {
 
       {/* ===================== BARRA SALVA ===================== */}
       {puoModificare && (
-        <div className="fixed bottom-0 left-0 right-0 lg:left-60 bg-white border-t border-gray-200 px-4 py-3 z-20">
+        <div className={'fixed bottom-0 left-0 right-0 lg:left-60 border-t-2 px-4 py-3 z-20 ' + (modificato ? 'bg-amber-100 border-amber-400' : 'bg-white border-gray-200')}>
           <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
-            <div className="text-sm text-gray-500">
-              {modificato ? 'Modifiche non salvate' : (nuovo ? '' : 'Tutto salvato')}
+            <div className={'text-sm ' + (scadenzaIncoerente ? 'text-red-700 font-semibold' : (modificato ? 'text-amber-900 font-semibold' : 'text-gray-500'))}>
+              {scadenzaIncoerente
+                ? 'Scadenza dell\'opzione dopo il primo servizio: correggi prima di salvare'
+                : (modificato ? '⚠️ Modifiche non salvate' : (nuovo ? '' : 'Tutto salvato'))}
             </div>
             <div className="flex gap-2">
               {!nuovo && modificato && (
@@ -997,7 +1133,7 @@ export default function EventoScheda() {
                   Scarta
                 </button>
               )}
-              <button type="button" onClick={salva} disabled={salvando || (!nuovo && !modificato)}
+              <button type="button" onClick={salva} disabled={salvando || (!nuovo && !modificato) || scadenzaIncoerente}
                 className="bg-wine-700 hover:bg-wine-800 disabled:bg-wine-300 text-white px-5 py-2 rounded-lg text-sm font-medium">
                 {salvando ? 'Salvataggio...' : (nuovo ? 'Crea evento' : 'Salva')}
               </button>
@@ -1107,6 +1243,38 @@ export default function EventoScheda() {
                 <button type="button" onClick={elimina} disabled={!hoCapito || lavoraModale}
                   className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-red-300 text-white px-4 py-2 rounded-lg text-sm font-medium">
                   {lavoraModale ? 'Attendere...' : 'Elimina'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================== USCITA CON MODIFICHE NON SALVATE ===================== */}
+      {uscitaVerso && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md">
+            <div className="px-6 py-4 border-b border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900">Modifiche non salvate</h2>
+            </div>
+            <div className="p-6 space-y-4">
+              <p className="text-sm text-gray-700">
+                Hai cambiato qualcosa in questa scheda e non l'hai salvato. Se esci adesso, le modifiche si perdono.
+              </p>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={function() { setUscitaVerso(null) }}
+                  className="flex-1 px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">
+                  Resta qui
+                </button>
+                <button type="button"
+                  onClick={function() {
+                    var dove = uscitaVerso
+                    modificatoRef.current = false
+                    setUscitaVerso(null)
+                    navigate(dove)
+                  }}
+                  className="flex-1 bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium">
+                  Esci senza salvare
                 </button>
               </div>
             </div>

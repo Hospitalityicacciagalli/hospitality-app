@@ -298,14 +298,12 @@ function TipologiaModal(props) {
   var [nome, setNome] = useState('')
   var [errore, setErrore] = useState(null)
   var [salvando, setSalvando] = useState(false)
-  var [confermaSimile, setConfermaSimile] = useState(false)
 
   useEffect(function() {
     if (props.open) {
       setNome(props.tipologia ? props.tipologia.nome : '')
       setErrore(null)
       setSalvando(false)
-      setConfermaSimile(false)
     }
   }, [props.open])
 
@@ -319,11 +317,9 @@ function TipologiaModal(props) {
   function salva() {
     if (!nome.trim()) { setErrore('Scrivi il nome della tipologia.'); return }
     if (uguale) { setErrore('Esiste gia\' la tipologia "' + uguale.nome + '".'); return }
-    if (simili.length > 0 && !confermaSimile) {
-      setErrore(null)
-      setConfermaSimile(true)
-      return
-    }
+    // L'avviso «Assomiglia a» si vede gia' mentre scrivi, e il pulsante
+    // dice gia' «Salva comunque»: premerlo e' la conferma (verbale
+    // Eventi fase 1, passo 12).
     setSalvando(true)
     setErrore(null)
     scritturaEventi(auth, 'tipologia_salva', {
@@ -351,14 +347,14 @@ function TipologiaModal(props) {
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">Nome</label>
             <input type="text" value={nome}
-              onChange={function(e) { setNome(e.target.value); setConfermaSimile(false) }}
+              onChange={function(e) { setNome(e.target.value) }}
               placeholder="es. Matrimonio, Battesimo, Aziendale"
               className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
           </div>
           {simili.length > 0 && (
             <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-900">
               Assomiglia a: <span className="font-semibold">{simili.map(function(t) { return t.nome }).join(', ')}</span>.
-              {confermaSimile ? ' Premi di nuovo Salva se e\' davvero una tipologia diversa.' : ''}
+              {' Se e\' davvero una tipologia diversa, premi «Salva comunque».'}
             </div>
           )}
           <div className="flex gap-3 pt-2">
@@ -368,7 +364,7 @@ function TipologiaModal(props) {
             </button>
             <button type="button" onClick={salva} disabled={salvando}
               className="flex-1 bg-wine-700 hover:bg-wine-800 disabled:bg-wine-300 text-white px-4 py-2 rounded-lg text-sm font-medium">
-              {salvando ? 'Salvataggio...' : (confermaSimile ? 'Salva comunque' : 'Salva')}
+              {salvando ? 'Salvataggio...' : (simili.length > 0 ? 'Salva comunque' : 'Salva')}
             </button>
           </div>
         </div>
@@ -389,12 +385,21 @@ var FILTRI = [
 ]
 
 // Riassunto di un evento per l'elenco: prima e ultima data, numero di
-// servizi, ospiti del servizio piu' grande, servizi senza numero.
+// servizi, ospiti SERVIZIO PER SERVIZIO, servizi senza numero.
+//
+// Gli ospiti non si sommano (decisione di Florestano, verbale Eventi
+// fase 1, passo 21): in un evento di piu' giorni sono quasi sempre le
+// stesse persone, e un totale le conterebbe due volte. Si mostrano in
+// ordine di data: «30 + 25 ospiti». Un servizio solo: «30 ospiti».
 function riassunto(ev) {
-  var servizi = ev.eventi_servizi || []
+  var servizi = (ev.eventi_servizi || []).slice()
+  servizi.sort(function(a, b) {
+    if (a.data !== b.data) return a.data < b.data ? -1 : 1
+    return (a.ordine || 0) - (b.ordine || 0)
+  })
   var prima = null
   var ultima = null
-  var maxOspiti = null
+  var numeri = []
   var senzaNumero = 0
   for (var i = 0; i < servizi.length; i++) {
     var s = servizi[i]
@@ -402,9 +407,10 @@ function riassunto(ev) {
     if (!ultima || s.data > ultima) ultima = s.data
     var n = numeroServizio(s)
     if (n === null) senzaNumero++
-    else if (maxOspiti === null || n > maxOspiti) maxOspiti = n
+    else numeri.push(n)
   }
-  return { prima: prima, ultima: ultima, nServizi: servizi.length, maxOspiti: maxOspiti, senzaNumero: senzaNumero }
+  var ospiti = numeri.length > 0 ? numeri.join(' + ') + ' ospiti' : ''
+  return { prima: prima, ultima: ultima, nServizi: servizi.length, ospiti: ospiti, senzaNumero: senzaNumero }
 }
 
 export default function EventiPage() {
@@ -436,7 +442,7 @@ export default function EventiPage() {
     setErrore(null)
     Promise.all([
       supabase.from('eventi')
-        .select('id, titolo, stato, scadenza_opzione, tipologia_id, cliente_id, provenienza, annullato_il, motivo_annullamento, customers(first_name, last_name), eventi_servizi(id, data, fascia, nome, ipotetici_adulti, ipotetici_bambini, definitivi_adulti, definitivi_bambini, effettivi_adulti, effettivi_bambini, ospiti_storici)')
+        .select('id, titolo, stato, scadenza_opzione, tipologia_id, cliente_id, provenienza, annullato_il, motivo_annullamento, customers(first_name, last_name), eventi_servizi(id, data, fascia, nome, ordine, ipotetici_adulti, ipotetici_bambini, definitivi_adulti, definitivi_bambini, effettivi_adulti, effettivi_bambini, ospiti_storici)')
         .order('created_at', { ascending: true }),
       supabase.from('eventi_tipologie').select('id, nome, attiva, ordine').order('ordine', { ascending: true }),
       supabase.from('sale').select('id, nome, ordine, attiva, solo_eventi').order('ordine', { ascending: true })
@@ -520,7 +526,7 @@ export default function EventiPage() {
             )}
             <div className="text-xs text-gray-500 mt-1">
               {r.nServizi === 1 ? '1 servizio' : r.nServizi + ' servizi'}
-              {r.maxOspiti !== null ? ' · ' + r.maxOspiti + ' ospiti' : ''}
+              {r.ospiti ? ' · ' + r.ospiti : ''}
             </div>
             {r.senzaNumero > 0 && (
               <div className="text-xs text-amber-700">{r.senzaNumero === 1 ? '1 senza numero' : r.senzaNumero + ' senza numero'}</div>

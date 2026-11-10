@@ -255,6 +255,7 @@ function ReservationForm() {
     if (!selectedCustomer) return
     if (!formData.reservation_date) return
     if (searchParams.get('normalizza') !== '1') return
+    if (!canEdit('normalizza_prenotazioni')) return
     if (normCercata) return
     apriNormalizza()
   }, [loading, selectedCustomer, formData.reservation_date])
@@ -1606,8 +1607,11 @@ function ReservationForm() {
           NORMALIZZA PRENOTAZIONE
           Il pannello propone, tu decidi, e niente e' salvato finche' non
           premi Salva. Si apre da solo arrivando dall'elenco.
+          Servono DUE permessi: modificare la prenotazione (il pannello
+          salva) e normalizza_prenotazioni (funzione del super admin,
+          migrazione 61).
           ============================================================ */}
-      {isEditing && canEdit('prenotazioni') && (
+      {isEditing && canEdit('prenotazioni') && canEdit('normalizza_prenotazioni') && (
         <div className="mb-6">
           {!normAperto ? (
             <button type="button" onClick={apriNormalizza}
