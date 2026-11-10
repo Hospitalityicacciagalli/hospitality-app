@@ -32,6 +32,8 @@ export var FEATURES = [
   { key: 'importa_prenotazioni', label: 'Importa',              type: 'standard', gruppo: 'prenotazioni' },
   { key: 'limiti',               label: 'Limiti coperti',       type: 'standard', gruppo: 'prenotazioni' },
   { key: 'alert_prenotazioni',   label: 'Alert',                type: 'standard', gruppo: 'prenotazioni' },
+  { key: 'eventi',               label: 'Scheda',               type: 'standard', gruppo: 'eventi' },
+  { key: 'eventi_economia',      label: 'Economia',             type: 'standard', gruppo: 'eventi' },
   { key: 'hic_operativo',        label: 'Operativo',            type: 'standard', gruppo: 'camere' },
   { key: 'hic_economico',        label: 'Economico',            type: 'standard', gruppo: 'camere' },
   { key: 'clienti',              label: 'Clienti',              type: 'standard' },
@@ -76,6 +78,7 @@ export var FEATURES = [
 // ============================================================
 export var GRUPPI_FEATURE = [
   { key: 'prenotazioni', label: 'Prenotazioni',  icon: '📅' },
+  { key: 'eventi',       label: 'Eventi',        icon: '🎉' },
   { key: 'camere',       label: 'Camere',        icon: '🛏️' },
   { key: 'cassa',        label: 'Cassa',         icon: '💰' },
   { key: 'bordo',        label: 'Bordo piscina', icon: '🍹' },
@@ -95,20 +98,26 @@ export function featureRichiedeLoginReale(feature) {
 
 // ============================================================
 // Permessi predefiniti per ruolo.
-// Deve coincidere con la migrazione SQL.
 // Usato come fallback se un profilo non ha ancora il jsonb popolato.
+//
+// ⚠️ SECONDA COPIA (regola 31): dalla migrazione 59 gli stessi valori
+// vivono anche nel database, tabella permessi_ruolo, letta dalla
+// funzione permesso_utente() che decide le scritture degli Eventi.
+// Chi cambia un valore qui deve cambiarlo LA' con una migrazione,
+// nello stesso commit. Due copie diverse = la pagina mostra un
+// pulsante che il database poi rifiuta (o il contrario).
 // ============================================================
 export var DEFAULT_PERMS_BY_ROLE = {
-  super_admin: { prenotazioni: 'write', importa_prenotazioni: 'write', limiti: 'write', alert_prenotazioni: 'write', hic_operativo: 'write', hic_economico: 'write', clienti: 'write', sale: 'write', staff: 'write', turni: 'write', cassa_reception: 'write', cassa_ristorante: 'write', cassaforte: 'write', totali_cassa: 'write', variabili_cassa: 'write', centri_costo: 'write', ordini_bordo: 'write', listino_bordo: 'write', gift_card: 'write', wine_tour: 'write', cooking_class: 'write', stipendi: 'write', campagna_riepilogo: 'write', campagna_importa: 'write', campagna_stipendi: 'write', impostazioni: 'write', utenti: 'write' },
-  proprieta:   { prenotazioni: 'write', importa_prenotazioni: 'none',  limiti: 'write', alert_prenotazioni: 'write', hic_operativo: 'write', hic_economico: 'write', clienti: 'write', sale: 'read',  staff: 'none',  turni: 'none',  cassa_reception: 'read', cassa_ristorante: 'read', cassaforte: 'write', totali_cassa: 'write', variabili_cassa: 'write', centri_costo: 'write', ordini_bordo: 'read',  listino_bordo: 'none',  gift_card: 'write', wine_tour: 'write', cooking_class: 'write', stipendi: 'write', campagna_riepilogo: 'write', campagna_importa: 'write', campagna_stipendi: 'write', impostazioni: 'none',  utenti: 'none' },
-  direttore:   { prenotazioni: 'write', importa_prenotazioni: 'write', limiti: 'write', alert_prenotazioni: 'write', hic_operativo: 'write', hic_economico: 'write', clienti: 'write', sale: 'read',  staff: 'write', turni: 'write', cassa_reception: 'write', cassa_ristorante: 'write', cassaforte: 'write', totali_cassa: 'write', variabili_cassa: 'write', centri_costo: 'write', ordini_bordo: 'write', listino_bordo: 'write', gift_card: 'write', wine_tour: 'write', cooking_class: 'write', stipendi: 'none',  campagna_riepilogo: 'write', campagna_importa: 'write', campagna_stipendi: 'write', impostazioni: 'write', utenti: 'none' },
-  reception:   { prenotazioni: 'write', importa_prenotazioni: 'none',  limiti: 'none', alert_prenotazioni: 'none',  hic_operativo: 'read',  hic_economico: 'none',  clienti: 'write', sale: 'read',  staff: 'read',  turni: 'none',  cassa_reception: 'write', cassa_ristorante: 'write', cassaforte: 'none',  totali_cassa: 'none', variabili_cassa: 'none', centri_costo: 'none', ordini_bordo: 'write', listino_bordo: 'write', gift_card: 'write', wine_tour: 'write', cooking_class: 'write', stipendi: 'none',  campagna_riepilogo: 'none', campagna_importa: 'none', campagna_stipendi: 'none', impostazioni: 'none',  utenti: 'none' },
-  sala:        { prenotazioni: 'write', importa_prenotazioni: 'none',  limiti: 'none', alert_prenotazioni: 'none',  hic_operativo: 'none',  hic_economico: 'none',  clienti: 'write', sale: 'read',  staff: 'none',  turni: 'none',  cassa_reception: 'write', cassa_ristorante: 'write', cassaforte: 'none',  totali_cassa: 'none', variabili_cassa: 'none', centri_costo: 'none', ordini_bordo: 'write', listino_bordo: 'write', gift_card: 'read',  wine_tour: 'read',  cooking_class: 'read',  stipendi: 'none',  campagna_riepilogo: 'none', campagna_importa: 'none', campagna_stipendi: 'none', impostazioni: 'none',  utenti: 'none' },
-  cucina:      { prenotazioni: 'read',  importa_prenotazioni: 'none',  limiti: 'none', alert_prenotazioni: 'none',  hic_operativo: 'none',  hic_economico: 'none',  clienti: 'read',  sale: 'none',  staff: 'none',  turni: 'none',  cassa_reception: 'none', cassa_ristorante: 'none', cassaforte: 'none',  totali_cassa: 'none', variabili_cassa: 'none', centri_costo: 'none', ordini_bordo: 'none',  listino_bordo: 'none',  gift_card: 'none',  wine_tour: 'none',  cooking_class: 'none',  stipendi: 'none',  campagna_riepilogo: 'none', campagna_importa: 'none', campagna_stipendi: 'none', impostazioni: 'none',  utenti: 'none' }
+  super_admin: { prenotazioni: 'write', importa_prenotazioni: 'write', limiti: 'write', alert_prenotazioni: 'write', eventi: 'write', eventi_economia: 'write', hic_operativo: 'write', hic_economico: 'write', clienti: 'write', sale: 'write', staff: 'write', turni: 'write', cassa_reception: 'write', cassa_ristorante: 'write', cassaforte: 'write', totali_cassa: 'write', variabili_cassa: 'write', centri_costo: 'write', ordini_bordo: 'write', listino_bordo: 'write', gift_card: 'write', wine_tour: 'write', cooking_class: 'write', stipendi: 'write', campagna_riepilogo: 'write', campagna_importa: 'write', campagna_stipendi: 'write', impostazioni: 'write', utenti: 'write' },
+  proprieta:   { prenotazioni: 'write', importa_prenotazioni: 'none',  limiti: 'write', alert_prenotazioni: 'write', eventi: 'read', eventi_economia: 'read', hic_operativo: 'write', hic_economico: 'write', clienti: 'write', sale: 'read',  staff: 'none',  turni: 'none',  cassa_reception: 'read', cassa_ristorante: 'read', cassaforte: 'write', totali_cassa: 'write', variabili_cassa: 'write', centri_costo: 'write', ordini_bordo: 'read',  listino_bordo: 'none',  gift_card: 'write', wine_tour: 'write', cooking_class: 'write', stipendi: 'write', campagna_riepilogo: 'write', campagna_importa: 'write', campagna_stipendi: 'write', impostazioni: 'none',  utenti: 'none' },
+  direttore:   { prenotazioni: 'write', importa_prenotazioni: 'write', limiti: 'write', alert_prenotazioni: 'write', eventi: 'write', eventi_economia: 'write', hic_operativo: 'write', hic_economico: 'write', clienti: 'write', sale: 'read',  staff: 'write', turni: 'write', cassa_reception: 'write', cassa_ristorante: 'write', cassaforte: 'write', totali_cassa: 'write', variabili_cassa: 'write', centri_costo: 'write', ordini_bordo: 'write', listino_bordo: 'write', gift_card: 'write', wine_tour: 'write', cooking_class: 'write', stipendi: 'none',  campagna_riepilogo: 'write', campagna_importa: 'write', campagna_stipendi: 'write', impostazioni: 'write', utenti: 'none' },
+  reception:   { prenotazioni: 'write', importa_prenotazioni: 'none',  limiti: 'none', alert_prenotazioni: 'none', eventi: 'read', eventi_economia: 'none',  hic_operativo: 'read',  hic_economico: 'none',  clienti: 'write', sale: 'read',  staff: 'read',  turni: 'none',  cassa_reception: 'write', cassa_ristorante: 'write', cassaforte: 'none',  totali_cassa: 'none', variabili_cassa: 'none', centri_costo: 'none', ordini_bordo: 'write', listino_bordo: 'write', gift_card: 'write', wine_tour: 'write', cooking_class: 'write', stipendi: 'none',  campagna_riepilogo: 'none', campagna_importa: 'none', campagna_stipendi: 'none', impostazioni: 'none',  utenti: 'none' },
+  sala:        { prenotazioni: 'write', importa_prenotazioni: 'none',  limiti: 'none', alert_prenotazioni: 'none', eventi: 'read', eventi_economia: 'none',  hic_operativo: 'none',  hic_economico: 'none',  clienti: 'write', sale: 'read',  staff: 'none',  turni: 'none',  cassa_reception: 'write', cassa_ristorante: 'write', cassaforte: 'none',  totali_cassa: 'none', variabili_cassa: 'none', centri_costo: 'none', ordini_bordo: 'write', listino_bordo: 'write', gift_card: 'read',  wine_tour: 'read',  cooking_class: 'read',  stipendi: 'none',  campagna_riepilogo: 'none', campagna_importa: 'none', campagna_stipendi: 'none', impostazioni: 'none',  utenti: 'none' },
+  cucina:      { prenotazioni: 'read',  importa_prenotazioni: 'none',  limiti: 'none', alert_prenotazioni: 'none', eventi: 'read', eventi_economia: 'none',  hic_operativo: 'none',  hic_economico: 'none',  clienti: 'read',  sale: 'none',  staff: 'none',  turni: 'none',  cassa_reception: 'none', cassa_ristorante: 'none', cassaforte: 'none',  totali_cassa: 'none', variabili_cassa: 'none', centri_costo: 'none', ordini_bordo: 'none',  listino_bordo: 'none',  gift_card: 'none',  wine_tour: 'none',  cooking_class: 'none',  stipendi: 'none',  campagna_riepilogo: 'none', campagna_importa: 'none', campagna_stipendi: 'none', impostazioni: 'none',  utenti: 'none' }
 }
 
 // Pavimento di sicurezza per ruoli non previsti.
-var BASE_FALLBACK = { prenotazioni: 'write', importa_prenotazioni: 'none', limiti: 'none', alert_prenotazioni: 'none', hic_operativo: 'none', hic_economico: 'none', clienti: 'write', sale: 'none', staff: 'none', turni: 'none', cassa_reception: 'none', cassa_ristorante: 'none', cassaforte: 'none', totali_cassa: 'none', variabili_cassa: 'none', centri_costo: 'none', ordini_bordo: 'none', listino_bordo: 'none', gift_card: 'none', wine_tour: 'none', cooking_class: 'none', stipendi: 'none', campagna_riepilogo: 'none', campagna_importa: 'none', campagna_stipendi: 'none', impostazioni: 'none', utenti: 'none' }
+var BASE_FALLBACK = { prenotazioni: 'write', importa_prenotazioni: 'none', limiti: 'none', alert_prenotazioni: 'none', eventi: 'none', eventi_economia: 'none', hic_operativo: 'none', hic_economico: 'none', clienti: 'write', sale: 'none', staff: 'none', turni: 'none', cassa_reception: 'none', cassa_ristorante: 'none', cassaforte: 'none', totali_cassa: 'none', variabili_cassa: 'none', centri_costo: 'none', ordini_bordo: 'none', listino_bordo: 'none', gift_card: 'none', wine_tour: 'none', cooking_class: 'none', stipendi: 'none', campagna_riepilogo: 'none', campagna_importa: 'none', campagna_stipendi: 'none', impostazioni: 'none', utenti: 'none' }
 
 export function defaultPermissionsForRole(role) {
   return DEFAULT_PERMS_BY_ROLE[role] || BASE_FALLBACK
@@ -147,6 +156,26 @@ export function AuthProvider(props) {
 
   var elevazioneTimerRef = useRef(null)
 
+  // ----------------------------------------------------------
+  // GETTONE DI ELEVAZIONE (migrazione 60, regola 55)
+  //
+  // Il PIN si verifica nel database con apri_elevazione(), che
+  // restituisce anche un GETTONE (codice casuale) e la sua SCADENZA.
+  // Il gettone vale solo su questa postazione (l'utente loggato) e
+  // solo fino alla scadenza. Le scritture che lo chiedono (oggi
+  // quelle degli Eventi) lo presentano al database, che sa cosi'
+  // CHI sta firmando: il Direttore elevato sul PC della reception
+  // risulta Direttore.
+  //
+  // Qui si tiene il gettone, MAI il PIN (regola 38).
+  //
+  // Sta in un ref oltre che dentro l'elevazione perche'
+  // terminaElevazione viene chiamata anche da funzioni create al
+  // montaggio (ascolto del logout, timer), che vedrebbero lo stato
+  // vecchio.
+  // ----------------------------------------------------------
+  var gettoneRef = useRef(null)
+
   useEffect(function() {
     supabase.auth.getSession().then(function(result) {
       setSession(result.data.session)
@@ -168,8 +197,10 @@ export function AuthProvider(props) {
       // Solo un vero logout (o assenza di sessione) annulla l'elevazione.
       // Gli eventi di routine (rinnovo del token, ritorno in primo piano)
       // NON devono spegnerla, altrimenti la finestra cade da sola.
+      // A sessione chiusa il database non accetta piu' chiamate da
+      // questa postazione: il gettone lo chiude signOut() PRIMA di uscire.
       if (event === 'SIGNED_OUT' || !newSession) {
-        terminaElevazione()
+        terminaElevazione(false)
       }
     })
 
@@ -183,14 +214,15 @@ export function AuthProvider(props) {
   // COLONNE DEL PROFILO — elencate per nome, mai select('*').
   //
   // In user_profiles vivono anche pin_hash, pin_failed_attempts e
-  // pin_locked_until. La migrazione 56 toglie a chi si collega dal
-  // browser il permesso di leggerle: da quel momento un select('*')
-  // fallirebbe, il profilo non si caricherebbe e l'utente vedrebbe
-  // un'app vuota senza nessun messaggio d'errore.
+  // pin_locked_until. Dalla migrazione 59 chi si collega dal browser
+  // NON puo' leggerle: un select('*') fallirebbe, il profilo non si
+  // caricherebbe e l'utente vedrebbe un'app vuota senza nessun
+  // messaggio d'errore.
   //
   // Il PIN si legge solo dentro le funzioni del database
-  // (verify_pin_utente, set_pin, reset_pin), che girano coi permessi
-  // del proprietario. Qui non serve, e quindi qui non si chiede.
+  // (apri_elevazione, verify_pin_utente, set_pin, reset_pin), che
+  // girano coi permessi del proprietario. Qui non serve, e quindi qui
+  // non si chiede.
   //
   // ⚠️ Chi aggiunge una colonna a user_profiles e la vuole nel
   // profilo deve aggiungerla a questo elenco: non arriva da sola.
@@ -215,9 +247,18 @@ export function AuthProvider(props) {
     return supabase.auth.signInWithPassword({ email: email, password: password })
   }
 
+  // Prima si chiude il gettone (per farlo serve ancora il login),
+  // poi si esce. Se la chiusura fallisce si esce lo stesso: il gettone
+  // scade da solo e vale solo per questa postazione.
   function signOut() {
-    terminaElevazione()
-    return supabase.auth.signOut().then(function() {
+    var g = gettoneRef.current
+    terminaElevazione(false)
+    var chiusura = g
+      ? supabase.rpc('chiudi_elevazione', { p_gettone: g }).then(function() { return null }, function() { return null })
+      : Promise.resolve(null)
+    return chiusura.then(function() {
+      return supabase.auth.signOut()
+    }).then(function() {
       setSession(null)
       setProfile(null)
     })
@@ -235,7 +276,8 @@ export function AuthProvider(props) {
       var ms = scadenza - Date.now()
       if (ms <= 0) {
         setSecondiResidui(0)
-        terminaElevazione()
+        // Scaduta: nel database il gettone e' gia' scaduto da solo.
+        terminaElevazione(false)
       } else {
         setSecondiResidui(Math.ceil(ms / 1000))
       }
@@ -244,44 +286,80 @@ export function AuthProvider(props) {
     elevazioneTimerRef.current = setInterval(aggiorna, 1000)
   }
 
-  // Attiva l'elevazione con i dati verificati (info) e la durata in minuti.
-  // info = { user_id, nome, role, permissions } (da verify_pin_utente).
+  // Durata accettata dalla scadenza del database. Fuori da questa
+  // finestra l'orologio del dispositivo e' sbagliato (es. PC indietro
+  // di ore): allora il timer usa i minuti, e comunque il database
+  // rifiuta il gettone alla SUA scadenza, non a quella del timer.
+  var DURATA_MIN_MS = 10 * 1000
+  var DURATA_MAX_MS = 12 * 60 * 60 * 1000
+
+  // Attiva l'elevazione con i dati verificati (info).
+  // info = la riga di apri_elevazione (finestra ConfermaPin):
+  //   { user_id, nome, role, permissions, gettone, scadenza }
+  // La durata la decide il database (Impostazioni -> minuti di
+  // elevazione): si usa la scadenza del gettone. Il parametro minuti
+  // resta solo come ripiego se la scadenza manca o non e' credibile.
+  //
+  // Una nuova elevazione (Estendi, o un'altra persona) sostituisce la
+  // precedente: il gettone vecchio si chiude nel database.
   function attivaElevazione(info, minuti) {
-    var durata = (minuti && minuti > 0) ? minuti : ELEVAZIONE_DEFAULT_MINUTI
-    var scadenza = Date.now() + durata * 60 * 1000
+    var vecchio = gettoneRef.current
+    var nuovo = info.gettone || null
+    if (vecchio && vecchio !== nuovo) {
+      supabase.rpc('chiudi_elevazione', { p_gettone: vecchio }).then(function() {}, function() {})
+    }
+    gettoneRef.current = nuovo
+
+    var scadenza = null
+    if (info.scadenza) {
+      var ms = Date.parse(info.scadenza) - Date.now()
+      if (!isNaN(ms) && ms >= DURATA_MIN_MS && ms <= DURATA_MAX_MS) {
+        scadenza = Date.now() + ms
+      }
+    }
+    if (scadenza === null) {
+      var durata = (minuti && minuti > 0) ? minuti : ELEVAZIONE_DEFAULT_MINUTI
+      scadenza = Date.now() + durata * 60 * 1000
+    }
     var dato = {
       user_id: info.user_id,
       nome: info.nome,
       role: info.role,
       permissions: (info.permissions && typeof info.permissions === 'object') ? info.permissions : null,
+      gettone: nuovo,
       scadenza: scadenza
     }
     setElevazione(dato)
     avviaTimer(scadenza)
   }
 
-  // Estende la finestra ripartendo da adesso (usato al rinnovo col PIN).
-  function rinnovaElevazione(minuti) {
-    if (!elevazione) return
-    var durata = (minuti && minuti > 0) ? minuti : ELEVAZIONE_DEFAULT_MINUTI
-    var scadenza = Date.now() + durata * 60 * 1000
-    setElevazione(function(prev) {
-      if (!prev) return prev
-      var u = {}; for (var k in prev) { u[k] = prev[k] }
-      u.scadenza = scadenza
-      return u
-    })
-    avviaTimer(scadenza)
-  }
-
   // Torna al base: spegne l'elevazione e ferma il timer.
-  function terminaElevazione() {
+  // chiudiNelDb: se non e' false, chiude anche il gettone nel database
+  // (pulsante "Torna al base"). Il timer scaduto e il logout passano
+  // false: il primo perche' il gettone e' gia' scaduto, il secondo
+  // perche' l'ha gia' chiuso signOut().
+  //
+  // (La vecchia rinnovaElevazione e' stata tolta: nessuno la chiamava,
+  // e allungava il timer della pagina senza allungare il gettone.
+  // Per estendere si reinserisce il PIN: nuovo gettone.)
+  function terminaElevazione(chiudiNelDb) {
     if (elevazioneTimerRef.current) {
       clearInterval(elevazioneTimerRef.current)
       elevazioneTimerRef.current = null
     }
+    var g = gettoneRef.current
+    gettoneRef.current = null
+    if (g && chiudiNelDb !== false) {
+      supabase.rpc('chiudi_elevazione', { p_gettone: g }).then(function() {}, function() {})
+    }
     setSecondiResidui(0)
     setElevazione(null)
+  }
+
+  // Il gettone da presentare alle scritture che lo chiedono (Eventi).
+  // null = nessuna elevazione: il database fa firmare l'utente loggato.
+  function gettoneElevazione() {
+    return gettoneRef.current
   }
 
   var elevato = elevazione !== null
@@ -377,8 +455,10 @@ export function AuthProvider(props) {
     elevato: elevato,
     secondiResidui: secondiResidui,
     attivaElevazione: attivaElevazione,
-    rinnovaElevazione: rinnovaElevazione,
-    terminaElevazione: terminaElevazione
+    terminaElevazione: terminaElevazione,
+    gettoneElevazione: gettoneElevazione,
+    // --- Solo per la fase 1 degli Eventi: vedi Layout e App ---
+    ruoloEfficace: ruoloEfficace
   }
 
   return (

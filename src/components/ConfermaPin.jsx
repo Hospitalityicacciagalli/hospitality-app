@@ -1,8 +1,25 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
-// Blocco anti-tentativi: per-DISPOSITIVO (non per-utente, perche' un PIN
-// errato non identifica nessuno). Memorizzato in localStorage del browser.
+// ============================================================
+// DUE BLOCCHI ANTI-TENTATIVI, con due mestieri diversi
+//
+// 1) DATABASE (migrazione 59-60, funzione pin_controlla): 5 PIN
+//    sbagliati sullo STESSO nome bloccano quella persona per 15
+//    minuti, su tutte le postazioni. E' il blocco vero: non si azzera
+//    cambiando browser. Quando scatta, il database risponde con
+//    "PIN bloccato per troppi tentativi errati: riprova tra N minuti."
+//
+// 2) DISPOSITIVO (qui, localStorage): 7 errori su QUALUNQUE nome
+//    bloccano questa finestra per 3 minuti. E' solo un freno contro chi
+//    prova nomi diversi uno dopo l'altro (4 tentativi a testa non
+//    farebbero mai scattare il blocco del database).
+//
+// Per questo la finestra NON mostra piu' "Tentativi rimasti: N": il
+// numero del dispositivo (7) e quello del database (5, per persona)
+// non coincidono, e il messaggio diceva "ne restano 2" proprio mentre
+// il database aveva appena bloccato quella persona.
+// ============================================================
 var MAX_FAILS = 7
 var LOCK_MINUTES = 3
 
@@ -39,8 +56,15 @@ export default function ConfermaPin(props) {
   //   title       (string)      titolo opzionale
   //   message     (string)      testo opzionale
   //   onCancel    (function)    chiamata su Annulla / chiusura
-  //   onConfirmed (function)    chiamata con { user_id, nome, role, permissions }
-  //                             su PIN valido per l'utente scelto
+  //   onConfirmed (function)    chiamata con
+  //                             { user_id, nome, role, permissions, gettone, scadenza }
+  //                             su PIN valido per l'utente scelto.
+  //
+  // Il PIN si verifica con apri_elevazione (migrazione 60), che rilascia
+  // SEMPRE un gettone. Chi apre la finestra per elevarsi lo passa ad
+  // AuthContext.attivaElevazione, che lo tiene; chi la apre solo per
+  // firmare (es. chiusura di cassa) lo ignora, e il gettone scade da
+  // solo: vale solo per questa postazione e solo per pochi minuti.
 
   var [utenti, setUtenti] = useState([])
   var [loadingList, setLoadingList] = useState(false)
@@ -129,10 +153,18 @@ export default function ConfermaPin(props) {
       return
     }
     setLoading(true)
-    supabase.rpc('verify_pin_utente', { p_user_id: selectedUserId, p_pin: pin }).then(function(result) {
+    supabase.rpc('apri_elevazione', { p_user_id: selectedUserId, p_pin: pin }).then(function(result) {
       setLoading(false)
       if (result.error) {
-        setError('Errore di verifica: ' + result.error.message)
+        var msg = result.error.message || ''
+        setPin('')
+        // Il blocco del database e' un messaggio per la persona, non un
+        // errore tecnico: si mostra cosi' com'e'.
+        if (msg.indexOf('PIN bloccato') === 0) {
+          setError(msg)
+        } else {
+          setError('Errore di verifica: ' + msg)
+        }
         return
       }
       var rows = result.data || []
@@ -149,7 +181,7 @@ export default function ConfermaPin(props) {
           setLockUntil(until)
           setError('Troppi tentativi errati. Inserimento bloccato su questo dispositivo.')
         } else {
-          setError('Nome o PIN non corretti. Tentativi rimasti: ' + (MAX_FAILS - f) + '.')
+          setError('Nome o PIN non corretti. Dopo 5 errori sullo stesso nome, quel PIN resta bloccato per 15 minuti.')
         }
         setPin('')
       }

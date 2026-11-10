@@ -38,6 +38,8 @@ import CookingClassPage from './pages/CookingClassPage';
 import ImportPrenotazioniPage from './pages/ImportPrenotazioniPage';
 import NormalizzaPrenotazioniPage from './pages/NormalizzaPrenotazioniPage';
 import LimitiPage from './pages/LimitiPage';
+import EventiPage from './pages/EventiPage';
+import EventoScheda from './pages/EventoScheda';
 import HicDashboardPage from './pages/hic/HicDashboardPage';
 import CamereOggiPage from './pages/hic/CamereOggiPage';
 import CampagnaImportaPage from './pages/CampagnaImportaPage';
@@ -88,6 +90,22 @@ function HicRoute() {
     return <Navigate to="/" replace />;
   }
   return <HicDashboardPage />;
+}
+
+// Eventi — FASE 1 (sez. 0 v61-v67): il modulo esiste ma lo vede solo chi
+// e' super_admin, ANCHE tramite il PIN (ruolo efficace, non il login):
+// cosi' si prova il gettone sulla postazione reception. In piu' serve il
+// permesso 'eventi' (lettura per guardare; le pagine chiedono la modifica
+// per i pulsanti).
+// ⚠️ Nella sessione 2 (travaso) il controllo sul ruolo si TOGLIE e resta
+// solo il permesso, come per ogni altra voce (regola 35). Va tolto anche
+// in Layout.jsx, nello stesso commit.
+function EventiRoute({ children }) {
+  var { canView, ruoloEfficace } = useAuth();
+  if (ruoloEfficace() !== 'super_admin' || !canView('eventi')) {
+    return <Navigate to="/" replace />;
+  }
+  return children;
 }
 
 function AppRoutes() {
@@ -177,6 +195,29 @@ function AppRoutes() {
         <Route path="/prenotazioni/normalizza" element={
           <ProtectedRoute feature="prenotazioni" requireEdit>
             <NormalizzaPrenotazioniPage />
+          </ProtectedRoute>
+        } />
+
+        {/* Eventi — fase 1, vedi EventiRoute qui sopra */}
+        <Route path="/eventi" element={
+          <ProtectedRoute>
+            <EventiRoute>
+              <EventiPage />
+            </EventiRoute>
+          </ProtectedRoute>
+        } />
+        <Route path="/eventi/nuovo" element={
+          <ProtectedRoute>
+            <EventiRoute>
+              <EventoScheda />
+            </EventiRoute>
+          </ProtectedRoute>
+        } />
+        <Route path="/eventi/:id" element={
+          <ProtectedRoute>
+            <EventiRoute>
+              <EventoScheda />
+            </EventiRoute>
           </ProtectedRoute>
         } />
 

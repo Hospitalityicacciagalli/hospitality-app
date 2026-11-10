@@ -46,7 +46,8 @@ export default function Layout({ children }) {
   var {
     profile, signOut, canView, canEdit,
     elevato, elevazione, secondiResidui,
-    attivaElevazione, terminaElevazione
+    attivaElevazione, terminaElevazione,
+    ruoloEfficace
   } = useAuth();
   var navigate = useNavigate();
   var location = useLocation();
@@ -135,6 +136,8 @@ export default function Layout({ children }) {
     setShowPinModal(false);
     // Chiunque confermi con nick + PIN ottiene una finestra fresca
     // con i propri rami. Vale sia per l'ingresso sia per l'estensione.
+    // info porta anche gettone e scadenza (migrazione 60): la durata
+    // la decide il database; minutiElevazione resta solo come ripiego.
     attivaElevazione(info, minutiElevazione);
   }
 
@@ -202,6 +205,13 @@ export default function Layout({ children }) {
 
   var showAdminSection = canView('impostazioni');
 
+  // Eventi — FASE 1: voce solo per chi e' super_admin, anche tramite PIN
+  // (ruolo efficace), e con il permesso 'eventi'. Stessa regola di
+  // EventiRoute in App.jsx.
+  // ⚠️ Sessione 2 (travaso): togliere il controllo sul ruolo qui e in
+  // App.jsx nello stesso commit; resta solo canView('eventi').
+  var vediEventi = ruoloEfficace() === 'super_admin' && canView('eventi');
+
   // Stato della sincronizzazione HiC.
   // hicMai = nessun giro andato mai a buon fine (la funzione torna vuoto).
   // hicFermo = superata la soglia. Il colore compare SOLO in questo caso:
@@ -236,6 +246,16 @@ export default function Layout({ children }) {
             onClick={function() { setMobileOpen(false); }}>
             <span className="text-base">📅</span>
             Prenotazioni
+          </NavLink>
+        )}
+
+        {vediEventi && (
+          <NavLink
+            to="/eventi"
+            className={function(p) { return navClass(p.isActive); }}
+            onClick={function() { setMobileOpen(false); }}>
+            <span className="text-base">🎉</span>
+            Eventi
           </NavLink>
         )}
 
