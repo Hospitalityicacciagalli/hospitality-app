@@ -12,8 +12,11 @@ import { useAuth } from '../lib/AuthContext'
 //   Spazi      — la tabella sale: si aggiungono e si modificano solo
 //                gli spazi "solo per eventi" (piscina, giardino...);
 //                le sale del ristorante restano a Sale e Tavoli
-//   Tipologie  — aggiungi, rinomina, spegni. MAI cancellare: un evento
-//                vecchio la usa (decisione B, 0.1 v63)
+//   Tipologie  — aggiungi, rinomina, spegni, elimina. Dal 12/11/2026
+//                (migrazione 63) tipologie e spazi «solo per eventi» si
+//                ELIMINANO: se qualche evento li usa, chi elimina sceglie
+//                la sostituta (o nessuna) e il database sposta e cancella
+//                in un'operazione sola (EliminaModal, qui sotto)
 //
 // LETTURA: direttamente dalle tabelle (regole di accesso col permesso
 // 'eventi', migrazione 59).
@@ -413,6 +416,193 @@ function riassunto(ev) {
   return { prima: prima, ultima: ultima, nServizi: servizi.length, ospiti: ospiti, senzaNumero: senzaNumero }
 }
 
+// ------------------------------------------------------------
+// EliminaModal — elimina una tipologia o uno spazio «solo per eventi»
+// (migrazione 63, verbale prova veloce del 12/11 passi 5-6).
+// Mostra gli eventi che lo usano e chiede con che cosa sostituirlo
+// (oppure «nessuna»/«nessuno»). Il database sposta e cancella in
+// un'operazione sola: o riesce tutto o non cambia niente.
+// props: open, tipo ('tipologia' | 'spazio'), oggetto ({ id, nome }),
+//        alternative (elenco da cui scegliere la sostituta),
+//        onClose, onDone(testoEsito)
+// ------------------------------------------------------------
+function EliminaModal(props) {
+  var auth = useAuth()
+  var [usi, setUsi] = useState(null)
+  var [erroreUsi, setErroreUsi] = useState(null)
+  var [sostituta, setSostituta] = useState(null)
+  var [errore, setErrore] = useState(null)
+  var [lavora, setLavora] = useState(false)
+
+  var tipologia = props.tipo === 'tipologia'
+  var idOggetto = props.oggetto ? props.oggetto.id : null
+
+  useEffect(function() {
+    if (!props.open || !idOggetto) return
+    setUsi(null)
+    setErroreUsi(null)
+    setSostituta(null)
+    setErrore(null)
+    setLavora(false)
+    var q
+    if (tipologia) {
+      q = supabase.from('eventi')
+        .select('id, titolo, stato, eventi_servizi(data)')
+        .eq('tipologia_id', idOggetto)
+    } else {
+      q = supabase.from('eventi_servizi_sale')
+        .select('servizio_id, eventi_servizi(id, data, evento_id, eventi(id, titolo, stato))')
+        .eq('sala_id', idOggetto)
+    }
+    q.then(function(res) {
+      if (res.error) { setErroreUsi('Non riesco a leggere gli eventi che lo usano: ' + res.error.message); return }
+      setUsi(raggruppaUsi(res.data || [], tipologia))
+    })
+  }, [props.open, idOggetto])
+
+  if (!props.open || !props.oggetto) return null
+
+  var alternative = (props.alternative || []).filter(function(x) { return x.id !== idOggetto })
+  var nome = props.oggetto.nome
+  var nessuno = tipologia ? 'Nessuna' : 'Nessuno'
+
+  function conferma() {
+    setLavora(true)
+    setErrore(null)
+    var funzione = tipologia ? 'tipologia_elimina' : 'spazio_elimina'
+    var parametri = tipologia
+      ? { p_id: idOggetto, p_sostituta: sostituta }
+      : { p_id: idOggetto, p_sostituto: sostituta }
+    scritturaEventi(auth, funzione, parametri).then(function(r) {
+      setLavora(false)
+      if (r.errore) { setErrore(r.errore); return }
+      var testo = (tipologia ? 'Tipologia' : 'Spazio') + ' "' + nome + '" ' + (tipologia ? 'eliminata.' : 'eliminato.')
+      var n = r.data || 0
+      if (n > 0) {
+        var nomeSost = ''
+        for (var i = 0; i < alternative.length; i++) {
+          if (alternative[i].id === sostituta) nomeSost = alternative[i].nome
+        }
+        var cosa = tipologia ? (n === 1 ? '1 evento' : n + ' eventi') : (n === 1 ? '1 servizio' : n + ' servizi')
+        testo = testo + ' ' + cosa + (nomeSost ? ' ora con "' + nomeSost + '".' : (tipologia ? ' ora senza tipologia.' : ' senza questo spazio.'))
+      }
+      if (props.onDone) props.onDone(testo)
+    })
+  }
+
+  var inUso = usi && usi.length > 0
+
+  return (
+    <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] flex flex-col">
+        <div className="px-6 py-4 border-b border-gray-200">
+          <h2 className="text-lg font-semibold text-gray-900">{tipologia ? 'Elimina la tipologia' : 'Elimina lo spazio'} «{nome}»</h2>
+        </div>
+        <div className="p-6 space-y-4 overflow-y-auto">
+          {errore && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{errore}</div>
+          )}
+          {erroreUsi && (
+            <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{erroreUsi}</div>
+          )}
+          {!usi && !erroreUsi && (
+            <div className="text-sm text-gray-400">Controllo gli eventi che {tipologia ? 'la' : 'lo'} usano...</div>
+          )}
+          {usi && !inUso && (
+            <div className="text-sm text-gray-700">
+              Nessun evento {tipologia ? 'la' : 'lo'} usa. Eliminando, sparisce dall'elenco per sempre.
+            </div>
+          )}
+          {inUso && (
+            <div>
+              <div className="text-sm text-gray-700 mb-2">
+                {tipologia ? 'La usano' : 'Lo usano'} <span className="font-semibold">{usi.length === 1 ? '1 evento' : usi.length + ' eventi'}</span>:
+              </div>
+              <div className="border border-gray-200 rounded-lg overflow-hidden mb-4">
+                {usi.map(function(u) {
+                  var st = STATI[u.stato] || STATI.richiesta
+                  return (
+                    <div key={u.id} className="px-3 py-2 border-b border-gray-100 last:border-0 flex items-center justify-between gap-3 text-sm">
+                      <div className="min-w-0">
+                        <div className="font-medium text-gray-900 truncate">{u.titolo}</div>
+                        <div className="text-xs text-gray-500">{u.prima ? formatData(u.prima, true) : 'senza data'}</div>
+                      </div>
+                      <span className={'inline-block px-2 py-0.5 rounded-full text-xs font-medium flex-shrink-0 ' + st.classe}>{st.label}</span>
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="text-sm text-gray-700 mb-2">
+                {tipologia ? 'Su questi eventi metti al suo posto:' : 'Sui loro servizi metti al suo posto:'}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" onClick={function() { setSostituta(null) }}
+                  className={'px-3 py-1.5 rounded-lg text-sm border ' + (sostituta === null ? 'bg-wine-700 text-white border-wine-700' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50')}>
+                  {nessuno}
+                </button>
+                {alternative.map(function(a) {
+                  var scelto = sostituta === a.id
+                  return (
+                    <button key={a.id} type="button" onClick={function() { setSostituta(a.id) }}
+                      className={'px-3 py-1.5 rounded-lg text-sm border ' + (scelto ? 'bg-wine-700 text-white border-wine-700' : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50') + (a.attiva === false ? ' opacity-60' : '')}>
+                      {a.nome}{a.attiva === false ? ' (spent' + (tipologia ? 'a' : 'o') + ')' : ''}
+                    </button>
+                  )
+                })}
+              </div>
+              {sostituta === null && (
+                <div className="mt-2 text-xs text-amber-800">
+                  {tipologia ? 'Questi eventi resteranno senza tipologia.' : 'Questi servizi perderanno solo questo spazio (gli altri spazi restano).'}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="px-6 py-4 border-t border-gray-200 flex justify-end gap-2">
+          <button type="button" onClick={props.onClose} disabled={lavora}
+            className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">
+            Annulla
+          </button>
+          <button type="button" onClick={conferma} disabled={lavora || !usi}
+            className="bg-red-600 hover:bg-red-700 disabled:bg-red-300 text-white px-4 py-2 rounded-lg text-sm font-medium">
+            {lavora ? 'Elimino...' : 'Elimina'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Dalle righe lette (eventi per una tipologia, legami servizio-spazio
+// per uno spazio) un evento per riga, con la data del primo servizio.
+function raggruppaUsi(righe, tipologia) {
+  var mappa = {}
+  var elenco = []
+  function aggiungi(ev, data) {
+    if (!ev) return
+    var u = mappa[ev.id]
+    if (!u) {
+      u = { id: ev.id, titolo: ev.titolo, stato: ev.stato, prima: null }
+      mappa[ev.id] = u
+      elenco.push(u)
+    }
+    if (data && (!u.prima || data < u.prima)) u.prima = data
+  }
+  for (var i = 0; i < righe.length; i++) {
+    var r = righe[i]
+    if (tipologia) {
+      var serv = r.eventi_servizi || []
+      if (serv.length === 0) aggiungi(r, null)
+      for (var j = 0; j < serv.length; j++) aggiungi(r, serv[j].data)
+    } else {
+      var s = r.eventi_servizi
+      if (s && s.eventi) aggiungi(s.eventi, s.data)
+    }
+  }
+  elenco.sort(function(a, b) { return (a.prima || '') < (b.prima || '') ? -1 : ((a.prima || '') > (b.prima || '') ? 1 : 0) })
+  return elenco
+}
+
 export default function EventiPage() {
   var auth = useAuth()
   var navigate = useNavigate()
@@ -429,7 +619,9 @@ export default function EventiPage() {
 
   var [spazioModal, setSpazioModal] = useState({ open: false, spazio: null })
   var [tipologiaModal, setTipologiaModal] = useState({ open: false, tipologia: null })
+  var [eliminaModal, setEliminaModal] = useState({ open: false, tipo: null, oggetto: null })
   var [erroreRiga, setErroreRiga] = useState(null)
+  var [messaggioRiga, setMessaggioRiga] = useState(null)
 
   useEffect(function() { carica() }, [])
 
@@ -551,7 +743,7 @@ export default function EventiPage() {
   function linguetta(key, label) {
     var attiva = tab === key
     return (
-      <button type="button" onClick={function() { setTab(key); setErroreRiga(null) }}
+      <button type="button" onClick={function() { setTab(key); setErroreRiga(null); setMessaggioRiga(null) }}
         className={'px-4 py-2 text-sm font-medium border-b-2 ' +
           (attiva ? 'border-wine-700 text-wine-800' : 'border-transparent text-gray-500 hover:text-gray-800')}>
         {label}
@@ -594,6 +786,9 @@ export default function EventiPage() {
       )}
       {erroreRiga && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-800">{erroreRiga}</div>
+      )}
+      {messaggioRiga && (
+        <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">{messaggioRiga}</div>
       )}
 
       {loading ? (
@@ -660,7 +855,7 @@ export default function EventiPage() {
           {tab === 'spazi' && (
             <div>
               <p className="text-sm text-gray-600 mb-3">
-                Da qui si aggiungono e si modificano gli spazi <span className="font-medium">solo per eventi</span>.
+                Da qui si aggiungono, si modificano e si eliminano gli spazi <span className="font-medium">solo per eventi</span>.
                 Le sale del ristorante si vedono per completezza, ma si gestiscono da Sale e Tavoli.
               </p>
               <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
@@ -675,10 +870,16 @@ export default function EventiPage() {
                         </div>
                       </div>
                       {s.solo_eventi && puoModificare ? (
-                        <button type="button" onClick={function() { setSpazioModal({ open: true, spazio: s }) }}
-                          className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 flex-shrink-0">
-                          Modifica
-                        </button>
+                        <div className="flex gap-2 flex-shrink-0">
+                          <button type="button" onClick={function() { setSpazioModal({ open: true, spazio: s }) }}
+                            className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">
+                            Modifica
+                          </button>
+                          <button type="button" onClick={function() { setErroreRiga(null); setMessaggioRiga(null); setEliminaModal({ open: true, tipo: 'spazio', oggetto: s }) }}
+                            className="px-3 py-1.5 border border-red-300 rounded-lg text-sm text-red-700 hover:bg-red-50">
+                            Elimina
+                          </button>
+                        </div>
                       ) : (
                         !s.solo_eventi && <span className="text-xs text-gray-400 flex-shrink-0">Sale e Tavoli</span>
                       )}
@@ -696,7 +897,8 @@ export default function EventiPage() {
           {tab === 'tipologie' && (
             <div>
               <p className="text-sm text-gray-600 mb-3">
-                Le tipologie non si cancellano: si spengono. Una tipologia spenta non viene piu' proposta, ma resta sugli eventi che la usano.
+                Una tipologia spenta non viene piu' proposta, ma resta sugli eventi che la usano.
+                Una tipologia eliminata sparisce: se qualche evento la usa, scegli tu con che cosa sostituirla.
               </p>
               <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
                 {tipologie.map(function(t) {
@@ -715,6 +917,10 @@ export default function EventiPage() {
                           <button type="button" onClick={function() { cambiaAttivaTipologia(t) }}
                             className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">
                             {t.attiva === false ? 'Accendi' : 'Spegni'}
+                          </button>
+                          <button type="button" onClick={function() { setErroreRiga(null); setMessaggioRiga(null); setEliminaModal({ open: true, tipo: 'tipologia', oggetto: t }) }}
+                            className="px-3 py-1.5 border border-red-300 rounded-lg text-sm text-red-700 hover:bg-red-50">
+                            Elimina
                           </button>
                         </div>
                       )}
@@ -743,6 +949,14 @@ export default function EventiPage() {
         elenco={tipologie}
         onClose={function() { setTipologiaModal({ open: false, tipologia: null }) }}
         onSaved={function() { setTipologiaModal({ open: false, tipologia: null }); carica() }}
+      />
+      <EliminaModal
+        open={eliminaModal.open}
+        tipo={eliminaModal.tipo}
+        oggetto={eliminaModal.oggetto}
+        alternative={eliminaModal.tipo === 'tipologia' ? tipologie : sale}
+        onClose={function() { setEliminaModal({ open: false, tipo: null, oggetto: null }) }}
+        onDone={function(testo) { setEliminaModal({ open: false, tipo: null, oggetto: null }); setMessaggioRiga(testo); carica() }}
       />
     </div>
   )

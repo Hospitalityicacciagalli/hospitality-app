@@ -36,6 +36,12 @@ import {
 // Ogni scrittura passa da scritturaEventi (EventiPage.jsx), che presenta
 // il gettone di elevazione: firma chi ha inserito il PIN.
 //
+// ERRORI (12/11/2026, verbale prova veloce): quello che impedisce di
+// salvare si controlla in UNA funzione sola, problemiForm() (regola 31).
+// Dopo il primo «Salva» che non passa, la barra in basso mostra la LISTA
+// dei problemi e si aggiorna da sola man mano che si correggono; toccando
+// una voce la pagina scorre al campo da sistemare.
+//
 // Il cliente si sceglie cercandolo. "Nuovo cliente" apre Clienti -> Nuovo
 // in un'altra scheda del browser: la creazione dei clienti, con il
 // controllo dei doppioni, resta in una copia sola (regola 31).
@@ -155,6 +161,15 @@ export default function EventoScheda() {
 
   var [spazioPer, setSpazioPer] = useState(null)
 
+  // tentato: e' gia' stato premuto Salva con dei problemi -> la barra in
+  // basso mostra la lista viva. confermaSimile: il testo di una tipologia
+  // nuova che assomiglia a una esistente e per cui e' stata chiesta la
+  // seconda conferma. appenaCreato: dopo «Crea evento» la scheda si
+  // ricarica (stesso componente, regola 57) e deve dire «Evento salvato.».
+  var [tentato, setTentato] = useState(false)
+  var [confermaSimile, setConfermaSimile] = useState('')
+  var appenaCreato = useRef(false)
+
   // Uscita dalla scheda con modifiche non salvate (verbale passo 23).
   // uscitaVerso = la pagina dove volevi andare, in attesa di conferma.
   // modificatoRef tiene "ci sono modifiche?" per gli ascoltatori qui
@@ -212,6 +227,41 @@ export default function EventoScheda() {
     return evento && evento.stato === 'opzione' ? f.scadenza : ''
   }
 
+  // I problemi che impediscono di salvare, in UNA copia sola (regola 31):
+  // la usa salva() per decidere e la barra in basso per mostrarli.
+  // dove = l'id del riquadro a cui la pagina scorre toccando la voce.
+  function problemiForm(f) {
+    var lista = []
+    if (!f.titolo.trim()) lista.push({ testo: 'Manca il titolo.', dove: 'campo-titolo' })
+    var clienteObbligatorio = nuovo || (evento && evento.provenienza === 'modulo')
+    if (clienteObbligatorio && !f.cliente) lista.push({ testo: 'Manca il cliente.', dove: 'campo-cliente' })
+    if (f.tipologiaTesto.trim() && !tipologiaUguale(f.tipologiaTesto, tipologie)) {
+      lista.push({ testo: 'La tipologia "' + f.tipologiaTesto.trim() + '" non e\' nell\'elenco: sceglila fra i suggerimenti oppure aggiungila.', dove: 'campo-tipologia' })
+    }
+    if (nuovo && f.stato === 'opzione' && !f.scadenza) {
+      lista.push({ testo: 'Manca la scadenza dell\'opzione.', dove: 'campo-scadenza' })
+    }
+    var scad = scadenzaVigente(f)
+    var primo = primaDataServizi(f.servizi)
+    if (scad && primo && scad > primo) {
+      lista.push({ testo: 'La scadenza dell\'opzione (' + formatData(scad) + ') e\' dopo il primo servizio (' + formatData(primo) + ').', dove: nuovo ? 'campo-scadenza' : 'campo-stato' })
+    }
+    if (f.servizi.length === 0) lista.push({ testo: 'Serve almeno un servizio.', dove: null })
+    for (var i = 0; i < f.servizi.length; i++) {
+      var sv = f.servizi[i]
+      var n = i + 1
+      if (!sv.data) lista.push({ testo: 'Servizio ' + n + ': manca la data.', dove: 'servizio-' + sv.chiave })
+      if (!fasciaValida(sv.fascia)) lista.push({ testo: 'Servizio ' + n + ': scegli pranzo, cena o giornata intera.', dove: 'servizio-' + sv.chiave })
+    }
+    return lista
+  }
+
+  function vaiAlCampo(dove) {
+    if (!dove) return
+    var el = document.getElementById(dove)
+    if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
+
   // ----------------------------------------------------------
   // CARICAMENTO
   // ----------------------------------------------------------
@@ -239,6 +289,8 @@ export default function EventoScheda() {
     setLoading(true)
     setErrore(null)
     setMessaggio(null)
+    setTentato(false)
+    setConfermaSimile('')
     setCambiaCliente(false)
     setCercaTesto('')
     setRisultati([])
@@ -329,6 +381,10 @@ export default function EventoScheda() {
       }
       setForm(f)
       setFotografia(JSON.stringify(f))
+      if (appenaCreato.current) {
+        appenaCreato.current = false
+        setMessaggio('Evento salvato.')
+      }
     })
   }
 
@@ -448,41 +504,19 @@ export default function EventoScheda() {
     setMessaggio(null)
     var f = form
 
-    if (!f.titolo.trim()) { setErrore('Scrivi il titolo dell\'evento.'); return }
-
-    var clienteObbligatorio = nuovo || (evento && evento.provenienza === 'modulo')
-    if (clienteObbligatorio && !f.cliente) { setErrore('Scegli il cliente dell\'evento.'); return }
+    // Un controllo solo (problemiForm): se c'e' qualcosa da sistemare la
+    // barra in basso lo elenca e si aggiorna da sola.
+    if (problemiForm(f).length > 0) {
+      setTentato(true)
+      return
+    }
 
     var tipologiaId = ''
-    if (f.tipologiaTesto.trim()) {
-      var t = tipologiaUguale(f.tipologiaTesto, tipologie)
-      if (!t) {
-        setErrore('La tipologia "' + f.tipologiaTesto.trim() + '" non e\' nell\'elenco: sceglila fra i suggerimenti oppure premi "Aggiungi all\'elenco".')
-        return
-      }
-      tipologiaId = t.id
-    }
-
-    if (nuovo && f.stato === 'opzione' && !f.scadenza) {
-      setErrore('Un\'opzione deve avere la data di scadenza.')
-      return
-    }
-
-    var scadControllo = scadenzaVigente(f)
-    var primoControllo = primaDataServizi(f.servizi)
-    if (scadControllo && primoControllo && scadControllo > primoControllo) {
-      setErrore(messaggioScadenza(scadControllo, primoControllo))
-      return
-    }
-
-    if (f.servizi.length === 0) { setErrore('Serve almeno un servizio.'); return }
+    if (f.tipologiaTesto.trim()) tipologiaId = tipologiaUguale(f.tipologiaTesto, tipologie).id
 
     var servizi = []
     for (var i = 0; i < f.servizi.length; i++) {
       var s = f.servizi[i]
-      var n = i + 1
-      if (!s.data) { setErrore('Servizio ' + n + ': manca la data.'); return }
-      if (!fasciaValida(s.fascia)) { setErrore('Servizio ' + n + ': scegli pranzo, cena o giornata intera.'); return }
       var x = {
         id: s.id || '',
         nome: s.nome.trim(),
@@ -522,6 +556,7 @@ export default function EventoScheda() {
       setSalvando(false)
       if (r.errore) { setErrore(r.errore); return }
       if (nuovo) {
+        appenaCreato.current = true
         navigate('/eventi/' + r.data, { replace: true })
       } else {
         carica()
@@ -619,6 +654,7 @@ export default function EventoScheda() {
 
   var modificato = JSON.stringify(form) !== fotografia
   modificatoRef.current = modificato
+  var problemiVivi = tentato ? problemiForm(form) : []
   var disab = !puoModificare
   var oggi = oggiIso()
   var statoAttuale = nuovo ? null : evento.stato
@@ -673,7 +709,7 @@ export default function EventoScheda() {
   }
 
   return (
-    <div className="p-4 lg:p-6 max-w-3xl mx-auto pb-28">
+    <div className={'p-4 lg:p-6 max-w-3xl mx-auto ' + (problemiVivi.length > 0 ? 'pb-56' : 'pb-28')}>
 
       <div className="flex items-center justify-between gap-3 mb-4">
         <button type="button" onClick={function() { vai('/eventi') }}
@@ -705,7 +741,7 @@ export default function EventoScheda() {
 
       {/* ===================== STATO (evento esistente) ===================== */}
       {!nuovo && (
-        <div className="mb-4 p-4 bg-white border border-gray-200 rounded-lg">
+        <div id="campo-stato" className="mb-4 p-4 bg-white border border-gray-200 rounded-lg">
           <div className="text-sm text-gray-700">
             Stato: <span className="font-semibold">{STATI[statoAttuale].label}</span>
             {statoAttuale === 'opzione' && evento.scadenza_opzione && (
@@ -761,7 +797,7 @@ export default function EventoScheda() {
 
       {/* ===================== TESTATA ===================== */}
       <div className="mb-4 p-4 bg-white border border-gray-200 rounded-lg space-y-4">
-        <div>
+        <div id="campo-titolo">
           <label className="block text-xs font-medium text-gray-700 mb-1">Titolo</label>
           <input type="text" value={form.titolo} disabled={disab}
             onChange={function(e) { imposta('titolo', e.target.value) }}
@@ -770,7 +806,7 @@ export default function EventoScheda() {
         </div>
 
         {/* Tipologia */}
-        <div>
+        <div id="campo-tipologia">
           <label className="block text-xs font-medium text-gray-700 mb-1">Tipologia</label>
           <input type="text" value={form.tipologiaTesto} disabled={disab}
             onChange={function(e) { imposta('tipologiaTesto', e.target.value) }}
@@ -803,13 +839,36 @@ export default function EventoScheda() {
                   })}
                 </div>
               )}
-              <div>
-                "{form.tipologiaTesto.trim()}" non e' nell'elenco.{' '}
-                <button type="button" onClick={aggiungiTipologia}
-                  className="ml-1 underline font-medium">
-                  Aggiungi all'elenco
-                </button>
-              </div>
+              {tipSimili.length > 0 && confermaSimile === form.tipologiaTesto.trim() ? (
+                <div className="p-2 bg-white border border-amber-400 rounded-lg">
+                  <div className="font-semibold mb-1">
+                    Sicuro? "{form.tipologiaTesto.trim()}" assomiglia a {tipSimili.map(function(t) { return '"' + t.nome + '"' }).join(', ')}.
+                  </div>
+                  <div className="mb-2">Aggiungila solo se e' davvero una tipologia diversa.</div>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" onClick={function() { setConfermaSimile(''); aggiungiTipologia() }}
+                      className="px-3 py-1.5 rounded-lg text-sm font-medium bg-amber-600 hover:bg-amber-700 text-white">
+                      Si', aggiungi "{form.tipologiaTesto.trim()}"
+                    </button>
+                    <button type="button" onClick={function() { setConfermaSimile('') }}
+                      className="px-3 py-1.5 rounded-lg text-sm border border-gray-300 bg-white text-gray-700 hover:bg-gray-50">
+                      No
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  "{form.tipologiaTesto.trim()}" non e' nell'elenco.{' '}
+                  <button type="button"
+                    onClick={function() {
+                      if (tipSimili.length > 0) setConfermaSimile(form.tipologiaTesto.trim())
+                      else aggiungiTipologia()
+                    }}
+                    className="ml-1 underline font-medium">
+                    Aggiungi all'elenco
+                  </button>
+                </div>
+              )}
             </div>
           )}
           {tipUguale && tipUguale.attiva === false && (
@@ -818,7 +877,7 @@ export default function EventoScheda() {
         </div>
 
         {/* Cliente */}
-        <div>
+        <div id="campo-cliente">
           <label className="block text-xs font-medium text-gray-700 mb-1">Cliente</label>
           {form.cliente && !cambiaCliente ? (
             <div className="flex items-center justify-between gap-3 p-3 border border-gray-200 rounded-lg">
@@ -896,7 +955,7 @@ export default function EventoScheda() {
               {form.stato === 'confermato' ? 'Confermato: di solito dopo la caparra.' : ''}
             </p>
             {form.stato === 'opzione' && (
-              <div className="mt-2">
+              <div id="campo-scadenza" className="mt-2">
                 <label className="block text-xs font-medium text-gray-700 mb-1">Scadenza dell'opzione</label>
                 <input type="date" value={form.scadenza} disabled={disab} max={primaServizio || undefined}
                   onChange={function(e) { imposta('scadenza', e.target.value) }}
@@ -942,7 +1001,7 @@ export default function EventoScheda() {
         })
         var saleVisibili = sale.filter(function(x) { return x.attiva !== false || s.sale.indexOf(x.id) >= 0 })
         return (
-          <div key={s.chiave} className="mb-4 p-4 bg-white border border-gray-200 rounded-lg space-y-4">
+          <div key={s.chiave} id={'servizio-' + s.chiave} className="mb-4 p-4 bg-white border border-gray-200 rounded-lg space-y-4">
             <div className="flex items-center justify-between gap-3">
               <div className="font-semibold text-gray-800">Servizio {idx + 1}</div>
               {!disab && form.servizi.length > 1 && (
@@ -1120,12 +1179,32 @@ export default function EventoScheda() {
       {/* ===================== BARRA SALVA ===================== */}
       {puoModificare && (
         <div className={'fixed bottom-0 left-0 right-0 lg:left-60 border-t-2 px-4 py-3 z-20 ' + (modificato ? 'bg-amber-100 border-amber-400' : 'bg-white border-gray-200')}>
-          <div className="max-w-3xl mx-auto flex items-center justify-between gap-3">
-            <div className={'text-sm ' + (scadenzaIncoerente ? 'text-red-700 font-semibold' : (modificato ? 'text-amber-900 font-semibold' : 'text-gray-500'))}>
-              {scadenzaIncoerente
-                ? 'Scadenza dell\'opzione dopo il primo servizio: correggi prima di salvare'
-                : (modificato ? '⚠️ Modifiche non salvate' : (nuovo ? '' : 'Tutto salvato'))}
-            </div>
+          <div className="max-w-3xl mx-auto flex items-end justify-between gap-3">
+            {problemiVivi.length > 0 ? (
+              <div className="text-sm text-red-700 min-w-0 flex-1">
+                <div className="font-semibold mb-1">
+                  {problemiVivi.length === 1 ? 'Per salvare manca ancora una cosa:' : 'Per salvare mancano ancora ' + problemiVivi.length + ' cose:'}
+                </div>
+                <div className="max-h-32 overflow-y-auto space-y-0.5">
+                  {problemiVivi.map(function(pr, i) {
+                    return (
+                      <button key={i} type="button" onClick={function() { vaiAlCampo(pr.dove) }}
+                        className="block w-full text-left underline decoration-red-300 hover:text-red-900">
+                        {'• ' + pr.testo}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+            ) : (errore ? (
+              <div className="text-sm text-red-700 font-semibold min-w-0 flex-1">{errore}</div>
+            ) : (
+              <div className={'text-sm ' + (scadenzaIncoerente ? 'text-red-700 font-semibold' : (modificato ? 'text-amber-900 font-semibold' : 'text-gray-500'))}>
+                {scadenzaIncoerente
+                  ? 'Scadenza dell\'opzione dopo il primo servizio: correggi prima di salvare'
+                  : (modificato ? '⚠️ Modifiche non salvate' : (nuovo ? '' : 'Tutto salvato'))}
+              </div>
+            ))}
             <div className="flex gap-2">
               {!nuovo && modificato && (
                 <button type="button" onClick={carica} disabled={salvando}
