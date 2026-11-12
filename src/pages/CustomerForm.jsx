@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, Save, AlertTriangle } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import AllergeniEditor, { validaAllergeni, salvaAllergeni, campiConsensoSalute } from '../components/AllergeniEditor'
@@ -14,10 +14,30 @@ import ComparazioneClienti, { cercaCandidatiForti } from '../components/Comparaz
 // niente in cambio.
 // ============================================================
 
+// RITORNO (12/11/2026): chi apre il modulo da un'altra pagina passa
+// ?ritorno=<percorso>. Oggi lo usa solo la scheda di un evento
+// («+ Nuovo cliente»): registrato il cliente, si torna all'evento con
+// ?cliente=<id> e la scheda lo sceglie da sola. Si accetta SOLO un
+// percorso interno che comincia con /eventi/: un indirizzo qualunque
+// nel parametro non porta da nessuna parte.
+function ritornoValido(r) {
+  if (!r) return null
+  if (r.indexOf('/eventi/') !== 0) return null
+  if (r.indexOf('//') >= 0 || r.indexOf('?') >= 0) return null
+  return r
+}
+
 function CustomerForm() {
   const { id } = useParams()
   const navigate = useNavigate()
   const isEditing = Boolean(id)
+  var [parametri] = useSearchParams()
+  var ritorno = isEditing ? null : ritornoValido(parametri.get('ritorno'))
+
+  function indietro() {
+    if (ritorno) navigate(ritorno)
+    else navigate(-1)
+  }
 
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -305,7 +325,8 @@ function CustomerForm() {
         if (consentError) throw consentError
       }
 
-      navigate(`/clienti/${customerId}`)
+      if (ritorno) navigate(ritorno + '?cliente=' + customerId)
+      else navigate(`/clienti/${customerId}`)
     } catch (error) {
       console.error('Errore salvataggio:', error)
       alert('Errore nel salvataggio. Riprova.')
@@ -327,7 +348,7 @@ function CustomerForm() {
       {/* Intestazione */}
       <div className="flex items-center gap-4 mb-6">
         <button
-          onClick={() => navigate(-1)}
+          onClick={indietro}
           className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
         >
           <ArrowLeft size={24} />
@@ -336,6 +357,13 @@ function CustomerForm() {
           {isEditing ? 'Modifica Cliente' : 'Nuovo Cliente'}
         </h1>
       </div>
+
+      {ritorno && (
+        <div className="mb-6 p-3 bg-yellow-50 border border-yellow-300 rounded-lg text-sm text-yellow-900">
+          Stai registrando il cliente per un evento: dopo «Registra Cliente» torni all'evento con il cliente gia' scelto
+          e tutto quello che avevi scritto. «Annulla» torna all'evento senza cliente.
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Dati anagrafici */}
@@ -612,7 +640,7 @@ function CustomerForm() {
           </button>
           <button
             type="button"
-            onClick={() => navigate(-1)}
+            onClick={indietro}
             className="px-6 py-4 border border-gray-300 rounded-xl hover:bg-gray-50 transition-colors font-medium text-gray-700 text-base"
           >
             Annulla
@@ -636,7 +664,10 @@ function CustomerForm() {
           // scheda che gia' esiste, non selezionarla per qualcos altro.
           setShowComparazione(false)
           setCandidati([])
-          navigate('/clienti/' + candidato.customer_id)
+          // Arrivando da un evento, «usa questa scheda» vuol dire proprio
+          // sceglierla per l'evento: si torna la' con quel cliente.
+          if (ritorno) navigate(ritorno + '?cliente=' + candidato.customer_id)
+          else navigate('/clienti/' + candidato.customer_id)
         }}
         onCreaComunque={function() {
           setShowComparazione(false)

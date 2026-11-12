@@ -42,9 +42,18 @@ import {
 // dei problemi e si aggiorna da sola man mano che si correggono; toccando
 // una voce la pagina scorre al campo da sistemare.
 //
-// Il cliente si sceglie cercandolo. "Nuovo cliente" apre Clienti -> Nuovo
-// in un'altra scheda del browser: la creazione dei clienti, con il
-// controllo dei doppioni, resta in una copia sola (regola 31).
+// BOZZA (12/11/2026): mentre si compila, la scheda tiene una copia di
+// tutto nel browser di quel computer (localStorage, 7 giorni). Tornando
+// sullo stesso evento (o su «Nuovo evento») la bozza si riprende da sola,
+// con un riquadro giallo e il pulsante «Scarta bozza». Sparisce con Salva,
+// Crea evento, Scarta ed «Esci senza salvare». Protegge da ogni uscita:
+// menu, F5, scheda chiusa, freccia «indietro» del browser.
+//
+// Il cliente si sceglie cercandolo. "Nuovo cliente" porta a Clienti ->
+// Nuovo NELLA STESSA SCHEDA, con ?ritorno=<questa pagina>: salvato il
+// cliente, CustomerForm torna qui con ?cliente=<id>, la bozza si riprende
+// e il cliente risulta gia' scelto. La creazione dei clienti, con il
+// controllo dei doppioni e i consensi, resta in una copia sola (regola 31).
 // ============================================================
 
 var CAMPI_NUMERO = [
@@ -91,6 +100,66 @@ function primaDataServizi(servizi) {
 function messaggioScadenza(scadenza, primo) {
   return 'La scadenza dell\'opzione (' + formatData(scadenza) + ') e\' dopo il primo servizio (' +
     formatData(primo) + '). Anticipa la scadenza oppure correggi le date dei servizi: finche\' non sono coerenti l\'evento non si salva.'
+}
+
+// ---- BOZZA nel browser (localStorage) --------------------------------
+// Una chiave per evento: bozza_evento_<id> oppure bozza_evento_nuovo.
+// Dentro: { salvata_il: ISO, form: {...} }. Dopo 7 giorni non vale piu'.
+// localStorage puo' mancare o rifiutare (navigazione privata, spazio
+// pieno): ogni accesso e' protetto, e senza bozza la scheda funziona
+// come prima.
+var BOZZA_PREFISSO = 'bozza_evento_'
+var BOZZA_DURATA_MS = 7 * 24 * 60 * 60 * 1000
+
+function chiaveBozza(idEvento) {
+  return BOZZA_PREFISSO + (idEvento || 'nuovo')
+}
+
+function leggiBozza(chiave) {
+  try {
+    var testo = window.localStorage.getItem(chiave)
+    if (!testo) return null
+    var b = JSON.parse(testo)
+    if (!b || !b.form || !b.salvata_il) return null
+    if (Date.now() - new Date(b.salvata_il).getTime() > BOZZA_DURATA_MS) {
+      window.localStorage.removeItem(chiave)
+      return null
+    }
+    return b
+  } catch (e) {
+    return null
+  }
+}
+
+function scriviBozza(chiave, form) {
+  try {
+    window.localStorage.setItem(chiave, JSON.stringify({ salvata_il: new Date().toISOString(), form: form }))
+  } catch (e) {
+    // spazio pieno o browser che non lo permette: niente bozza
+  }
+}
+
+function togliBozza(chiave) {
+  try { window.localStorage.removeItem(chiave) } catch (e) { /* niente */ }
+}
+
+// Le bozze scadute di TUTTI gli eventi: si puliscono a ogni apertura.
+function pulisciBozzeScadute() {
+  try {
+    var daTogliere = []
+    for (var i = 0; i < window.localStorage.length; i++) {
+      var k = window.localStorage.key(i)
+      if (k && k.indexOf(BOZZA_PREFISSO) === 0) daTogliere.push(k)
+    }
+    for (var j = 0; j < daTogliere.length; j++) leggiBozza(daTogliere[j])
+  } catch (e) { /* niente */ }
+}
+
+function formatOra(iso) {
+  var d = new Date(iso)
+  if (isNaN(d.getTime())) return ''
+  function due(n) { return n < 10 ? '0' + n : '' + n }
+  return due(d.getDate()) + '/' + due(d.getMonth() + 1) + ' alle ' + due(d.getHours()) + ':' + due(d.getMinutes())
 }
 
 function fasciaValida(f) {
@@ -170,6 +239,15 @@ export default function EventoScheda() {
   var [confermaSimile, setConfermaSimile] = useState('')
   var appenaCreato = useRef(false)
 
+  // bozzaRipresa: la bozza che e' stata rimessa nella scheda ({ salvata_il,
+  // dopo: true se l'evento e' stato modificato nel database DOPO la bozza}).
+  // chiaveAttiva: la chiave della bozza a cui appartiene il modulo che si
+  // vede. Vale null mentre si carica e dopo un salvataggio: cosi' durante
+  // il passaggio da «nuovo» all'evento creato (regola 57) il modulo
+  // vecchio non finisce nella bozza dell'evento nuovo.
+  var [bozzaRipresa, setBozzaRipresa] = useState(null)
+  var chiaveAttiva = useRef(null)
+
   // Uscita dalla scheda con modifiche non salvate (verbale passo 23).
   // uscitaVerso = la pagina dove volevi andare, in attesa di conferma.
   // modificatoRef tiene "ci sono modifiche?" per gli ascoltatori qui
@@ -178,6 +256,14 @@ export default function EventoScheda() {
   var modificatoRef = useRef(false)
 
   useEffect(function() { carica() }, [id])
+
+  // Ogni modifica finisce nella bozza; tornati uguali al salvato, la bozza
+  // sparisce.
+  useEffect(function() {
+    if (loading || !form || !chiaveAttiva.current) return
+    if (JSON.stringify(form) !== fotografia) scriviBozza(chiaveAttiva.current, form)
+    else togliBozza(chiaveAttiva.current)
+  }, [form, fotografia, loading])
 
   // Due strade per perdere le modifiche:
   //  - chiudere o ricaricare la scheda del browser: il browser mostra il
@@ -291,6 +377,9 @@ export default function EventoScheda() {
     setMessaggio(null)
     setTentato(false)
     setConfermaSimile('')
+    setBozzaRipresa(null)
+    chiaveAttiva.current = null
+    pulisciBozzeScadute()
     setCambiaCliente(false)
     setCercaTesto('')
     setRisultati([])
@@ -309,9 +398,10 @@ export default function EventoScheda() {
         }
         setEvento(null)
         setHaSoldi(false)
-        setForm(f)
         setFotografia(JSON.stringify(f))
+        setForm(riprendiBozza(f, null))
         setLoading(false)
+        clienteDalRitorno()
       })
       return
     }
@@ -379,13 +469,68 @@ export default function EventoScheda() {
         scadenza: ev.scadenza_opzione || '',
         servizi: sv
       }
-      setForm(f)
       setFotografia(JSON.stringify(f))
+      setForm(riprendiBozza(f, ev.updated_at))
       if (appenaCreato.current) {
         appenaCreato.current = false
         setMessaggio('Evento salvato.')
       }
+      clienteDalRitorno()
     })
+  }
+
+  // Se per questo evento c'e' una bozza valida la rimette nella scheda
+  // (con chiavi dei servizi NUOVE: quelle salvate potrebbero ripetersi);
+  // altrimenti restituisce il modulo letto. Da qui in poi le modifiche
+  // vanno nella bozza di questo evento.
+  function riprendiBozza(f, aggiornatoIl) {
+    var chiave = chiaveBozza(id)
+    chiaveAttiva.current = chiave
+    var b = leggiBozza(chiave)
+    if (!b) return f
+    var g = {}
+    for (var k in b.form) g[k] = b.form[k]
+    g.servizi = (b.form.servizi || []).map(function(sv) {
+      var c = {}
+      for (var h in sv) c[h] = sv[h]
+      c.chiave = nuovaChiave()
+      return c
+    })
+    if (g.servizi.length === 0) return f
+    setBozzaRipresa({
+      salvata_il: b.salvata_il,
+      dopo: !!(aggiornatoIl && new Date(aggiornatoIl).getTime() > new Date(b.salvata_il).getTime())
+    })
+    return g
+  }
+
+  function scartaBozza() {
+    togliBozza(chiaveBozza(id))
+    setBozzaRipresa(null)
+    carica()
+  }
+
+  // Ritorno da Clienti -> Nuovo: ?cliente=<id> nell'indirizzo. Si legge il
+  // cliente, lo si mette nella scheda e si toglie il parametro, cosi' un
+  // ricaricamento non lo rimette.
+  function clienteDalRitorno() {
+    var q = new URLSearchParams(location.search)
+    var cid = q.get('cliente')
+    if (!cid) return
+    navigate(location.pathname, { replace: true })
+    supabase.from('customers')
+      .select('id, first_name, last_name, phone, email')
+      .eq('id', cid)
+      .maybeSingle()
+      .then(function(res) {
+        if (res.error || !res.data) {
+          setErrore('Non trovo il cliente appena registrato: cercalo per nome.')
+          return
+        }
+        imposta('cliente', res.data)
+        setCambiaCliente(false)
+        setMessaggio('Cliente "' + res.data.last_name + ' ' + res.data.first_name + '" scelto per l\'evento. Ricordati di salvare.')
+      })
   }
 
   // ----------------------------------------------------------
@@ -476,8 +621,13 @@ export default function EventoScheda() {
     setRisultati([])
   }
 
+  // Stessa scheda: la bozza e' gia' salvata dall'effetto qui sopra, e
+  // CustomerForm torna qui. Si naviga direttamente (non con vai()): non
+  // e' un'uscita che perde dati, quindi niente finestra «Modifiche non
+  // salvate».
   function apriNuovoCliente() {
-    window.open('/clienti/nuovo', '_blank')
+    if (chiaveAttiva.current && JSON.stringify(form) !== fotografia) scriviBozza(chiaveAttiva.current, form)
+    navigate('/clienti/nuovo?ritorno=' + encodeURIComponent(location.pathname))
   }
 
   // ----------------------------------------------------------
@@ -555,6 +705,9 @@ export default function EventoScheda() {
     scritturaEventi(auth, 'evento_salva', { p_evento: dati }).then(function(r) {
       setSalvando(false)
       if (r.errore) { setErrore(r.errore); return }
+      togliBozza(chiaveBozza(id))
+      chiaveAttiva.current = null
+      setBozzaRipresa(null)
       if (nuovo) {
         appenaCreato.current = true
         navigate('/eventi/' + r.data, { replace: true })
@@ -737,6 +890,22 @@ export default function EventoScheda() {
       )}
       {messaggio && (
         <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">{messaggio}</div>
+      )}
+      {bozzaRipresa && modificato && (
+        <div className={'mb-4 p-3 border rounded-lg text-sm flex items-start justify-between gap-3 ' + (bozzaRipresa.dopo ? 'bg-red-50 border-red-300 text-red-800' : 'bg-yellow-50 border-yellow-300 text-yellow-900')}>
+          <div>
+            <div className="font-semibold">Ripresa la bozza non salvata del {formatOra(bozzaRipresa.salvata_il)}.</div>
+            {bozzaRipresa.dopo ? (
+              <div>Attenzione: l'evento e' stato modificato da qualcuno DOPO questa bozza. Salvando, la bozza sostituisce quelle modifiche: controlla prima, oppure scarta la bozza.</div>
+            ) : (
+              <div>Quello che vedi non e' ancora salvato: premi Salva quando hai finito.</div>
+            )}
+          </div>
+          <button type="button" onClick={scartaBozza}
+            className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm text-gray-700 bg-white hover:bg-gray-50 flex-shrink-0">
+            Scarta bozza
+          </button>
+        </div>
       )}
 
       {/* ===================== STATO (evento esistente) ===================== */}
@@ -932,7 +1101,7 @@ export default function EventoScheda() {
                     )}
                   </div>
                   <p className="mt-1 text-xs text-gray-500">
-                    "Nuovo cliente" apre la scheda Clienti in un'altra pagina del browser: salvalo la', poi torna qui e cercalo.
+                    "Nuovo cliente" apre la scheda Clienti: registrato il cliente, si torna qui con tutto quello che hai scritto e il cliente gia' scelto.
                   </p>
                 </div>
               )}
@@ -1207,7 +1376,7 @@ export default function EventoScheda() {
             ))}
             <div className="flex gap-2">
               {!nuovo && modificato && (
-                <button type="button" onClick={carica} disabled={salvando}
+                <button type="button" onClick={function() { togliBozza(chiaveBozza(id)); carica() }} disabled={salvando}
                   className="px-4 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50">
                   Scarta
                 </button>
@@ -1348,6 +1517,8 @@ export default function EventoScheda() {
                 <button type="button"
                   onClick={function() {
                     var dove = uscitaVerso
+                    togliBozza(chiaveBozza(id))
+                    chiaveAttiva.current = null
                     modificatoRef.current = false
                     setUscitaVerso(null)
                     navigate(dove)
