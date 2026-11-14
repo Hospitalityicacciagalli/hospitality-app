@@ -1269,11 +1269,19 @@ export default function EventoScheda() {
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-gray-700 mb-1">Esclusiva</label>
+                {/* Sessione 2 (14/11): «Esclusiva» diceva troppo poco. Da oggi
+                    questa spunta chiede la firma su OGNI prenotazione del turno,
+                    quindi vale solo per l'INTERA STRUTTURA. «Pergola in
+                    esclusiva» NON e' questa spunta: l'esclusiva di un solo
+                    spazio e' un cantiere a parte (per ora va nelle note). */}
+                <label className="block text-xs font-medium text-gray-700 mb-1">Intera struttura in esclusiva</label>
                 <div className="flex flex-wrap gap-2">
                   {bottoneScelta(!s.esclusiva, 'No', function() { impostaServizio(s.chiave, 'esclusiva', false) }, disab)}
-                  {bottoneScelta(s.esclusiva, 'Ristorante chiuso al pubblico', function() { impostaServizio(s.chiave, 'esclusiva', true) }, disab)}
+                  {bottoneScelta(s.esclusiva, 'Sì — ristorante chiuso al pubblico', function() { impostaServizio(s.chiave, 'esclusiva', true) }, disab)}
                 </div>
+                {!s.esclusiva && (
+                  <div className="text-xs text-gray-500 mt-1">Solo una sala (es. Pergola) in esclusiva? Lascia «No» e scrivilo nelle note: per gli spazi in esclusiva arriva una funzione dedicata.</div>
+                )}
               </div>
             </div>
 

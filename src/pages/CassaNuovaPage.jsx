@@ -128,9 +128,11 @@ function ordinaPer(righe) {
   return copia;
 }
 
+// Eventi dal MODULO (migrazione 64): «prima data + titolo» (0.5 punto 5
+// v61); lo stato si scrive solo se non e' confermato.
 function labelEvento(ev) {
-  var pasto = ev.meal_type === 'lunch' ? 'Pranzo' : (ev.meal_type === 'dinner' ? 'Cena' : 'Giornata');
-  return ev.event_date + ' · ' + ev.title + ' (' + pasto + ')';
+  var stato = ev.stato === 'opzione' ? ' (opzione)' : (ev.stato === 'richiesta' ? ' (richiesta)' : '');
+  return ev.event_date + ' · ' + ev.title + stato;
 }
 
 // ── (mig. 41) effetto di UN movimento sui contanti in cassa ──
@@ -255,6 +257,8 @@ function ModaleMovimento(props) {
   var sale = props.sale;
   var tavoli = props.tavoli;
   var eventi = props.eventi;
+  // Si scelgono solo eventi non annullati (0.5 punto 5 v61).
+  var listaEventi = eventi.filter(function(ev) { return ev.stato !== 'annullato'; });
   var userId = props.userId;
   var puoUsareCassaforte = props.puoUsareCassaforte;
   var esistente = props.movimento || null;
@@ -499,13 +503,13 @@ function ModaleMovimento(props) {
           {tipo === 'entrata' && (
             <div>
               <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Evento collegato (opzionale)</div>
-              {eventi.length > 0 ? (
+              {listaEventi.length > 0 ? (
                 <div className="max-h-44 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
                   <button type="button" onClick={function() { setEventoId(''); }}
                     className={'w-full text-left px-3 py-2 text-sm ' + (eventoId === '' ? 'bg-wine-50 text-wine-800 font-medium' : 'bg-white text-gray-700 hover:bg-gray-50')}>
                     nessuno
                   </button>
-                  {eventi.map(function(ev) {
+                  {listaEventi.map(function(ev) {
                     var sel = ev.id === eventoId;
                     return (
                       <button key={ev.id} type="button" onClick={function() { setEventoId(ev.id); }}
@@ -715,11 +719,29 @@ export default function CassaNuovaPage(props) {
     supabase.from('tavoli_sala').select('*').eq('attivo', true).then(function(r) {
       if (r.data) setTavoli(ordinaPer(r.data));
     });
+    // Eventi dal MODULO (migrazione 64; la cassa vecchia resta sull'archivio
+    // event_dates). Si tengono quelli con almeno un servizio negli ultimi
+    // tre mesi o nel futuro, in ordine di prima data (la piu' recente in
+    // cima). Gli ANNULLATI restano in memoria per mostrare il titolo di un
+    // movimento gia' collegato, ma non si possono scegliere (listaEventi).
     var treMesiFa = spostaData(oggiISO(), -90);
-    supabase.from('event_dates').select('id, event_date, title, event_type, meal_type')
-      .gte('event_date', treMesiFa).order('event_date', { ascending: false }).then(function(r) {
-        if (r.data) setEventi(r.data);
+    supabase.from('eventi').select('id, titolo, stato, eventi_servizi(data, fascia)').then(function(r) {
+      if (r.error) { console.error('eventi:', r.error); return; }
+      var out = [];
+      (r.data || []).forEach(function(ev) {
+        var servizi = ev.eventi_servizi || [];
+        if (servizi.length === 0) return;
+        var prima = servizi[0].data, ultima = servizi[0].data, fascia = servizi[0].fascia;
+        servizi.forEach(function(s) {
+          if (s.data < prima) { prima = s.data; fascia = s.fascia; }
+          if (s.data > ultima) ultima = s.data;
+        });
+        if (ultima < treMesiFa) return;
+        out.push({ id: ev.id, event_date: prima, title: ev.titolo, meal_type: fascia, stato: ev.stato });
       });
+      out.sort(function(a, b) { return a.event_date < b.event_date ? 1 : (a.event_date > b.event_date ? -1 : 0); });
+      setEventi(out);
+    });
   }, []);
 
   // fondo di apertura = contato dell'ULTIMA chiusura di una data precedente

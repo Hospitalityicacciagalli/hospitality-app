@@ -205,12 +205,10 @@ export default function Layout({ children }) {
 
   var showAdminSection = canView('impostazioni');
 
-  // Eventi — FASE 1: voce solo per chi e' super_admin, anche tramite PIN
-  // (ruolo efficace), e con il permesso 'eventi'. Stessa regola di
-  // EventiRoute in App.jsx.
-  // ⚠️ Sessione 2 (travaso): togliere il controllo sul ruolo qui e in
-  // App.jsx nello stesso commit; resta solo canView('eventi').
-  var vediEventi = ruoloEfficace() === 'super_admin' && canView('eventi');
+  // Eventi — dalla sessione 2 (migrazione 64) la voce si vede con il solo
+  // permesso 'eventi', come ogni altra voce. Stessa regola di EventiRoute
+  // in App.jsx (il controllo «solo super_admin» e' stato tolto insieme).
+  var vediEventi = canView('eventi');
 
   // Stato della sincronizzazione HiC.
   // hicMai = nessun giro andato mai a buon fine (la funzione torna vuoto).

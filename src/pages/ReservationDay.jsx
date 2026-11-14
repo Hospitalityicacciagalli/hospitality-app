@@ -4,6 +4,9 @@ import { Plus, ArrowLeft, Users, Clock, Phone, AlertTriangle, CalendarDays, Baby
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import { severitaLabel } from '../components/AllergeniEditor'
+// Eventi dal MODULO (migrazione 64): numeri dal conteggio unico del
+// database, schede dai servizi. Vedi src/lib/eventiLettura.js.
+import { caricaCopertiEventi, caricaServiziEventi, copertiDelTurno, righeRiservate, servizioNelTurno, titoloServizio } from '../lib/eventiLettura'
 
 function formatDateDisplay(dateStr) {
   var parts = dateStr.split('-')
@@ -12,7 +15,7 @@ function formatDateDisplay(dateStr) {
   return d.toLocaleDateString('it-IT', options)
 }
 
-var STATO_EVENTO_LABELS = { option: 'Opzione', confirmed: 'Confermato' }
+var STATO_EVENTO_LABELS = { opzione: 'Opzione', confermato: 'Confermato' }
 var PASTO_LABELS = { lunch: 'Pranzo', dinner: 'Cena', both: 'Giornata intera' }
 
 function turnoDb(turno) {
@@ -235,137 +238,45 @@ function BadgeGiftCard(props) {
   )
 }
 
-// ── FORM EVENTO ──────────────────────────────────────────────
-function FormEvento(props) {
-  var onSave = props.onSave
-  var onClose = props.onClose
-  var dateStr = props.dateStr
-  var eventoEsistente = props.evento || null
-  var isModifica = eventoEsistente !== null
-
-  var [title, setTitle] = useState(isModifica ? eventoEsistente.title : '')
-  var [eventType, setEventType] = useState(isModifica ? eventoEsistente.event_type : 'option')
-  var [mealType, setMealType] = useState(isModifica ? eventoEsistente.meal_type : 'dinner')
-  var [coversReserved, setCoversReserved] = useState(isModifica ? String(eventoEsistente.covers_reserved || '') : '')
-  var [notes, setNotes] = useState(isModifica ? (eventoEsistente.notes || '') : '')
-  var [saving, setSaving] = useState(false)
-  var [errore, setErrore] = useState('')
-
-  function handleSave() {
-    if (!title.trim()) { setErrore("Inserisci il titolo dell'evento."); return }
-    setErrore('')
-    setSaving(true)
-    var payload = {
-      event_date: dateStr,
-      title: title.trim(),
-      event_type: eventType,
-      meal_type: mealType,
-      covers_reserved: parseInt(coversReserved, 10) || null,
-      notes: notes.trim() || null
-    }
-    var query = isModifica
-      ? supabase.from('event_dates').update(payload).eq('id', eventoEsistente.id).select()
-      : supabase.from('event_dates').insert([payload]).select()
-    query.then(function(result) {
-      setSaving(false)
-      if (result.error) { setErrore('Errore: ' + result.error.message); return }
-      if (result.data && result.data.length > 0) { onSave(result.data[0], isModifica) }
-    })
-  }
-
-  return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-2xl w-full max-w-md shadow-2xl">
-        <div className="flex items-center justify-between p-6 border-b border-gray-100">
-          <h2 className="text-lg font-bold text-gray-900">{isModifica ? 'Modifica Evento' : 'Nuovo Evento'}</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-2xl leading-none">&times;</button>
-        </div>
-        <div className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Titolo evento *</label>
-            <input type="text" placeholder="es. Matrimonio Rossi, Compleanno 50 anni..." value={title}
-              onChange={function(e) { setTitle(e.target.value) }}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" autoFocus />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Stato</label>
-            <div className="flex gap-2">
-              <button onClick={function() { setEventType('option') }}
-                className={"flex-1 py-2 px-3 rounded-lg text-sm font-medium border transition-colors " + (eventType === 'option' ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50')}>
-                Opzione
-              </button>
-              <button onClick={function() { setEventType('confirmed') }}
-                className={"flex-1 py-2 px-3 rounded-lg text-sm font-medium border transition-colors " + (eventType === 'confirmed' ? 'bg-amber-500 text-white border-amber-500' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50')}>
-                Confermato
-              </button>
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Pasto</label>
-            <div className="flex gap-2">
-              {['lunch', 'dinner', 'both'].map(function(p) {
-                return (
-                  <button key={p} onClick={function() { setMealType(p) }}
-                    className={"flex-1 py-2 px-2 rounded-lg text-xs font-medium border transition-colors " + (mealType === p ? 'bg-wine-700 text-white border-wine-700' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50')}>
-                    {PASTO_LABELS[p]}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Ospiti previsti (opzionale)</label>
-            <input type="number" min="1" placeholder="es. 80" value={coversReserved}
-              onChange={function(e) { setCoversReserved(e.target.value) }}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Note (opzionale)</label>
-            <textarea rows={2} placeholder="Note interne sull'evento..." value={notes}
-              onChange={function(e) { setNotes(e.target.value) }}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-wine-500 resize-none" />
-          </div>
-          {errore && <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">{errore}</div>}
-        </div>
-        <div className="flex gap-3 p-6 pt-0">
-          <button onClick={onClose} className="flex-1 py-2.5 px-4 border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50">Annulla</button>
-          <button onClick={handleSave} disabled={saving}
-            className={"flex-1 py-2.5 px-4 rounded-lg text-sm font-medium transition-colors " + (saving ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-wine-700 text-white hover:bg-wine-800')}>
-            {saving ? 'Salvataggio...' : (isModifica ? 'Aggiorna' : 'Salva Evento')}
-          </button>
-        </div>
-      </div>
-    </div>
-  )
-}
-
 // ── CARD EVENTO ──────────────────────────────────────────────
+// Un SERVIZIO di un evento del modulo (sessione 2, migrazione 64). Qui si
+// legge e basta: modifiche, stati e cancellazioni si fanno in Eventi, la
+// strada unica (0.5 punto 9 v61). «Evento riservato» = chi non ha il
+// permesso Eventi: vede solo il numero, niente nome ne' note.
 function CardEvento(props) {
   var ev = props.evento
-  var onModifica = props.onModifica
-  var onElimina = props.onElimina
-  var isConfirmato = ev.event_type === 'confirmed'
-  var bgColor = isConfirmato ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-200'
-  var badgeColor = isConfirmato ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
+  var onApri = props.onApri
+  var isConfermato = ev.stato === 'confermato'
+  var bgColor = isConfermato ? 'bg-amber-50 border-amber-200' : 'bg-blue-50 border-blue-200'
+  var badgeColor = isConfermato ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
+  var orario = ''
+  if (ev.ora_inizio) orario = String(ev.ora_inizio).slice(0, 5) + (ev.ora_fine ? '–' + String(ev.ora_fine).slice(0, 5) : '')
   return (
     <div className={"rounded-xl border p-4 " + bgColor}>
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap mb-1">
-            {isConfirmato ? <Star size={14} className="text-amber-500 fill-amber-500 flex-shrink-0" /> : <Clock size={14} className="text-blue-500 flex-shrink-0" />}
-            <span className="font-semibold text-gray-900 text-sm">{ev.title}</span>
-            <span className={"px-2 py-0.5 rounded-full text-xs font-medium " + badgeColor}>{STATO_EVENTO_LABELS[ev.event_type]}</span>
-            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">{PASTO_LABELS[ev.meal_type] || ev.meal_type}</span>
+            {isConfermato ? <Star size={14} className="text-amber-500 fill-amber-500 flex-shrink-0" /> : <Clock size={14} className="text-blue-500 flex-shrink-0" />}
+            <span className="font-semibold text-gray-900 text-sm">{titoloServizio(ev)}</span>
+            {!ev.riservato && <span className={"px-2 py-0.5 rounded-full text-xs font-medium " + badgeColor}>{STATO_EVENTO_LABELS[ev.stato] || ev.stato}</span>}
+            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">{PASTO_LABELS[ev.fascia] || ev.fascia}</span>
+            {ev.esclusiva && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">Esclusiva: ristorante chiuso al pubblico</span>}
+            {!ev.occupa_coperti && <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-500">non occupa i coperti</span>}
           </div>
           <div className="flex items-center gap-3 text-xs text-gray-500 mt-1 flex-wrap">
-            {ev.covers_reserved && <span className="flex items-center gap-1"><Users size={12} />{ev.covers_reserved + ' ospiti previsti'}</span>}
-            {ev.notes && <span className="text-gray-400 italic truncate max-w-xs">{ev.notes}</span>}
+            <span className="flex items-center gap-1"><Users size={12} />{ev.numero ? ev.numero + ' ospiti previsti' : 'numero ospiti non indicato'}</span>
+            {orario && <span className="flex items-center gap-1"><Clock size={12} />{orario}</span>}
+            {ev.spazi.length > 0 && <span>{ev.spazi.join(', ')}</span>}
           </div>
+          {(ev.note_evento || ev.note_servizio) && (
+            <div className="text-xs text-gray-400 italic mt-1 whitespace-pre-line">{[ev.note_servizio, ev.note_evento].filter(function(x) { return x }).join(' · ')}</div>
+          )}
         </div>
-        <div className="flex gap-1 flex-shrink-0">
-          <button onClick={function() { onModifica(ev) }} className="text-xs px-2 py-1 bg-white text-gray-600 rounded border border-gray-200 hover:bg-gray-50">Modifica</button>
-          <button onClick={function() { onElimina(ev.id) }} className="text-xs px-2 py-1 bg-white text-red-600 rounded border border-red-200 hover:bg-red-50">Elimina</button>
-        </div>
+        {!ev.riservato && (
+          <div className="flex gap-1 flex-shrink-0">
+            <button onClick={function() { onApri(ev) }} className="text-xs px-2 py-1 bg-white text-gray-700 rounded border border-gray-200 hover:bg-gray-50">Apri in Eventi</button>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -708,6 +619,9 @@ function StampaMenu(props) {
   var sale = props.sale
   var clientiTavolo = props.clientiTavolo || {}
   var eventi = props.eventi || []
+  // Il conteggio unico del turno (coperti_eventi): i totali stampati
+  // vengono da qui, non da una somma delle schede (regola 31).
+  var copertiTurno = props.copertiTurno || { ospiti: 0, opzione: 0, senzaNumero: 0, esclusiva: false }
   var [aperto, setAperto] = useState(false)
   var ref = useRef(null)
 
@@ -724,7 +638,7 @@ function StampaMenu(props) {
   // Eventi che pesano su QUESTO turno: la stessa regola della pagina a
   // schermo (un evento "Giornata intera" vale sia a pranzo sia a cena).
   function eventiDelTurno() {
-    return eventi.filter(function(ev) { return ev.meal_type === turno || ev.meal_type === 'both' })
+    return eventi.filter(function(ev) { return servizioNelTurno(ev.fascia, turno) })
   }
 
   // Un unico punto di calcolo per tutte le stampe: i numeri stampati devono
@@ -739,15 +653,10 @@ function StampaMenu(props) {
       bambini += r.children_count || 0
     })
     var evs = eventiDelTurno()
-    var ospitiEvento = 0
-    var senzaNumero = false
-    evs.forEach(function(ev) {
-      var cr = ev.covers_reserved
-      // Un evento senza numero ospiti non si somma e va dichiarato:
-      // un evento reale non ha mai zero ospiti.
-      if (cr == null || cr === '' || Number(cr) === 0) senzaNumero = true
-      else ospitiEvento += (parseInt(cr, 10) || 0)
-    })
+    // Ospiti degli eventi: dal conteggio unico del database (confermati
+    // + opzioni). Un servizio senza numero non si somma e va dichiarato.
+    var ospitiEvento = copertiTurno.ospiti
+    var senzaNumero = copertiTurno.senzaNumero > 0
     return {
       prenotazioni: reservations.length,
       ospiti: ospiti,
@@ -787,30 +696,29 @@ function StampaMenu(props) {
   function buildEventiHtml() {
     var evs = eventiDelTurno()
     if (evs.length === 0) return ''
-    var totEv = 0
-    var senzaNumero = false
     var html = '<div class="section-title">' + (evs.length === 1 ? 'Evento del giorno' : 'Eventi del giorno') + '</div>'
     evs.forEach(function(ev) {
-      var cr = ev.covers_reserved
-      if (cr == null || cr === '' || Number(cr) === 0) senzaNumero = true
-      else totEv += (parseInt(cr, 10) || 0)
-      var stato = STATO_EVENTO_LABELS[ev.event_type] || ev.event_type
-      var pasto = PASTO_LABELS[ev.meal_type] || ev.meal_type
-      var statoColor = ev.event_type === 'confirmed' ? '#fef3c7' : '#dbeafe'
+      var stato = STATO_EVENTO_LABELS[ev.stato] || ev.stato
+      var pasto = PASTO_LABELS[ev.fascia] || ev.fascia
+      var statoColor = ev.stato === 'confermato' ? '#fef3c7' : '#dbeafe'
       html += '<div class="card-evento">'
-      html += '<div class="cliente">\u2605 ' + esc(ev.title || 'Evento') + '</div>'
+      html += '<div class="cliente">\u2605 ' + esc(titoloServizio(ev)) + '</div>'
       html += '<div class="row">'
-      html += '<span class="badge-stato" style="background:' + statoColor + ';color:#111;">' + stato + '</span>'
+      if (!ev.riservato) html += '<span class="badge-stato" style="background:' + statoColor + ';color:#111;">' + stato + '</span>'
       html += '<span class="badge-stato" style="background:#f3f4f6;color:#111;">' + pasto + '</span>'
-      html += '<span>\ud83d\udc65 ' + ((cr == null || cr === '' || Number(cr) === 0) ? 'numero ospiti non indicato' : cr + ' ospiti previsti') + '</span>'
+      if (ev.esclusiva) html += '<span class="badge-stato" style="background:#fee2e2;color:#991b1b;">Esclusiva</span>'
+      html += '<span>\ud83d\udc65 ' + (ev.numero ? ev.numero + ' ospiti previsti' : 'numero ospiti non indicato') + (ev.occupa_coperti ? '' : ' (non occupano i coperti)') + '</span>'
+      if (ev.spazi.length > 0) html += '<span>' + esc(ev.spazi.join(', ')) + '</span>'
       html += '</div>'
-      if (ev.notes) html += '<div class="note">\ud83d\udcdd ' + esc(ev.notes) + '</div>'
+      var note = [ev.note_servizio, ev.note_evento].filter(function(x) { return x }).join(' \u00b7 ')
+      if (note) html += '<div class="note">\ud83d\udcdd ' + esc(note) + '</div>'
       html += '</div>'
     })
     // Con un evento solo il totale ripeterebbe la riga sopra: si stampa
-    // soltanto quando gli eventi sono piu di uno.
+    // soltanto quando gli eventi sono piu di uno. Il numero e' quello del
+    // conteggio unico, come nel riquadro in testa.
     if (evs.length > 1) {
-      html += '<div class="totale-blocco">Totale eventi: ' + evs.length + ' \u00b7 ' + totEv + (senzaNumero ? ' +?' : '') + ' ospiti previsti</div>'
+      html += '<div class="totale-blocco">Totale eventi: ' + evs.length + ' \u00b7 ' + copertiTurno.ospiti + (copertiTurno.senzaNumero > 0 ? ' +?' : '') + ' ospiti previsti</div>'
     }
     return html
   }
@@ -1100,9 +1008,10 @@ function ReservationDay() {
   var [loading, setLoading] = useState(true)
   var [summary, setSummary] = useState({ total: 0, adults: 0, children: 0, count: 0 })
   var [settings, setSettings] = useState({ max_covers_lunch: 60, max_covers_dinner: 60 })
+  // Eventi del giorno dal modulo: le schede dei servizi (eventi) e il
+  // conteggio unico per turno (copertiEventi). Vedi lib/eventiLettura.js.
   var [eventi, setEventi] = useState([])
-  var [showFormEvento, setShowFormEvento] = useState(false)
-  var [eventoInModifica, setEventoInModifica] = useState(null)
+  var [copertiEventi, setCopertiEventi] = useState({})
   var [pannelloTavoli, setPannelloTavoli] = useState(null)
   var [tavoliAssegnati, setTavoliAssegnati] = useState({})
   // Chi siede a ciascun tavolo: una copia sola, letta qui e passata a
@@ -1122,12 +1031,14 @@ function ReservationDay() {
 
   useEffect(function() {
     loadSettings()
-    loadEventi()
     loadSale()
     loadTipologieGift()
   }, [])
 
   useEffect(function() { loadReservations(); caricaLimite(); caricaAlertManuale() }, [dateStr, selectedMeal])
+  // Gli eventi si ricaricano a ogni cambio di giorno: passando da un giorno
+  // all'altro la pagina resta la stessa e non rinasce (regola 57).
+  useEffect(function() { loadEventi() }, [dateStr])
 
   function loadTipologieGift() {
     supabase.from('gift_card_tipologie').select('*')
@@ -1222,8 +1133,16 @@ function ReservationDay() {
   }
 
   function loadEventi() {
-    supabase.from('event_dates').select('*').eq('event_date', dateStr).order('created_at', { ascending: true })
-      .then(function(result) { if (!result.error) setEventi(result.data || []) })
+    var giorno = dateStr
+    Promise.all([caricaServiziEventi(giorno, giorno), caricaCopertiEventi(giorno, giorno)]).then(function(esiti) {
+      var schede = esiti[0]
+      var mappa = esiti[1]
+      // Chi non ha il permesso Eventi non riceve le schede (regole del
+      // database): vede «Evento riservato» con il numero del conteggio.
+      if (schede.length === 0) schede = righeRiservate(mappa, giorno)
+      setEventi(schede)
+      setCopertiEventi(mappa)
+    })
   }
 
   function caricaBadgeTavoli(meal) {
@@ -1345,22 +1264,15 @@ function ReservationDay() {
       })
   }
 
-  function handleSaveEvento(eventoSalvato, isModifica) {
-    if (isModifica) {
-      setEventi(function(prev) { return prev.map(function(ev) { return ev.id === eventoSalvato.id ? eventoSalvato : ev }) })
-    } else {
-      setEventi(function(prev) { return prev.concat([eventoSalvato]) })
-    }
-    setShowFormEvento(false)
-    setEventoInModifica(null)
+  // Gli eventi si creano e si modificano solo nella pagina Eventi
+  // (0.5 punto 9 v61): da qui si apre la scheda, o una nuova con data e
+  // turno gia' scritti.
+  function apriEvento(ev) {
+    if (ev && ev.evento_id) navigate('/eventi/' + ev.evento_id)
   }
 
-  function handleEliminaEvento(id) {
-    if (!confirm('Eliminare questo evento? I movimenti di cassa collegati non vengono eliminati.')) return
-    supabase.from('event_dates').delete().eq('id', id).then(function(result) {
-      if (result.error) { alert('Errore: ' + result.error.message) }
-      else { setEventi(function(prev) { return prev.filter(function(ev) { return ev.id !== id }) }) }
-    })
+  function nuovoEvento() {
+    navigate('/eventi/nuovo?data=' + dateStr + '&fascia=' + selectedMeal)
   }
 
   function handleChiudiPannelloTavoli(aggiornato) {
@@ -1370,31 +1282,37 @@ function ReservationDay() {
 
   var maxCoversDefault = selectedMeal === 'lunch' ? settings.max_covers_lunch : settings.max_covers_dinner
   var maxCovers = (limiteEffettivo != null) ? limiteEffettivo : maxCoversDefault
-  // Coperti degli eventi del giorno sul turno selezionato (un evento "both"
-  // vale su entrambi i turni). Se un evento non ha il numero, il totale del
-  // turno resta parziale e lo segnaliamo.
-  var eventiFascia = eventi.filter(function(ev) { return ev.meal_type === selectedMeal || ev.meal_type === 'both' })
-  var copertiEvento = 0
-  var eventoSenzaNumero = false
-  eventiFascia.forEach(function(ev) {
-    var cr = ev.covers_reserved
-    // Un evento senza il numero ospiti (vuoto, nullo o 0) non va sommato
-    // e va segnalato: un evento reale non ha mai 0 ospiti.
-    if (cr == null || cr === '' || Number(cr) === 0) eventoSenzaNumero = true
-    else copertiEvento += (parseInt(cr, 10) || 0)
-  })
+  // Coperti degli eventi sul turno selezionato: dal conteggio unico del
+  // database (coperti_eventi), confermati + opzioni; «giornata intera»
+  // vale su pranzo e cena; un servizio senza numero non si somma e va
+  // segnalato. Nessuna somma fatta qui (regola 31).
+  var copertiTurno = copertiDelTurno(copertiEventi, dateStr, selectedMeal)
+  var copertiEvento = copertiTurno.ospiti
+  var copertiOpzione = copertiTurno.opzione
+  var eventoSenzaNumero = copertiTurno.senzaNumero > 0
+  var esclusivaTurno = copertiTurno.esclusiva
   var totaleTurno = summary.total + copertiEvento
   var remainingCovers = maxCovers - totaleTurno
   var inAlertAuto = totaleTurno >= maxCovers
-  var fasciaInAlert = inAlertAuto || Boolean(alertManuale)
+  var fasciaInAlert = inAlertAuto || Boolean(alertManuale) || esclusivaTurno
   var statusLabels = { confirmed: 'Confermata', arrived: 'Arrivato', seated: 'Accomodato', completed: 'Completato', cancelled: 'Cancellata', no_show: 'No Show' }
   var statusColors = { confirmed: 'bg-blue-100 text-blue-800', arrived: 'bg-yellow-100 text-yellow-800', seated: 'bg-green-100 text-green-800', completed: 'bg-gray-100 text-gray-600', cancelled: 'bg-red-100 text-red-800', no_show: 'bg-orange-100 text-orange-800' }
   var categoryColors = { standard: 'bg-gray-100 text-gray-700', vip: 'bg-amber-100 text-amber-800', press: 'bg-purple-100 text-purple-800', business: 'bg-blue-100 text-blue-800', hotel_guest: 'bg-green-100 text-green-800' }
   var categoryLabels = { standard: 'Standard', vip: 'VIP', press: 'Stampa', business: 'Business', hotel_guest: 'Ospite Hotel' }
   var activeReservations = reservations.filter(function(r) { return r.status !== 'cancelled' })
   var cancelledReservations = reservations.filter(function(r) { return r.status === 'cancelled' })
-  var eventiConfermati = eventi.filter(function(ev) { return ev.event_type === 'confirmed' })
-  var eventiOpzione = eventi.filter(function(ev) { return ev.event_type === 'option' })
+  // Quanti EVENTI (non servizi) confermati e in opzione nella giornata.
+  function contaEventi(stato) {
+    var visti = {}
+    var n = 0
+    eventi.forEach(function(ev) {
+      var chiave = ev.evento_id || ev.id
+      if (ev.stato === stato && !visti[chiave]) { visti[chiave] = true; n = n + 1 }
+    })
+    return n
+  }
+  var nEventiConfermati = contaEventi('confermato')
+  var nEventiOpzione = contaEventi('opzione')
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
@@ -1408,16 +1326,16 @@ function ReservationDay() {
             <h1 className="text-2xl font-bold text-gray-900 capitalize">{formatDateDisplay(dateStr)}</h1>
             {eventi.length > 0 && (
               <div className="flex items-center gap-2 mt-0.5">
-                {eventiConfermati.length > 0 && (
+                {nEventiConfermati > 0 && (
                   <span className="flex items-center gap-1 text-xs text-amber-700 font-medium">
                     <Star size={12} className="fill-amber-500 text-amber-500" />
-                    {eventiConfermati.length === 1 ? '1 evento confermato' : eventiConfermati.length + ' eventi confermati'}
+                    {nEventiConfermati === 1 ? '1 evento confermato' : nEventiConfermati + ' eventi confermati'}
                   </span>
                 )}
-                {eventiOpzione.length > 0 && (
+                {nEventiOpzione > 0 && (
                   <span className="flex items-center gap-1 text-xs text-blue-600 font-medium">
                     <Clock size={12} />
-                    {eventiOpzione.length === 1 ? '1 opzione' : eventiOpzione.length + ' opzioni'}
+                    {nEventiOpzione === 1 ? '1 opzione' : nEventiOpzione + ' opzioni'}
                   </span>
                 )}
               </div>
@@ -1425,12 +1343,14 @@ function ReservationDay() {
           </div>
         </div>
         <div className="flex gap-2 flex-wrap">
-          <StampaMenu dateStr={dateStr} turno={selectedMeal} reservations={activeReservations} sale={sale} eventi={eventi} clientiTavolo={clientiTavolo} />
-          <button onClick={function() { setEventoInModifica(null); setShowFormEvento(true) }}
-            className="inline-flex items-center gap-2 bg-amber-500 text-white px-4 py-2.5 rounded-xl hover:bg-amber-600 transition-colors font-medium shadow-sm text-sm">
-            <Calendar size={16} />
-            <span>Nuovo Evento</span>
-          </button>
+          <StampaMenu dateStr={dateStr} turno={selectedMeal} reservations={activeReservations} sale={sale} eventi={eventi} copertiTurno={copertiTurno} clientiTavolo={clientiTavolo} />
+          {canEdit('eventi') && (
+            <button onClick={nuovoEvento}
+              className="inline-flex items-center gap-2 bg-amber-500 text-white px-4 py-2.5 rounded-xl hover:bg-amber-600 transition-colors font-medium shadow-sm text-sm">
+              <Calendar size={16} />
+              <span>Nuovo Evento</span>
+            </button>
+          )}
           <Link to={"/prenotazioni/nuova?date=" + dateStr + "&meal=" + selectedMeal}
             className="inline-flex items-center gap-2 bg-wine-700 text-white px-4 py-2.5 rounded-xl hover:bg-wine-800 transition-colors font-medium shadow-sm text-sm">
             <Plus size={16} />
@@ -1447,9 +1367,7 @@ function ReservationDay() {
           </h2>
           <div className="space-y-2">
             {eventi.map(function(ev) {
-              return <CardEvento key={ev.id} evento={ev}
-                onModifica={function() { setEventoInModifica(ev); setShowFormEvento(true) }}
-                onElimina={handleEliminaEvento} />
+              return <CardEvento key={ev.id} evento={ev} onApri={apriEvento} />
             })}
           </div>
         </div>
@@ -1472,7 +1390,7 @@ function ReservationDay() {
           <div><p className="text-sm text-gray-500">Ospiti</p><p className="text-2xl font-bold text-gray-900">{summary.total}</p></div>
           <div><p className="text-sm text-gray-500 flex items-center gap-1"><User size={12} />Adulti</p><p className="text-xl font-bold text-gray-700">{summary.adults}</p></div>
           <div><p className="text-sm text-gray-500 flex items-center gap-1"><Baby size={12} />Bambini</p><p className="text-xl font-bold text-gray-700">{summary.children}</p></div>
-          <div><p className="text-sm text-gray-500 flex items-center gap-1"><Star size={12} />Evento</p><p className="text-xl font-bold text-gray-700">{copertiEvento + (eventoSenzaNumero ? ' +?' : '')}</p></div>
+          <div><p className="text-sm text-gray-500 flex items-center gap-1"><Star size={12} />Evento</p><p className="text-xl font-bold text-gray-700">{copertiEvento + (eventoSenzaNumero ? ' +?' : '')}</p>{copertiOpzione > 0 && <p className="text-xs text-blue-600">{'di cui ' + copertiOpzione + ' in opzione'}</p>}</div>
           <div><p className="text-sm text-gray-500">Totale turno</p><p className="text-2xl font-bold text-gray-900">{totaleTurno + (eventoSenzaNumero ? ' +?' : '')}</p></div>
           <div><p className="text-sm text-gray-500">Disponibili</p><p className={"text-2xl font-bold " + (remainingCovers < 10 ? 'text-red-600' : 'text-green-600')}>{remainingCovers}</p></div>
         </div>
@@ -1493,6 +1411,11 @@ function ReservationDay() {
                     {(selectedMeal === 'lunch' ? 'Pranzo' : 'Cena') + " al limite: " + totaleTurno + (eventoSenzaNumero ? "+? " : " ") + "coperti su " + maxCovers}
                   </p>
                 )}
+                {esclusivaTurno && (
+                  <p className="text-sm font-semibold text-red-800">
+                    {(selectedMeal === 'lunch' ? 'Pranzo' : 'Cena') + " in esclusiva per un evento: il ristorante e chiuso al pubblico. Per prenotare serve il permesso del Direttore."}
+                  </p>
+                )}
                 {eventoSenzaNumero && (
                   <p className="text-sm font-medium text-indigo-800">
                     Evento senza numero ospiti: il totale del turno e incompleto.
@@ -1502,7 +1425,7 @@ function ReservationDay() {
                   <p className="text-sm text-amber-800">
                     {"Avviso del direttore" + (alertManuale.testo ? ": " + alertManuale.testo : "")}
                   </p>
-                ) : (!inAlertAuto && !eventoSenzaNumero && (
+                ) : (!inAlertAuto && !eventoSenzaNumero && !esclusivaTurno && (
                   <p className="text-sm text-gray-500">Nessun avviso del direttore su questo turno.</p>
                 ))}
               </div>
@@ -1643,11 +1566,6 @@ function ReservationDay() {
       )}
 
       <div className="h-8" />
-
-      {showFormEvento && (
-        <FormEvento dateStr={dateStr} evento={eventoInModifica} onSave={handleSaveEvento}
-          onClose={function() { setShowFormEvento(false); setEventoInModifica(null) }} />
-      )}
 
       {pannelloTavoli && (
         <PannelloTavoli prenotazione={pannelloTavoli} dateStr={dateStr} turno={selectedMeal} clientiTavolo={clientiTavolo} onClose={handleChiudiPannelloTavoli} />

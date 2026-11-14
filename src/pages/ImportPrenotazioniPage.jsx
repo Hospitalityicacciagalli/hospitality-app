@@ -22,10 +22,13 @@ import { useAuth } from '../lib/AuthContext'
 //
 // La pagina NON scrive nulla finche' non si preme "Conferma e inserisci".
 // Prenotazioni -> reservations (con cliente per telefono, dedup).
-// Eventi -> event_dates SOLO se l'interruttore "Reinserisci eventi" e' acceso
-//           (di default SPENTO: sul reimport gli eventi restano quelli gia'
-//           presenti, perche' event_dates e' protetta e non ha un marcatore
-//           che distingua gli eventi importati da quelli inseriti a mano).
+// Eventi -> NON si inseriscono piu' da qui (sessione 2 Eventi, migrazione
+//           64, decisione E della v60): gli eventi si creano solo nella
+//           pagina Eventi, la strada unica. Quelli trovati nel file sono
+//           elencati come «da inserire in Eventi», ciascuno con il pulsante
+//           che apre una scheda nuova (in un'altra scheda del browser, cosi'
+//           l'import resta qui) con data e turno gia' scritti.
+//           L'interruttore «Reinserisci eventi» e' stato tolto.
 // Alert -> alert_prenotazioni, ma SOLO se non ne esiste gia' uno su quel
 //          giorno+fascia (non calpesta gli alert manuali). Firma "Import Excel".
 //
@@ -51,6 +54,40 @@ function dataEstesa(iso) {
   return GIORNI_SETT[d.getDay()] + ' ' + parseInt(p[2]) + ' ' + MESI[parseInt(p[1]) - 1]
 }
 
+// Eventi trovati nel file: non si inseriscono da qui, si creano nella
+// pagina Eventi (strada unica). Il pulsante apre una scheda nuova con data
+// e turno gia' scritti, in un'altra scheda del browser: l'import resta qui.
+function ElencoEventiDaInserire(props) {
+  var eventi = props.eventi || []
+  return (
+    <div className="bg-amber-50 rounded-xl border border-amber-200 p-3 mb-4 text-left">
+      <div className="text-sm font-medium text-amber-900 flex items-center gap-1.5">
+        <Star size={14} className="text-amber-500" /> {eventi.length === 1 ? '1 evento da inserire in Eventi' : eventi.length + ' eventi da inserire in Eventi'}
+      </div>
+      <div className="text-xs text-amber-800 mb-2">
+        Gli eventi non si inseriscono dall'import: si creano nella pagina Eventi. Prima di crearne uno, controlla che non ci sia gia.
+      </div>
+      <div className="space-y-1">
+        {eventi.map(function(v, idx) {
+          var fascia = v.meal_type || (v.pasto === 'Pranzo' ? 'lunch' : 'dinner')
+          var ospiti = v.adulti != null ? (v.adulti + ' + ' + (v.bambini || 0) + ' ospiti') : 'ospiti da definire'
+          return (
+            <div key={v._id || idx} className="flex items-center justify-between gap-2 bg-white rounded-lg border border-amber-100 px-2 py-1.5">
+              <div className="min-w-0 text-xs text-gray-700 truncate">
+                <span className="font-medium">{v.data}</span>{' · ' + (v.pasto || '') + ' · ' + (v.titolo || 'Evento') + ' · ' + ospiti}
+              </div>
+              <a href={'/eventi/nuovo?data=' + v.data + '&fascia=' + fascia} target="_blank" rel="noopener noreferrer"
+                className="flex-shrink-0 text-xs px-2 py-1 rounded border border-amber-300 text-amber-800 bg-white hover:bg-amber-100 font-medium">
+                Apri in Eventi
+              </a>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 export default function ImportPrenotazioniPage() {
   var { canEdit } = useAuth()
   var navigate = useNavigate()
@@ -64,7 +101,6 @@ export default function ImportPrenotazioniPage() {
   var [modalita, setModalita] = useState('giorno')
   var [giornoIdx, setGiornoIdx] = useState(0)
 
-  var [reinserisciEventi, setReinserisciEventi] = useState(false)
 
   var [inserimento, setInserimento] = useState(false)
   var [progresso, setProgresso] = useState(null)
@@ -344,8 +380,8 @@ export default function ImportPrenotazioniPage() {
     if (!puoScrivere) { setErrore('Non hai i permessi per inserire prenotazioni.'); return }
 
     var attive = voci.filter(function(v) { return !v._scartata })
-    var daInserire = attive.filter(function(v) { return v._tipo === 'prenotazione' || reinserisciEventi })
-    var eventiSaltati = attive.filter(function(v) { return v._tipo === 'evento' && !reinserisciEventi }).length
+    var daInserire = attive.filter(function(v) { return v._tipo === 'prenotazione' })
+    var eventiDaInserire = attive.filter(function(v) { return v._tipo === 'evento' })
     var totale = daInserire.length
     var haAlert = alert && alert.length > 0
 
@@ -362,26 +398,6 @@ export default function ImportPrenotazioniPage() {
 
     daInserire.forEach(function(v) {
       chain = chain.then(function() {
-        if (v._tipo === 'evento') {
-          var ad = v.adulti == null ? 0 : v.adulti
-          var bb = v.bambini == null ? 0 : v.bambini
-          var noteEv = []
-          if (v.note && String(v.note).trim()) noteEv.push(String(v.note).trim())
-          noteEv.push('Adulti: ' + ad + ' · Bambini: ' + bb)
-          var payloadEv = {
-            event_date: v.data,
-            meal_type: v.meal_type || (v.pasto === 'Pranzo' ? 'lunch' : 'dinner'),
-            event_type: 'confirmed',
-            title: v.titolo || 'Evento',
-            notes: noteEv.join(' | '),
-            covers_reserved: ad + bb
-          }
-          return supabase.from('event_dates').insert(payloadEv).then(function(r) {
-            if (r.error) errori.push('Evento ' + v.data + ' ' + (v.titolo || '') + ': ' + r.error.message)
-            fatte += 1
-            setProgresso({ fatte: fatte, totale: totale, errori: errori.slice() })
-          })
-        }
         return trovaOCreaCliente(v, cacheTelefoni).then(function(customerId) {
           var requestedTime = v.orario ? v.orario + ':00' : null
           var payload = {
@@ -421,7 +437,7 @@ export default function ImportPrenotazioniPage() {
         inserite: fatte - errori.length,
         errori: errori,
         totale: totale,
-        eventiSaltati: eventiSaltati,
+        eventiDaInserire: eventiDaInserire,
         alert: esitoAlert
       })
     })
@@ -517,13 +533,11 @@ export default function ImportPrenotazioniPage() {
               Alert: inseriti <span className="font-semibold">{alr.inseriti}</span>
               {alr.saltati > 0 ? (', gia presenti (saltati) ' + alr.saltati) : ''}
             </div>
-            {risultato.eventiSaltati > 0 && (
-              <div className="flex items-center gap-2">
-                <Star size={14} className="text-amber-500" />
-                Eventi non reinseriti: <span className="font-semibold">{risultato.eventiSaltati}</span> (restano quelli gia presenti)
-              </div>
-            )}
           </div>
+
+          {risultato.eventiDaInserire && risultato.eventiDaInserire.length > 0 && (
+            <ElencoEventiDaInserire eventi={risultato.eventiDaInserire} />
+          )}
 
           {risultato.errori.length > 0 && (
             <div className="text-left mt-4 p-3 bg-red-50 border border-red-200 rounded-lg">
@@ -567,7 +581,7 @@ export default function ImportPrenotazioniPage() {
   var nPren = attive.filter(function(v) { return v._tipo === 'prenotazione' }).length
   var nEventi = attive.filter(function(v) { return v._tipo === 'evento' }).length
   var nAlert = alert.length
-  var nDaInserire = nPren + (reinserisciEventi ? nEventi : 0)
+  var nDaInserire = nPren
 
   return (
     <div className="max-w-4xl mx-auto p-4 lg:p-6">
@@ -592,29 +606,9 @@ export default function ImportPrenotazioniPage() {
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">{errore}</div>
       )}
 
-      <div className="bg-white rounded-xl border border-gray-200 p-3 mb-4 flex items-center justify-between gap-3">
-        <div className="min-w-0">
-          <div className="text-sm font-medium text-gray-800 flex items-center gap-1.5">
-            <Star size={14} className="text-amber-500" /> Eventi
-          </div>
-          <div className="text-xs text-gray-500">
-            {reinserisciEventi
-              ? 'Verranno reinseriti in event_dates (attenzione ai doppioni).'
-              : 'Non vengono reinseriti: restano quelli gia presenti dal primo import.'}
-          </div>
-        </div>
-        <button
-          onClick={function() { setReinserisciEventi(!reinserisciEventi) }}
-          className={
-            'flex-shrink-0 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ' +
-            (reinserisciEventi
-              ? 'bg-amber-500 text-white border-amber-500'
-              : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50')
-          }
-        >
-          {reinserisciEventi ? 'Reinserisco eventi: SÌ' : 'Reinserisco eventi: NO'}
-        </button>
-      </div>
+      {nEventi > 0 && (
+        <ElencoEventiDaInserire eventi={attive.filter(function(v) { return v._tipo === 'evento' })} />
+      )}
 
       <div className="flex gap-2 mb-4">
         <button
@@ -692,7 +686,6 @@ export default function ImportPrenotazioniPage() {
             className="w-full bg-wine-700 text-white py-3 rounded-lg hover:bg-wine-800 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Conferma e inserisci {nPren} prenotazioni
-            {reinserisciEventi && nEventi > 0 ? ' + ' + nEventi + ' eventi' : ''}
             {nAlert > 0 ? ' + ' + nAlert + ' avvisi' : ''}
           </button>
         )}
@@ -824,7 +817,7 @@ function RigaVoce(props) {
             />
           </div>
           <div className="flex flex-wrap items-center gap-1.5 mt-2">
-            <span className="text-xs text-amber-700">{v.pasto} · andra in event_dates</span>
+            <span className="text-xs text-amber-700">{v.pasto} · da inserire nella pagina Eventi</span>
             {v.adulti == null && (
               <span className="inline-flex items-center gap-1 bg-orange-100 text-orange-800 text-xs px-2 py-0.5 rounded">
                 <AlertTriangle size={11} /> ospiti da definire

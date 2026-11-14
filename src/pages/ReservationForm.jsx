@@ -4,6 +4,8 @@ import { ArrowLeft, Save, Search, AlertTriangle, UserPlus, Check, Users, Chevron
 import { supabase } from '../lib/supabase'
 import AllergeniEditor, { validaAllergeni, salvaAllergeni, campiConsensoSalute, salvaConsensoSalute, caricaAllergeniCliente, severitaLabel } from '../components/AllergeniEditor'
 import { useAuth } from '../lib/AuthContext'
+// Coperti degli eventi dal conteggio unico del database (migrazione 64).
+import { caricaCopertiEventi, copertiDelTurno } from '../lib/eventiLettura'
 import ConfermaPin from '../components/ConfermaPin'
 import ComparazioneClienti, { cercaCandidatiForti } from '../components/ComparazioneClienti'
 
@@ -92,6 +94,12 @@ function ReservationForm() {
   var [alertManuale, setAlertManuale] = useState(null)
   var [copertiEvento, setCopertiEvento] = useState(0)
   var [eventoSenzaNumero, setEventoSenzaNumero] = useState(false)
+  // Turno in esclusiva per un evento (ristorante chiuso al pubblico):
+  // per salvare serve la spunta «ho chiesto il permesso al Direttore»,
+  // firmata come l'Ok direttore (punto C, 0.8 v61; deciso il 14/11:
+  // vale sia in creazione sia in modifica).
+  var [esclusivaTurno, setEsclusivaTurno] = useState(false)
+  var [copertiOpzione, setCopertiOpzione] = useState(0)
   var [okDirettore, setOkDirettore] = useState(false)
 
   // Coperti prima della modifica (per il log), storia della prenotazione,
@@ -718,7 +726,7 @@ function ReservationForm() {
   function refreshAlertState() {
     var d = formData.reservation_date
     var m = formData.meal_type
-    if (!d || !m) { setCopertiAltri(0); setAlertManuale(null); setCopertiEvento(0); setEventoSenzaNumero(false); return }
+    if (!d || !m) { setCopertiAltri(0); setAlertManuale(null); setCopertiEvento(0); setEventoSenzaNumero(false); setEsclusivaTurno(false); setCopertiOpzione(0); return }
 
     supabase.from('reservations')
       .select('id, guests_count')
@@ -748,26 +756,17 @@ function ReservationForm() {
         else setAlertManuale(null)
       })
 
-    // Coperti degli eventi del giorno sul turno (un evento "both" vale su
-    // entrambi i turni). Se un evento non ha il numero, lo segnaliamo.
-    supabase.from('event_dates')
-      .select('covers_reserved, meal_type')
-      .eq('event_date', d)
-      .then(function(result) {
-        var somma = 0
-        var senza = false
-        if (!result.error && result.data) {
-          for (var i = 0; i < result.data.length; i++) {
-            var ev = result.data[i]
-            if (ev.meal_type !== m && ev.meal_type !== 'both') continue
-            var cr = ev.covers_reserved
-            if (cr == null || cr === '' || Number(cr) === 0) senza = true
-            else somma += (parseInt(cr, 10) || 0)
-          }
-        }
-        setCopertiEvento(somma)
-        setEventoSenzaNumero(senza)
-      })
+    // Coperti degli eventi del giorno sul turno, dal conteggio unico del
+    // database (coperti_eventi): confermati + opzioni, «giornata intera»
+    // su pranzo e cena, richieste e annullati esclusi. Un servizio senza
+    // numero non si somma e va segnalato. Nessuna somma fatta qui.
+    caricaCopertiEventi(d, d).then(function(mappa) {
+      var c = copertiDelTurno(mappa, d, m)
+      setCopertiEvento(c.ospiti)
+      setCopertiOpzione(c.opzione)
+      setEventoSenzaNumero(c.senzaNumero > 0)
+      setEsclusivaTurno(c.esclusiva)
+    })
   }
 
   function handleInputChange(e) {
@@ -1539,10 +1538,11 @@ function ReservationForm() {
   var limite = (availability && typeof availability.max_covers === 'number') ? availability.max_covers : null
   var copertiDopo = copertiAltri + totalGuests + copertiEvento
   var overLimit = (limite !== null) && (copertiDopo > limite)
-  var fasciaInAlert = overLimit || Boolean(alertManuale)
+  var fasciaInAlert = overLimit || Boolean(alertManuale) || esclusivaTurno
   // L'avviso manuale rende obbligatorio l'ok solo in creazione; l'oltre-limite
-  // lo rende obbligatorio sia in creazione sia in modifica.
-  var serveOk = overLimit || (Boolean(alertManuale) && !isEditing)
+  // e l'esclusiva di un evento lo rendono obbligatorio sia in creazione sia
+  // in modifica.
+  var serveOk = overLimit || esclusivaTurno || (Boolean(alertManuale) && !isEditing)
   var bloccato = serveOk && !okDirettore
   var mostraSpunta = fasciaInAlert
 
@@ -2121,9 +2121,19 @@ function ReservationForm() {
                       {"Con questa prenotazione: " + copertiDopo + " coperti" + (limite !== null ? " su un limite di " + limite : "") + "."}
                     </p>
                   )}
+                  {esclusivaTurno && (
+                    <p className="text-sm font-semibold text-red-800 mt-0.5">
+                      Turno in esclusiva per un evento: il ristorante e chiuso al pubblico. Si prenota solo dopo aver chiesto il permesso al Direttore.
+                    </p>
+                  )}
                   {alertManuale && (
                     <p className="text-sm text-amber-800 mt-0.5">
                       {"Avviso del direttore: " + (alertManuale.testo || "\u2014")}
+                    </p>
+                  )}
+                  {copertiOpzione > 0 && (
+                    <p className="text-sm text-amber-800 mt-0.5">
+                      {"Nel conteggio ci sono " + copertiOpzione + " ospiti di eventi ancora in opzione."}
                     </p>
                   )}
                   {eventoSenzaNumero && (
@@ -2141,13 +2151,17 @@ function ReservationForm() {
                         className="w-5 h-5 rounded border-gray-300 text-wine-700 focus:ring-wine-500"
                       />
                       <span className={"text-sm font-medium " + (serveOk && !okDirettore ? "text-red-700" : "text-amber-900")}>
-                        {serveOk ? "Ok direttore (obbligatorio per salvare)" : "Ok direttore (facoltativo)"}
+                        {esclusivaTurno
+                          ? "Ho chiesto il permesso al Direttore (turno in esclusiva) \u2014 obbligatorio per salvare"
+                          : (serveOk ? "Ok direttore (obbligatorio per salvare)" : "Ok direttore (facoltativo)")}
                       </span>
                     </label>
                   )}
                   {bloccato && (
                     <p className="text-xs text-red-600 mt-1">
-                      {"Spunta \u201cOk direttore\u201d per poter salvare la prenotazione."}
+                      {esclusivaTurno
+                        ? "Spunta \u201cHo chiesto il permesso al Direttore\u201d per poter salvare: la spunta viene firmata con il tuo nome."
+                        : "Spunta \u201cOk direttore\u201d per poter salvare la prenotazione."}
                     </p>
                   )}
                 </div>

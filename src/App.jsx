@@ -92,17 +92,14 @@ function HicRoute() {
   return <HicDashboardPage />;
 }
 
-// Eventi — FASE 1 (sez. 0 v61-v67): il modulo esiste ma lo vede solo chi
-// e' super_admin, ANCHE tramite il PIN (ruolo efficace, non il login):
-// cosi' si prova il gettone sulla postazione reception. In piu' serve il
-// permesso 'eventi' (lettura per guardare; le pagine chiedono la modifica
-// per i pulsanti).
-// ⚠️ Nella sessione 2 (travaso) il controllo sul ruolo si TOGLIE e resta
-// solo il permesso, come per ogni altra voce (regola 35). Va tolto anche
-// in Layout.jsx, nello stesso commit.
+// Eventi — dalla sessione 2 (migrazione 64, travaso) la pagina si apre a
+// chiunque abbia il permesso 'eventi' (lettura per guardare; le pagine
+// chiedono la modifica per i pulsanti), come ogni altra voce (regola 35).
+// Il controllo «solo super_admin» della fase 1 e' stato tolto qui e in
+// Layout.jsx nello stesso commit.
 function EventiRoute({ children }) {
-  var { canView, ruoloEfficace } = useAuth();
-  if (ruoloEfficace() !== 'super_admin' || !canView('eventi')) {
+  var { canView } = useAuth();
+  if (!canView('eventi')) {
     return <Navigate to="/" replace />;
   }
   return children;

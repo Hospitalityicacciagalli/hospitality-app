@@ -1,6 +1,8 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/AuthContext";
+// Coperti degli eventi dal conteggio unico del database (migrazione 64).
+import { caricaCopertiEventi } from "../lib/eventiLettura";
 import {
   Calendar, ChevronLeft, ChevronRight, Plus, X, Clock,
   Users, Coffee, Moon, Trash2, BedDouble, Pencil, Copy, AlertTriangle
@@ -212,18 +214,21 @@ export default function ShiftsPage() {
           else if (r.meal_type === "dinner") acc[r.reservation_date].dinner += (r.guests_count || 0);
         });
       }
-      return supabase.from("event_dates").select("event_date, meal_type, covers_reserved").gte("event_date", ws).lte("event_date", weekEnd);
-    }).then(function(result) {
-      if (result && !result.error && result.data) {
-        result.data.forEach(function(e) {
-          var c = e.covers_reserved || 0;
-          if (!c) return;
-          if (!acc[e.event_date]) acc[e.event_date] = { lunch: 0, dinner: 0 };
-          if (e.meal_type === "lunch") acc[e.event_date].lunch += c;
-          else if (e.meal_type === "dinner") acc[e.event_date].dinner += c;
-          else if (e.meal_type === "both") { acc[e.event_date].lunch += c; acc[e.event_date].dinner += c; }
-        });
-      }
+      // Eventi: il conteggio unico del database (coperti_eventi), con
+      // confermati E opzioni (deciso il 14/11: per i turni un'opzione pesa
+      // come un evento). «Giornata intera» e' gia' divisa su pranzo e cena.
+      return caricaCopertiEventi(ws, weekEnd);
+    }).then(function(mappa) {
+      Object.keys(mappa || {}).forEach(function(chiave) {
+        var parti = chiave.split("|");
+        var giorno = parti[0];
+        var fascia = parti[1];
+        var n = mappa[chiave].ospiti || 0;
+        if (!n) return;
+        if (!acc[giorno]) acc[giorno] = { lunch: 0, dinner: 0 };
+        if (fascia === "lunch") acc[giorno].lunch += n;
+        else if (fascia === "dinner") acc[giorno].dinner += n;
+      });
       setCovers(acc);
     });
   }

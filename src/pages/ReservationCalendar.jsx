@@ -2,6 +2,9 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, Plus, CalendarDays, Star, Clock, AlertTriangle, HelpCircle } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+// Eventi dal MODULO (migrazione 64): schede dai servizi, numeri e alert
+// da riepilogo_alert, che a sua volta usa il conteggio unico.
+import { caricaServiziEventi } from '../lib/eventiLettura'
 
 function pad(n) {
   return n < 10 ? '0' + n : '' + n
@@ -84,44 +87,50 @@ function ReservationCalendar() {
           setCoverData(grouped)
         }
 
-        // Carica eventi del mese
-        return supabase
-          .from('event_dates')
-          .select('*')
-          .gte('event_date', firstDay)
-          .lte('event_date', lastDay)
+        // Eventi del mese dal modulo (opzioni e confermati): UNA voce per
+        // evento e per giorno, anche se l'evento ha piu' servizi quel giorno.
+        // Insieme, il riepilogo alert del mese (una sola chiamata) per i badge.
+        return Promise.all([
+          caricaServiziEventi(firstDay, lastDay),
+          supabase.rpc('riepilogo_alert', { p_dal: firstDay, p_al: lastDay })
+        ])
       })
-      .then(function(result) {
-        if (result && !result.error) {
-          var events = {}
-          for (var i = 0; i < result.data.length; i++) {
-            var ev = result.data[i]
-            var key = ev.event_date
-            if (!events[key]) {
-              events[key] = []
-            }
-            events[key].push(ev)
-          }
-          setEventData(events)
+      .then(function(esiti) {
+        var schede = esiti ? esiti[0] : []
+        var result = esiti ? esiti[1] : null
+        var events = {}
+        var visti = {}
+        for (var i = 0; i < schede.length; i++) {
+          var ev = schede[i]
+          var chiave = ev.data + '|' + ev.evento_id
+          if (visti[chiave]) continue
+          visti[chiave] = true
+          if (!events[ev.data]) events[ev.data] = []
+          events[ev.data].push({ titolo: ev.titolo, stato: ev.stato })
         }
-        // Riepilogo alert del mese (una sola chiamata) per i badge
-        return supabase.rpc('riepilogo_alert', { p_dal: firstDay, p_al: lastDay })
-      })
-      .then(function(result) {
         if (result && !result.error && result.data) {
           var alerts = {}
-          for (var i = 0; i < result.data.length; i++) {
-            var row = result.data[i]
+          for (var j = 0; j < result.data.length; j++) {
+            var row = result.data[j]
             var k = row.data
-            if (!alerts[k]) alerts[k] = { auto: false, manual: false, missing: false }
+            if (!alerts[k]) alerts[k] = { auto: false, manual: false, missing: false, esclusiva: false }
             if (row.in_alert_auto) alerts[k].auto = true
             if (row.alert_manuale) alerts[k].manual = true
             if (row.evento_senza_numero) alerts[k].missing = true
+            if (row.esclusiva) alerts[k].esclusiva = true
+            // Chi non ha il permesso Eventi non riceve le schede: per lui
+            // il giorno mostra «Evento riservato», dai soli numeri.
+            if (schede.length === 0 && (row.coperti_evento > 0 || row.evento_senza_numero)) {
+              if (!events[k]) events[k] = []
+              var conf = (row.coperti_evento || 0) - (row.coperti_opzione || 0)
+              events[k].push({ titolo: 'Evento riservato', stato: (conf > 0 || !row.coperti_opzione) ? 'confermato' : 'opzione' })
+            }
           }
           setAlertData(alerts)
         } else {
           setAlertData({})
         }
+        setEventData(events)
         setLoading(false)
       })
   }
@@ -246,7 +255,7 @@ function ReservationCalendar() {
           <Clock size={12} className="text-blue-500" /> Opzione evento
         </span>
         <span className="flex items-center gap-1">
-          <AlertTriangle size={12} className="text-amber-500" /> Turno in alert
+          <AlertTriangle size={12} className="text-amber-500" /> Turno in alert o in esclusiva
         </span>
         <span className="flex items-center gap-1">
           <HelpCircle size={12} className="text-indigo-500" /> Evento senza numero
@@ -285,7 +294,9 @@ function ReservationCalendar() {
               var dinnerData = coverData[dinnerKey]
               var dayEvents = eventData[dateStr] || []
               var dayAlert = alertData[dateStr]
-              var hasAlert = Boolean(dayAlert && (dayAlert.auto || dayAlert.manual))
+              // Un turno in esclusiva per un evento conta come alert:
+              // prenotare li' chiede il permesso del Direttore.
+              var hasAlert = Boolean(dayAlert && (dayAlert.auto || dayAlert.manual || dayAlert.esclusiva))
               var hasMissing = Boolean(dayAlert && dayAlert.missing)
 
               var hasData = lunchData || dinnerData || dayEvents.length > 0
@@ -319,7 +330,7 @@ function ReservationCalendar() {
                       {hasAlert && <AlertTriangle size={12} className="text-amber-500 flex-shrink-0" />}
                       {hasMissing && <HelpCircle size={12} className="text-indigo-500 flex-shrink-0" />}
                       {dayEvents.length > 0 && dayEvents.map(function(ev, evIdx) {
-                        if (ev.event_type === 'confirmed') {
+                        if (ev.stato === 'confermato') {
                           return <Star key={evIdx} size={12} className="text-amber-500 fill-amber-500 flex-shrink-0" />
                         }
                         return <Clock key={evIdx} size={12} className="text-blue-500 flex-shrink-0" />
@@ -371,10 +382,10 @@ function ReservationCalendar() {
 
                   {/* Eventi */}
                   {dayEvents.map(function(ev, evIdx) {
-                    var bgColor = ev.event_type === 'confirmed' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
+                    var bgColor = ev.stato === 'confermato' ? 'bg-amber-100 text-amber-800' : 'bg-blue-100 text-blue-800'
                     return (
-                      <div key={evIdx} className={"rounded px-1.5 py-0.5 mt-0.5 text-xs font-medium truncate " + bgColor}>
-                        {ev.title}
+                      <div key={evIdx} title={ev.titolo} className={"rounded px-1.5 py-0.5 mt-0.5 text-xs font-medium truncate " + bgColor}>
+                        {ev.titolo}
                       </div>
                     )
                   })}
