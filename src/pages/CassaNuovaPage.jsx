@@ -130,9 +130,29 @@ function ordinaPer(righe) {
 
 // Eventi dal MODULO (migrazione 64): «prima data + titolo» (0.5 punto 5
 // v61); lo stato si scrive solo se non e' confermato.
+// 16/11/2026 (prova del 14/11, 0.6 v70): la data in gg/mm/aaaa e il
+// cliente in fondo, per riconoscerlo a colpo d'occhio.
+function dataItaliana(iso) {
+  if (!iso || iso.length < 10) return iso || '';
+  return iso.substring(8, 10) + '/' + iso.substring(5, 7) + '/' + iso.substring(0, 4);
+}
 function labelEvento(ev) {
   var stato = ev.stato === 'opzione' ? ' (opzione)' : (ev.stato === 'richiesta' ? ' (richiesta)' : '');
-  return ev.event_date + ' · ' + ev.title + stato;
+  return dataItaliana(ev.event_date) + ' · ' + ev.title + (ev.cliente ? ' · ' + ev.cliente : '') + stato;
+}
+
+// Filtri dell'elenco eventi nella finestra del movimento: tre campi,
+// tutti facoltativi, che valgono insieme. Cliente e titolo: basta un
+// pezzo del testo, maiuscole e accenti non contano. Data: l'evento ha
+// un servizio in quel giorno.
+function senzaAccenti(t) {
+  return (t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+function eventoPassaFiltri(ev, fCliente, fTitolo, fData) {
+  if (fCliente.trim() && senzaAccenti(ev.cliente).indexOf(senzaAccenti(fCliente.trim())) < 0) return false;
+  if (fTitolo.trim() && senzaAccenti(ev.title).indexOf(senzaAccenti(fTitolo.trim())) < 0) return false;
+  if (fData && (ev.date || []).indexOf(fData) < 0) return false;
+  return true;
 }
 
 // ── (mig. 41) effetto di UN movimento sui contanti in cassa ──
@@ -279,6 +299,13 @@ function ModaleMovimento(props) {
   var [centroId, setCentroId] = useState(isModifica ? (esistente.centro_di_costo_id || '') : '');
   var [tavoloId, setTavoloId] = useState(isModifica ? (esistente.tavolo_id || '') : '');
   var [eventoId, setEventoId] = useState(isModifica ? (esistente.event_id || '') : '');
+  var [filtroCliente, setFiltroCliente] = useState('');
+  var [filtroTitolo, setFiltroTitolo] = useState('');
+  var [filtroData, setFiltroData] = useState('');
+  var filtriAttivi = !!(filtroCliente.trim() || filtroTitolo.trim() || filtroData);
+  var eventiFiltrati = listaEventi.filter(function(ev) { return eventoPassaFiltri(ev, filtroCliente, filtroTitolo, filtroData); });
+  var eventoScelto = null;
+  for (var ie = 0; ie < listaEventi.length; ie++) { if (listaEventi[ie].id === eventoId) { eventoScelto = listaEventi[ie]; break; } }
   var [daCausale, setDaCausale] = useState(isModifica ? (esistente.da_causale || '') : '');
   var [nota, setNota] = useState(isModifica ? (esistente.nota || '') : '');
   var [versaSubito, setVersaSubito] = useState(false);
@@ -504,20 +531,55 @@ function ModaleMovimento(props) {
             <div>
               <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">Evento collegato (opzionale)</div>
               {listaEventi.length > 0 ? (
-                <div className="max-h-44 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
-                  <button type="button" onClick={function() { setEventoId(''); }}
-                    className={'w-full text-left px-3 py-2 text-sm ' + (eventoId === '' ? 'bg-wine-50 text-wine-800 font-medium' : 'bg-white text-gray-700 hover:bg-gray-50')}>
-                    nessuno
-                  </button>
-                  {listaEventi.map(function(ev) {
-                    var sel = ev.id === eventoId;
-                    return (
-                      <button key={ev.id} type="button" onClick={function() { setEventoId(ev.id); }}
-                        className={'w-full text-left px-3 py-2 text-sm ' + (sel ? 'bg-wine-50 text-wine-800 font-medium' : 'bg-white text-gray-700 hover:bg-gray-50')}>
-                        {labelEvento(ev)}
-                      </button>
-                    );
-                  })}
+                <div>
+                  {eventoScelto && (
+                    <div className="mb-2 px-3 py-2 bg-wine-50 border border-wine-200 rounded-lg text-sm text-wine-800">
+                      Collegato: <span className="font-medium">{labelEvento(eventoScelto)}</span>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-3 gap-2 mb-2">
+                    <input type="text" value={filtroCliente} onChange={function(e) { setFiltroCliente(e.target.value); }}
+                      placeholder="Cliente"
+                      className="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                    <input type="text" value={filtroTitolo} onChange={function(e) { setFiltroTitolo(e.target.value); }}
+                      placeholder="Titolo"
+                      className="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                    <input type="date" value={filtroData} onChange={function(e) { setFiltroData(e.target.value); }}
+                      className="w-full px-2 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-wine-500" />
+                  </div>
+                  {filtriAttivi && (
+                    <div className="flex items-center justify-between mb-2 text-xs text-gray-500">
+                      <span>{eventiFiltrati.length === 1 ? '1 evento trovato' : eventiFiltrati.length + ' eventi trovati'}</span>
+                      <button type="button" onClick={function() { setFiltroCliente(''); setFiltroTitolo(''); setFiltroData(''); }}
+                        className="text-wine-700 hover:underline">Togli i filtri</button>
+                    </div>
+                  )}
+                  <div className="max-h-44 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+                    <button type="button" onClick={function() { setEventoId(''); }}
+                      className={'w-full text-left px-3 py-2 text-sm ' + (eventoId === '' ? 'bg-wine-50 text-wine-800 font-medium' : 'bg-white text-gray-700 hover:bg-gray-50')}>
+                      nessuno
+                    </button>
+                    {eventiFiltrati.map(function(ev, i) {
+                      var sel = ev.id === eventoId;
+                      // Una riga di separazione dove finiscono i prossimi
+                      // e cominciano i passati.
+                      var primoPassato = !ev.futuro && (i === 0 || eventiFiltrati[i - 1].futuro);
+                      return (
+                        <div key={ev.id}>
+                          {primoPassato && (
+                            <div className="px-3 py-1 text-xs font-medium text-gray-400 uppercase tracking-wide bg-gray-50">Gia' passati</div>
+                          )}
+                          <button type="button" onClick={function() { setEventoId(ev.id); }}
+                            className={'w-full text-left px-3 py-2 text-sm ' + (sel ? 'bg-wine-50 text-wine-800 font-medium' : 'bg-white text-gray-700 hover:bg-gray-50')}>
+                            {labelEvento(ev)}
+                          </button>
+                        </div>
+                      );
+                    })}
+                    {eventiFiltrati.length === 0 && (
+                      <div className="px-3 py-2 text-sm text-gray-400">Nessun evento con questi filtri.</div>
+                    )}
+                  </div>
                 </div>
               ) : (
                 <div className="text-xs text-gray-400">Nessun evento in agenda. La caparra si registra comunque; l'evento si collega quando c'e'.</div>
@@ -721,25 +783,38 @@ export default function CassaNuovaPage(props) {
     });
     // Eventi dal MODULO (migrazione 64; la cassa vecchia resta sull'archivio
     // event_dates). Si tengono quelli con almeno un servizio negli ultimi
-    // tre mesi o nel futuro, in ordine di prima data (la piu' recente in
-    // cima). Gli ANNULLATI restano in memoria per mostrare il titolo di un
-    // movimento gia' collegato, ma non si possono scegliere (listaEventi).
-    var treMesiFa = spostaData(oggiISO(), -90);
-    supabase.from('eventi').select('id, titolo, stato, eventi_servizi(data, fascia)').then(function(r) {
+    // tre mesi o nel futuro. Gli ANNULLATI restano in memoria per mostrare
+    // il titolo di un movimento gia' collegato, ma non si possono scegliere
+    // (listaEventi).
+    // ORDINE (16/11/2026, prova del 14/11): in cima i PROSSIMI — in corso
+    // o futuri, dal piu' vicino a oggi al piu' lontano; sotto i PASSATI,
+    // dal piu' recente. Prima erano tutti dal piu' lontano al piu' vicino.
+    // Il cliente si legge insieme, per i filtri.
+    var oggi = oggiISO();
+    var treMesiFa = spostaData(oggi, -90);
+    supabase.from('eventi').select('id, titolo, stato, customers(first_name, last_name), eventi_servizi(data, fascia)').then(function(r) {
       if (r.error) { console.error('eventi:', r.error); return; }
       var out = [];
       (r.data || []).forEach(function(ev) {
         var servizi = ev.eventi_servizi || [];
         if (servizi.length === 0) return;
         var prima = servizi[0].data, ultima = servizi[0].data, fascia = servizi[0].fascia;
+        var date = [];
         servizi.forEach(function(s) {
           if (s.data < prima) { prima = s.data; fascia = s.fascia; }
           if (s.data > ultima) ultima = s.data;
+          if (date.indexOf(s.data) < 0) date.push(s.data);
         });
         if (ultima < treMesiFa) return;
-        out.push({ id: ev.id, event_date: prima, title: ev.titolo, meal_type: fascia, stato: ev.stato });
+        var c = ev.customers;
+        var cliente = c ? ((c.last_name || '') + ' ' + (c.first_name || '')).trim() : '';
+        out.push({ id: ev.id, event_date: prima, ultima: ultima, futuro: ultima >= oggi, date: date, title: ev.titolo, cliente: cliente, meal_type: fascia, stato: ev.stato });
       });
-      out.sort(function(a, b) { return a.event_date < b.event_date ? 1 : (a.event_date > b.event_date ? -1 : 0); });
+      out.sort(function(a, b) {
+        if (a.futuro !== b.futuro) return a.futuro ? -1 : 1;
+        if (a.futuro) return a.event_date < b.event_date ? -1 : (a.event_date > b.event_date ? 1 : 0);
+        return a.ultima < b.ultima ? 1 : (a.ultima > b.ultima ? -1 : 0);
+      });
       setEventi(out);
     });
   }, []);

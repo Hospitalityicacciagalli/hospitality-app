@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
+import ConfermaPin from '../components/ConfermaPin'
 import {
   STATI, FASCE, oggiIso, formatData, numeroServizio,
   tipologieSimili, tipologiaUguale, normalizzaNome,
@@ -48,6 +49,19 @@ import {
 // con un riquadro giallo e il pulsante «Scarta bozza». Sparisce con Salva,
 // Crea evento, Scarta ed «Esci senza salvare». Protegge da ogni uscita:
 // menu, F5, scheda chiusa, freccia «indietro» del browser.
+//
+// PERMESSO «RICHIESTE» (migrazione 65, 16/11/2026): chi ha Richieste in
+// modifica e NON ha Eventi in modifica (la reception, di base):
+//   - crea eventi solo in stato Richiesta (lo stato di partenza e' fisso);
+//   - modifica e salva solo gli eventi che sono in stato Richiesta, anche
+//     quelli del Direttore; gli altri li vede in sola lettura;
+//   - niente pulsanti di stato, niente «Elimina», niente tipologie o
+//     spazi nuovi: si scelgono solo fra quelli esistenti;
+//   - per salvare FIRMA COL PIN: se la postazione non e' gia' elevata
+//     con il suo nome, «Crea richiesta»/«Salva» apre la finestra PIN e
+//     la richiesta si salva a nome di chi ha inserito il PIN (come la
+//     firma della chiusura cassa: la postazione resta al base).
+// Il database fa lo stesso controllo (evento_salva, regola 55).
 //
 // Il cliente si sceglie cercandolo. "Nuovo cliente" porta a Clienti ->
 // Nuovo NELLA STESSA SCHEDA, con ?ritorno=<questa pagina>: salvato il
@@ -174,6 +188,8 @@ export default function EventoScheda() {
   var id = params.id || null
   var nuovo = !id
   var puoModificare = auth.canEdit('eventi')
+  // Solo «Richieste» (migrazione 65): vedi la nota in testa al file.
+  var soloRichieste = !puoModificare && auth.canEdit('eventi_richieste')
 
   var contatore = useRef(0)
   function nuovaChiave() {
@@ -229,6 +245,10 @@ export default function EventoScheda() {
   var [hoCapito, setHoCapito] = useState(false)
 
   var [spazioPer, setSpazioPer] = useState(null)
+
+  // Finestra PIN per firmare una richiesta (solo «Richieste», postazione
+  // non elevata).
+  var [chiediPin, setChiediPin] = useState(false)
 
   // tentato: e' gia' stato premuto Salva con dei problemi -> la barra in
   // basso mostra la lista viva. confermaSimile: il testo di una tipologia
@@ -308,8 +328,15 @@ export default function EventoScheda() {
   // La scadenza che vale per il controllo: quella scelta alla nascita
   // per un evento nuovo in opzione, quella della scheda per un evento
   // esistente che e' in opzione. Negli altri stati non c'e' scadenza.
+  // Lo stato con cui l'evento nasce: con il solo permesso Richieste e'
+  // sempre «richiesta», qualunque cosa ci sia nel modulo (anche in una
+  // bozza ripresa, scritta da chi poteva scegliere l'opzione).
+  function statoNascita(f) {
+    return soloRichieste ? 'richiesta' : f.stato
+  }
+
   function scadenzaVigente(f) {
-    if (nuovo) return f.stato === 'opzione' ? f.scadenza : ''
+    if (nuovo) return statoNascita(f) === 'opzione' ? f.scadenza : ''
     return evento && evento.stato === 'opzione' ? f.scadenza : ''
   }
 
@@ -322,9 +349,14 @@ export default function EventoScheda() {
     var clienteObbligatorio = nuovo || (evento && evento.provenienza === 'modulo')
     if (clienteObbligatorio && !f.cliente) lista.push({ testo: 'Manca il cliente.', dove: 'campo-cliente' })
     if (f.tipologiaTesto.trim() && !tipologiaUguale(f.tipologiaTesto, tipologie)) {
-      lista.push({ testo: 'La tipologia "' + f.tipologiaTesto.trim() + '" non e\' nell\'elenco: sceglila fra i suggerimenti oppure aggiungila.', dove: 'campo-tipologia' })
+      lista.push({
+        testo: soloRichieste
+          ? 'La tipologia "' + f.tipologiaTesto.trim() + '" non e\' nell\'elenco: sceglila fra i suggerimenti (una tipologia nuova la aggiunge chi ha il permesso Eventi) oppure lascia il campo vuoto.'
+          : 'La tipologia "' + f.tipologiaTesto.trim() + '" non e\' nell\'elenco: sceglila fra i suggerimenti oppure aggiungila.',
+        dove: 'campo-tipologia'
+      })
     }
-    if (nuovo && f.stato === 'opzione' && !f.scadenza) {
+    if (nuovo && statoNascita(f) === 'opzione' && !f.scadenza) {
       lista.push({ testo: 'Manca la scadenza dell\'opzione.', dove: 'campo-scadenza' })
     }
     var scad = scadenzaVigente(f)
@@ -649,7 +681,11 @@ export default function EventoScheda() {
   // ----------------------------------------------------------
   // SALVA (evento_salva)
   // ----------------------------------------------------------
-  function salva() {
+  // gettoneFirma: il gettone della finestra PIN aperta qui sotto per
+  // firmare una richiesta (solo «Richieste»). Negli altri casi e' null e
+  // vale l'elevazione della postazione, come sempre.
+  function salva(gettoneFirma) {
+    if (typeof gettoneFirma !== 'string') gettoneFirma = null
     setErrore(null)
     setMessaggio(null)
     var f = form
@@ -658,6 +694,13 @@ export default function EventoScheda() {
     // barra in basso lo elenca e si aggiorna da sola.
     if (problemiForm(f).length > 0) {
       setTentato(true)
+      return
+    }
+
+    // Solo «Richieste» e postazione non elevata: prima la firma col PIN
+    // (il database rifiuterebbe comunque). Si torna qui da onPinRichiesta.
+    if (soloRichieste && !gettoneFirma && !auth.gettoneElevazione()) {
+      setChiediPin(true)
       return
     }
 
@@ -692,9 +735,9 @@ export default function EventoScheda() {
       servizi: servizi
     }
     if (nuovo) {
-      dati.stato = f.stato
-      dati.scadenza_opzione = f.stato === 'opzione' ? f.scadenza : ''
-    } else if (evento && evento.stato === 'opzione') {
+      dati.stato = statoNascita(f)
+      dati.scadenza_opzione = dati.stato === 'opzione' ? f.scadenza : ''
+    } else if (evento && evento.stato === 'opzione' && !soloRichieste) {
       // Dalla migrazione 62 la scadenza di un'opzione si puo' correggere
       // anche dalla scheda, insieme ai servizi: e' l'unico modo di
       // spostare in un colpo solo l'evento e la sua scadenza.
@@ -702,7 +745,7 @@ export default function EventoScheda() {
     }
 
     setSalvando(true)
-    scritturaEventi(auth, 'evento_salva', { p_evento: dati }).then(function(r) {
+    scritturaEventi(auth, 'evento_salva', { p_evento: dati }, gettoneFirma).then(function(r) {
       setSalvando(false)
       if (r.errore) { setErrore(r.errore); return }
       togliBozza(chiaveBozza(id))
@@ -716,6 +759,18 @@ export default function EventoScheda() {
         setTimeout(function() { setMessaggio('Evento salvato.') }, 0)
       }
     })
+  }
+
+  // PIN giusto: si salva con il gettone di questa firma. La postazione
+  // NON si eleva: il gettone serve solo a questo salvataggio (scade da
+  // solo, come quello delle firme della cassa).
+  function onPinRichiesta(info) {
+    setChiediPin(false)
+    if (!info || !info.gettone) {
+      setErrore('La firma col PIN non e\' arrivata: riprova.')
+      return
+    }
+    salva(info.gettone)
   }
 
   // ----------------------------------------------------------
@@ -808,7 +863,10 @@ export default function EventoScheda() {
   var modificato = JSON.stringify(form) !== fotografia
   modificatoRef.current = modificato
   var problemiVivi = tentato ? problemiForm(form) : []
-  var disab = !puoModificare
+  // Si puo' scrivere: con Eventi in modifica sempre; con il solo
+  // «Richieste» un evento nuovo o uno che E' in stato Richiesta.
+  var puoScrivere = puoModificare || (soloRichieste && (nuovo || evento.stato === 'richiesta'))
+  var disab = !puoScrivere
   var oggi = oggiIso()
   var statoAttuale = nuovo ? null : evento.stato
   var scaduta = statoAttuale === 'opzione' && evento.scadenza_opzione && evento.scadenza_opzione < oggi
@@ -880,9 +938,18 @@ export default function EventoScheda() {
 
       <h1 className="text-2xl font-bold text-gray-900 mb-4">{nuovo ? 'Nuovo evento' : (evento.titolo || 'Evento')}</h1>
 
-      {!puoModificare && (
+      {!puoScrivere && (
         <div className="mb-4 p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm text-gray-700">
-          Sola lettura: per modificare serve il permesso Eventi in modifica (anche col PIN).
+          {soloRichieste
+            ? 'Sola lettura: con il permesso Richieste si modificano solo gli eventi in stato Richiesta. Questo e\' ' + STATI[evento.stato].label.toLowerCase() + ': lo modifica chi ha il permesso Eventi.'
+            : 'Sola lettura: per modificare serve il permesso Eventi in modifica (anche col PIN).'}
+        </div>
+      )}
+      {puoScrivere && soloRichieste && (
+        <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-900">
+          {nuovo ? 'Stai registrando una richiesta. ' : 'Puoi modificare questa richiesta. '}
+          Al salvataggio ti verra' chiesto il tuo PIN: la richiesta restera' a tuo nome.
+          Opzione, conferma e annullamento li decide chi ha il permesso Eventi.
         </div>
       )}
       {errore && (
@@ -993,7 +1060,13 @@ export default function EventoScheda() {
               })}
             </div>
           )}
-          {!disab && form.tipologiaTesto.trim() && !tipUguale && (
+          {!disab && soloRichieste && form.tipologiaTesto.trim() && !tipUguale && (
+            <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-900">
+              "{form.tipologiaTesto.trim()}" non e' nell'elenco: scegli una delle tipologie qui sopra, oppure lascia il campo vuoto.
+              Una tipologia nuova la aggiunge chi ha il permesso Eventi.
+            </div>
+          )}
+          {!disab && !soloRichieste && form.tipologiaTesto.trim() && !tipUguale && (
             <div className="mt-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-900">
               {tipSimili.length > 0 && (
                 <div className="mb-2">
@@ -1113,17 +1186,23 @@ export default function EventoScheda() {
         {nuovo && (
           <div>
             <label className="block text-xs font-medium text-gray-700 mb-1">Stato di partenza</label>
-            <div className="flex flex-wrap gap-2">
-              {bottoneScelta(form.stato === 'richiesta', 'Richiesta', function() { imposta('stato', 'richiesta') }, disab)}
-              {bottoneScelta(form.stato === 'opzione', 'Opzione', function() { imposta('stato', 'opzione') }, disab)}
-              {bottoneScelta(form.stato === 'confermato', 'Confermato', function() { imposta('stato', 'confermato') }, disab)}
-            </div>
+            {soloRichieste ? (
+              <div className="flex flex-wrap gap-2">
+                {bottoneScelta(true, 'Richiesta', function() {}, false)}
+              </div>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {bottoneScelta(form.stato === 'richiesta', 'Richiesta', function() { imposta('stato', 'richiesta') }, disab)}
+                {bottoneScelta(form.stato === 'opzione', 'Opzione', function() { imposta('stato', 'opzione') }, disab)}
+                {bottoneScelta(form.stato === 'confermato', 'Confermato', function() { imposta('stato', 'confermato') }, disab)}
+              </div>
+            )}
             <p className="mt-1 text-xs text-gray-500">
-              {form.stato === 'richiesta' ? 'La richiesta non occupa posti e non ha scadenza.' : ''}
-              {form.stato === 'opzione' ? 'L\'opzione occupa i posti fino alla scadenza (e anche dopo, finche\' non la chiudi).' : ''}
-              {form.stato === 'confermato' ? 'Confermato: di solito dopo la caparra.' : ''}
+              {statoNascita(form) === 'richiesta' ? 'La richiesta non occupa posti e non ha scadenza.' : ''}
+              {statoNascita(form) === 'opzione' ? 'L\'opzione occupa i posti fino alla scadenza (e anche dopo, finche\' non la chiudi).' : ''}
+              {statoNascita(form) === 'confermato' ? 'Confermato: di solito dopo la caparra.' : ''}
             </p>
-            {form.stato === 'opzione' && (
+            {statoNascita(form) === 'opzione' && (
               <div id="campo-scadenza" className="mt-2">
                 <label className="block text-xs font-medium text-gray-700 mb-1">Scadenza dell'opzione</label>
                 <input type="date" value={form.scadenza} disabled={disab} max={primaServizio || undefined}
@@ -1300,7 +1379,7 @@ export default function EventoScheda() {
                     </button>
                   )
                 })}
-                {!disab && (
+                {!disab && puoModificare && (
                   <button type="button" onClick={function() { setSpazioPer(s.chiave) }}
                     className="px-3 py-1.5 rounded-full text-sm border border-dashed border-wine-400 text-wine-700 hover:bg-wine-50">
                     + Nuovo spazio
@@ -1354,7 +1433,7 @@ export default function EventoScheda() {
       )}
 
       {/* ===================== BARRA SALVA ===================== */}
-      {puoModificare && (
+      {puoScrivere && (
         <div className={'fixed bottom-0 left-0 right-0 lg:left-60 border-t-2 px-4 py-3 z-20 ' + (modificato ? 'bg-amber-100 border-amber-400' : 'bg-white border-gray-200')}>
           <div className="max-w-3xl mx-auto flex items-end justify-between gap-3">
             {problemiVivi.length > 0 ? (
@@ -1389,9 +1468,9 @@ export default function EventoScheda() {
                   Scarta
                 </button>
               )}
-              <button type="button" onClick={salva} disabled={salvando || (!nuovo && !modificato) || scadenzaIncoerente}
+              <button type="button" onClick={function() { salva(null) }} disabled={salvando || (!nuovo && !modificato) || scadenzaIncoerente}
                 className="bg-wine-700 hover:bg-wine-800 disabled:bg-wine-300 text-white px-5 py-2 rounded-lg text-sm font-medium">
-                {salvando ? 'Salvataggio...' : (nuovo ? 'Crea evento' : 'Salva')}
+                {salvando ? 'Salvataggio...' : (nuovo ? (soloRichieste ? 'Crea richiesta' : 'Crea evento') : 'Salva')}
               </button>
             </div>
           </div>
@@ -1552,6 +1631,13 @@ export default function EventoScheda() {
           })
         }}
       />
+
+      <ConfermaPin
+        open={chiediPin}
+        title="Firma la richiesta"
+        message="Scegli il tuo nome e inserisci il PIN: la richiesta si salva a tuo nome. La postazione resta com'era."
+        onCancel={function() { setChiediPin(false) }}
+        onConfirmed={onPinRichiesta} />
     </div>
   )
 }

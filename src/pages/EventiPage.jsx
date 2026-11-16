@@ -167,14 +167,20 @@ export function tipologiaUguale(nome, elenco) {
 // Se il database dice che l'elevazione non vale piu', la si spegne
 // anche qui: la pagina non deve continuare a mostrare poteri che il
 // database non riconosce.
-export function scritturaEventi(auth, funzione, parametri) {
-  var p = { p_gettone: auth.gettoneElevazione() }
+//
+// gettoneFirma (facoltativo, migrazione 65): il gettone di una FIRMA col
+// PIN chiesta per questa sola scrittura (una richiesta salvata dalla
+// reception a postazione non elevata). Se c'e', vale lui e l'elevazione
+// della postazione non si tocca.
+export function scritturaEventi(auth, funzione, parametri, gettoneFirma) {
+  var firmaSingola = !!gettoneFirma
+  var p = { p_gettone: firmaSingola ? gettoneFirma : auth.gettoneElevazione() }
   for (var k in parametri) { p[k] = parametri[k] }
   return supabase.rpc(funzione, p).then(function(res) {
     if (res.error) {
       var msg = res.error.message || 'Errore sconosciuto'
       if (msg.indexOf('Elevazione') === 0) {
-        auth.terminaElevazione(false)
+        if (!firmaSingola) auth.terminaElevazione(false)
         msg = msg + ' Inserisci di nuovo il PIN e ripeti l\'operazione: niente e\' stato salvato.'
       }
       return { data: null, errore: msg }
@@ -607,6 +613,10 @@ export default function EventiPage() {
   var auth = useAuth()
   var navigate = useNavigate()
   var puoModificare = auth.canEdit('eventi')
+  // «+ Nuovo evento» anche con il solo permesso Richieste (migrazione 65):
+  // la scheda nasce in stato Richiesta e si salva firmando col PIN.
+  // Tipologie e spazi restano solo per chi ha Eventi in modifica.
+  var puoCreare = puoModificare || auth.canEdit('eventi_richieste')
 
   var [tab, setTab] = useState('eventi')
   var [eventi, setEventi] = useState([])
@@ -755,10 +765,10 @@ export default function EventiPage() {
     <div className="p-4 lg:p-6 max-w-4xl mx-auto">
       <div className="flex items-center justify-between gap-3 mb-4">
         <h1 className="text-2xl font-bold text-gray-900">Eventi</h1>
-        {tab === 'eventi' && puoModificare && (
+        {tab === 'eventi' && puoCreare && (
           <button type="button" onClick={function() { navigate('/eventi/nuovo') }}
             className="bg-wine-700 hover:bg-wine-800 text-white px-4 py-2 rounded-lg text-sm font-medium">
-            + Nuovo evento
+            {puoModificare ? '+ Nuovo evento' : '+ Nuova richiesta'}
           </button>
         )}
         {tab === 'spazi' && puoModificare && (

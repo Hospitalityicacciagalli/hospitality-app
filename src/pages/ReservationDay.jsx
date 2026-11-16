@@ -1344,11 +1344,13 @@ function ReservationDay() {
         </div>
         <div className="flex gap-2 flex-wrap">
           <StampaMenu dateStr={dateStr} turno={selectedMeal} reservations={activeReservations} sale={sale} eventi={eventi} copertiTurno={copertiTurno} clientiTavolo={clientiTavolo} />
-          {canEdit('eventi') && (
+          {/* Anche con il solo permesso Richieste (migrazione 65): la scheda
+              nasce in stato Richiesta e si salva firmando col PIN. */}
+          {(canEdit('eventi') || canEdit('eventi_richieste')) && (
             <button onClick={nuovoEvento}
               className="inline-flex items-center gap-2 bg-amber-500 text-white px-4 py-2.5 rounded-xl hover:bg-amber-600 transition-colors font-medium shadow-sm text-sm">
               <Calendar size={16} />
-              <span>Nuovo Evento</span>
+              <span>{canEdit('eventi') ? 'Nuovo Evento' : 'Nuova richiesta evento'}</span>
             </button>
           )}
           <Link to={"/prenotazioni/nuova?date=" + dateStr + "&meal=" + selectedMeal}
