@@ -3,6 +3,7 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../lib/AuthContext'
 import ConfermaPin from '../components/ConfermaPin'
+import { registraModifiche, liberaModifiche } from '../lib/controlloVersione'
 import {
   STATI, FASCE, oggiIso, formatData, numeroServizio,
   tipologieSimili, tipologiaUguale, normalizzaNome,
@@ -274,6 +275,13 @@ export default function EventoScheda() {
   // sotto, che nascono una volta sola e non vedono le variabili nuove.
   var [uscitaVerso, setUscitaVerso] = useState(null)
   var modificatoRef = useRef(false)
+
+  // Il controllo di versione (src/lib/controlloVersione.js) non ricarica
+  // mai la pagina mentre questa scheda ha modifiche non salvate.
+  useEffect(function() {
+    registraModifiche(modificatoRef)
+    return function() { liberaModifiche(modificatoRef) }
+  }, [])
 
   useEffect(function() { carica() }, [id])
 

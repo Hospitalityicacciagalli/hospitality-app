@@ -3,6 +3,7 @@ import { NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../lib/AuthContext';
 import { supabase } from '../lib/supabase';
 import ConfermaPin from './ConfermaPin';
+import { useControlloVersione, aggiornaOra, VERSIONE, dataVersioneBreve } from '../lib/controlloVersione';
 
 // ============================================================
 // SOGLIA DI ALLARME SINCRONIZZAZIONE HOTEL IN CLOUD
@@ -78,6 +79,13 @@ export default function Layout({ children }) {
   // cambia in un posto solo.
   var [hicUltimo, setHicUltimo] = useState(null);
   var [hicLetto, setHicLetto] = useState(false);
+
+  // Controllo di versione (src/lib/controlloVersione.js): versioneNuova
+  // e' la versione pubblicata sul sito se diversa da quella che gira qui,
+  // altrimenti null. Il ricaricamento da solo (cambio pagina, 10 minuti
+  // di fermo) lo decide il controllo; qui si mostra solo la striscia.
+  var versioneNuova = useControlloVersione(elevato, location.pathname);
+  var dataVersione = dataVersioneBreve();
 
   useEffect(function() {
     // Rileggo il flag "dispositivo condiviso" a ogni cambio pagina:
@@ -666,6 +674,14 @@ export default function Layout({ children }) {
           Esci
         </button>
 
+        {/* Versione del programma che gira su QUESTO dispositivo. Nei
+            verbali si controlla questa riga invece di premere Ctrl+F5. */}
+        <div className="px-3 pt-2 text-wine-400 text-xs">
+          {VERSIONE === 'locale'
+            ? 'Versione locale'
+            : 'Versione ' + VERSIONE + (dataVersione ? ' · ' + dataVersione : '')}
+        </div>
+
       </div>
     </div>
   );
@@ -737,6 +753,33 @@ export default function Layout({ children }) {
                 La sessione sta per scadere. Premi <span className="font-semibold">Estendi</span> e reinserisci il PIN per continuare.
               </div>
             )}
+          </div>
+        )}
+
+        {/* Fascia VERSIONE NUOVA. Compare quando sul sito c'e' un programma
+            piu' recente di quello che gira qui. Il pulsante ricarica la
+            pagina su cui si e'. Da elevati si avvisa che si torna al base:
+            l'elevazione vive solo nella memoria della pagina. */}
+        {versioneNuova && (
+          <div className="bg-blue-700 text-white">
+            <div className="px-4 py-2 flex items-center justify-between gap-3">
+              <div className="flex items-start gap-2 min-w-0">
+                <span className="text-base flex-shrink-0">🔄</span>
+                <div className="text-sm">
+                  <span className="font-semibold">È disponibile una versione nuova del programma.</span>
+                  {elevato ? (
+                    <span className="ml-1">Aggiornando, la postazione torna al base. Altrimenti si aggiorna da sola quando torni al base e cambi pagina.</span>
+                  ) : (
+                    <span className="ml-1">Si aggiorna da sola al prossimo cambio di pagina.</span>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={function() { aggiornaOra(versioneNuova); }}
+                className="flex-shrink-0 text-sm font-medium bg-white text-blue-700 px-3 py-1 rounded-lg hover:bg-blue-50">
+                Aggiorna ora
+              </button>
+            </div>
           </div>
         )}
 
