@@ -3,17 +3,52 @@ import { useParams, useNavigate, Link } from 'react-router-dom'
 import { ArrowLeft, Edit, Trash2, Phone, Mail, MapPin, AlertTriangle, Shield, ShieldCheck, ShieldX } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import AllergenBadge from '../components/AllergenBadge'
+import StoricoCliente from '../components/StoricoCliente'
+
+// ============================================================
+// SCHEDA CLIENTE
+// 23/11/2026 (migrazione 67): aggiunto il riquadro «Storico»
+// (components/StoricoCliente.jsx). Il resto della pagina fa quello
+// che faceva prima: riscritto solo nella forma del progetto (var,
+// niente funzioni freccia).
+// ⚠️ «Disattiva Cliente» non ha ancora un controllo di permesso:
+// arriva con la sessione «fusione ed eliminazione» (0.6 v76).
+// ============================================================
+
+var categoryLabels = {
+  standard: 'Standard',
+  vip: 'VIP',
+  press: 'Stampa',
+  business: 'Business',
+  hotel_guest: 'Ospite Hotel'
+}
+
+var categoryColors = {
+  standard: 'bg-gray-100 text-gray-700',
+  vip: 'bg-amber-100 text-amber-800',
+  press: 'bg-purple-100 text-purple-800',
+  business: 'bg-blue-100 text-blue-800',
+  hotel_guest: 'bg-green-100 text-green-800'
+}
+
+var consentLabels = {
+  data_processing: 'Trattamento dati personali',
+  health_data: 'Dati sulla salute (allergeni)',
+  marketing: 'Comunicazioni commerciali',
+  profiling: 'Profilazione'
+}
 
 function CustomerDetail() {
-  const { id } = useParams()
-  const navigate = useNavigate()
-  const [customer, setCustomer] = useState(null)
-  const [allergens, setAllergens] = useState([])
-  const [consents, setConsents] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  var params = useParams()
+  var id = params.id
+  var navigate = useNavigate()
+  var [customer, setCustomer] = useState(null)
+  var [allergens, setAllergens] = useState([])
+  var [consents, setConsents] = useState([])
+  var [loading, setLoading] = useState(true)
+  var [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
 
-  useEffect(() => {
+  useEffect(function() {
     loadCustomer()
   }, [id])
 
@@ -21,17 +56,17 @@ function CustomerDetail() {
     setLoading(true)
     try {
       // Carica dati cliente
-      const { data: customerData, error: customerError } = await supabase
+      var customerResult = await supabase
         .from('customers')
         .select('*')
         .eq('id', id)
         .single()
 
-      if (customerError) throw customerError
-      setCustomer(customerData)
+      if (customerResult.error) throw customerResult.error
+      setCustomer(customerResult.data)
 
       // Carica allergeni
-      const { data: allergensData, error: allergensError } = await supabase
+      var allergensResult = await supabase
         .from('customer_allergens')
         .select(`
           severity,
@@ -45,17 +80,17 @@ function CustomerDetail() {
         `)
         .eq('customer_id', id)
 
-      if (allergensError) throw allergensError
-      setAllergens(allergensData)
+      if (allergensResult.error) throw allergensResult.error
+      setAllergens(allergensResult.data)
 
       // Carica consensi
-      const { data: consentsData, error: consentsError } = await supabase
+      var consentsResult = await supabase
         .from('gdpr_consents')
         .select('*')
         .eq('customer_id', id)
 
-      if (consentsError) throw consentsError
-      setConsents(consentsData)
+      if (consentsResult.error) throw consentsResult.error
+      setConsents(consentsResult.data)
 
     } catch (error) {
       console.error('Errore:', error)
@@ -69,40 +104,17 @@ function CustomerDetail() {
   async function handleDelete() {
     try {
       // Disattiva il cliente (soft delete)
-      const { error } = await supabase
+      var result = await supabase
         .from('customers')
         .update({ is_active: false })
         .eq('id', id)
 
-      if (error) throw error
+      if (result.error) throw result.error
       navigate('/clienti')
     } catch (error) {
       console.error('Errore eliminazione:', error)
       alert('Errore durante l\'eliminazione.')
     }
-  }
-
-  const categoryLabels = {
-    standard: 'Standard',
-    vip: 'VIP',
-    press: 'Stampa',
-    business: 'Business',
-    hotel_guest: 'Ospite Hotel',
-  }
-
-  const categoryColors = {
-    standard: 'bg-gray-100 text-gray-700',
-    vip: 'bg-amber-100 text-amber-800',
-    press: 'bg-purple-100 text-purple-800',
-    business: 'bg-blue-100 text-blue-800',
-    hotel_guest: 'bg-green-100 text-green-800',
-  }
-
-  const consentLabels = {
-    data_processing: 'Trattamento dati personali',
-    health_data: 'Dati sulla salute (allergeni)',
-    marketing: 'Comunicazioni commerciali',
-    profiling: 'Profilazione',
   }
 
   if (loading) {
@@ -121,7 +133,7 @@ function CustomerDetail() {
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-4">
           <button
-            onClick={() => navigate('/clienti')}
+            onClick={function() { navigate('/clienti') }}
             className="p-2 rounded-lg hover:bg-gray-100 transition-colors"
           >
             <ArrowLeft size={24} />
@@ -131,7 +143,7 @@ function CustomerDetail() {
               <h1 className="text-2xl font-bold text-gray-900">
                 {customer.first_name} {customer.last_name}
               </h1>
-              <span className={`px-3 py-1 rounded-full text-sm font-medium ${categoryColors[customer.category]}`}>
+              <span className={'px-3 py-1 rounded-full text-sm font-medium ' + (categoryColors[customer.category] || '')}>
                 {categoryLabels[customer.category]}
               </span>
             </div>
@@ -143,7 +155,7 @@ function CustomerDetail() {
 
         <div className="flex items-center gap-2">
           <Link
-            to={`/clienti/${id}/modifica`}
+            to={'/clienti/' + id + '/modifica'}
             className="flex items-center gap-2 bg-wine-700 text-white px-4 py-2.5 rounded-lg hover:bg-wine-800 transition-colors font-medium"
           >
             <Edit size={16} />
@@ -159,7 +171,7 @@ function CustomerDetail() {
           <div className="space-y-3">
             {customer.phone && (
               <a
-                href={`tel:${customer.phone}`}
+                href={'tel:' + customer.phone}
                 className="flex items-center gap-3 text-gray-700 hover:text-wine-700 transition-colors"
               >
                 <Phone size={18} className="text-gray-400" />
@@ -168,7 +180,7 @@ function CustomerDetail() {
             )}
             {customer.email && (
               <a
-                href={`mailto:${customer.email}`}
+                href={'mailto:' + customer.email}
                 className="flex items-center gap-3 text-gray-700 hover:text-wine-700 transition-colors"
               >
                 <Mail size={18} className="text-gray-400" />
@@ -202,13 +214,15 @@ function CustomerDetail() {
             <p className="text-gray-400 italic">Nessun allergene segnalato</p>
           ) : (
             <div className="flex flex-wrap gap-2">
-              {allergens.map((item, index) => (
-                <AllergenBadge
-                  key={index}
-                  allergen={item.allergens}
-                  severity={item.severity}
-                />
-              ))}
+              {allergens.map(function(item, index) {
+                return (
+                  <AllergenBadge
+                    key={index}
+                    allergen={item.allergens}
+                    severity={item.severity}
+                  />
+                )
+              })}
             </div>
           )}
         </div>
@@ -221,6 +235,9 @@ function CustomerDetail() {
           </div>
         )}
 
+        {/* Storico (migrazione 67) */}
+        <StoricoCliente clienteId={id} />
+
         {/* Consensi GDPR */}
         <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
           <div className="flex items-center gap-2 mb-4">
@@ -229,9 +246,13 @@ function CustomerDetail() {
           </div>
 
           <div className="space-y-3">
-            {Object.entries(consentLabels).map(([type, label]) => {
-              const consent = consents.find(c => c.consent_type === type)
-              const granted = consent?.granted || false
+            {Object.keys(consentLabels).map(function(type) {
+              var label = consentLabels[type]
+              var consent = null
+              for (var i = 0; i < consents.length; i++) {
+                if (consents[i].consent_type === type) { consent = consents[i]; break }
+              }
+              var granted = consent ? !!consent.granted : false
 
               return (
                 <div key={type} className="flex items-center gap-3">
@@ -243,7 +264,7 @@ function CustomerDetail() {
                   <span className={granted ? 'text-gray-700' : 'text-gray-400'}>
                     {label}
                   </span>
-                  {granted && consent?.granted_at && (
+                  {granted && consent.granted_at && (
                     <span className="text-xs text-gray-400">
                       ({new Date(consent.granted_at).toLocaleDateString('it-IT')})
                     </span>
@@ -271,7 +292,7 @@ function CustomerDetail() {
                 Sì, disattiva
               </button>
               <button
-                onClick={() => setShowDeleteConfirm(false)}
+                onClick={function() { setShowDeleteConfirm(false) }}
                 className="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 text-sm"
               >
                 Annulla
@@ -279,7 +300,7 @@ function CustomerDetail() {
             </div>
           ) : (
             <button
-              onClick={() => setShowDeleteConfirm(true)}
+              onClick={function() { setShowDeleteConfirm(true) }}
               className="flex items-center gap-2 px-4 py-2 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 transition-colors text-sm"
             >
               <Trash2 size={16} />
