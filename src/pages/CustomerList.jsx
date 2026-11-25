@@ -2,97 +2,119 @@ import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { Search, Plus, Phone, Mail, AlertTriangle, ChevronRight } from 'lucide-react'
 import { supabase } from '../lib/supabase'
+import { useAuth } from '../lib/AuthContext'
+import { caricaABlocchi } from '../lib/caricaABlocchi'
+
+// ============================================================
+// ELENCO CLIENTI
+// 25/11/2026 (migrazione 68, sessione «fusione ed eliminazione»):
+//   * clienti e allergeni si caricano A BLOCCHI di 1.000
+//     (lib/caricaABlocchi.js): oltre le 1.000 righe Supabase taglia in
+//     silenzio, e le schede erano 865 e crescevano di ~8 al giorno;
+//   * interruttore «Mostra anche le disattivate»: le disattivate
+//     compaiono in grigio con la scritta «Disattivata»; dalla loro
+//     scheda si riattivano (regola 48). Le LAPIDI delle fusioni
+//     (merged_into valorizzato) non compaiono MAI;
+//   * «Nuovo Cliente» solo a chi ha Clienti = modifica (la rotta
+//     /clienti/nuovo lo chiedeva già: il pulsante portava a un rifiuto).
+// Riscritto nella forma del progetto (var, niente funzioni freccia).
+// Il filtro per categoria è un menù nativo: va bene, questa è una
+// pagina e non una finestra modale.
+// ============================================================
+
+var categoryLabels = {
+  standard: 'Standard',
+  vip: 'VIP',
+  press: 'Stampa',
+  business: 'Business',
+  hotel_guest: 'Ospite Hotel'
+}
+
+var categoryColors = {
+  standard: 'bg-gray-100 text-gray-700',
+  vip: 'bg-amber-100 text-amber-800',
+  press: 'bg-purple-100 text-purple-800',
+  business: 'bg-blue-100 text-blue-800',
+  hotel_guest: 'bg-green-100 text-green-800'
+}
+
+function iniziali(c) {
+  var a = (c.first_name || '').trim()
+  var b = (c.last_name || '').trim()
+  return (a ? a[0] : '') + (b ? b[0] : '')
+}
 
 function CustomerList() {
-  const [customers, setCustomers] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [searchTerm, setSearchTerm] = useState('')
-  const [categoryFilter, setCategoryFilter] = useState('all')
-  const navigate = useNavigate()
+  var auth = useAuth()
+  var puoScrivere = auth.canEdit('clienti')
+  var [customers, setCustomers] = useState([])
+  var [loading, setLoading] = useState(true)
+  var [searchTerm, setSearchTerm] = useState('')
+  var [categoryFilter, setCategoryFilter] = useState('all')
+  var [mostraDisattivate, setMostraDisattivate] = useState(false)
+  var navigate = useNavigate()
 
-  // Carica i clienti dal database
-  useEffect(() => {
+  useEffect(function() {
     loadCustomers()
-  }, [])
+  }, [mostraDisattivate])
 
-  async function loadCustomers() {
+  function loadCustomers() {
     setLoading(true)
-    try {
-      // Carica clienti con i loro allergeni
-      const { data: customersData, error: customersError } = await supabase
-        .from('customers')
-        .select('*')
-        .eq('is_active', true)
-        .order('last_name', { ascending: true })
-
-      if (customersError) throw customersError
-
-      // Carica gli allergeni per tutti i clienti
-      const { data: allergensData, error: allergensError } = await supabase
-        .from('customer_allergens')
-        .select(`
-          customer_id,
-          severity,
-          allergen_id,
-          allergens (
-            id,
-            name,
-            icon
-          )
-        `)
-
-      if (allergensError) throw allergensError
-
-      // Combina clienti con i loro allergeni
-      const customersWithAllergens = customersData.map(customer => ({
-        ...customer,
-        allergens: allergensData
-          .filter(a => a.customer_id === customer.id)
-          .map(a => ({
-            ...a.allergens,
-            severity: a.severity
-          }))
-      }))
-
-      setCustomers(customersWithAllergens)
-    } catch (error) {
+    var conDisattivate = mostraDisattivate
+    caricaABlocchi(function() {
+      var q = supabase.from('customers').select('*')
+      if (conDisattivate) {
+        // attive + disattivate, mai le lapidi
+        q = q.is('merged_into', null)
+      } else {
+        q = q.eq('is_active', true)
+      }
+      return q.order('last_name', { ascending: true }).order('id', { ascending: true })
+    }).then(function(resClienti) {
+      if (resClienti.error) throw resClienti.error
+      return caricaABlocchi(function() {
+        return supabase.from('customer_allergens')
+          .select('id, customer_id, severity, allergen_id, allergens ( id, name, icon )')
+          .order('id', { ascending: true })
+      }).then(function(resAllergeni) {
+        if (resAllergeni.error) throw resAllergeni.error
+        var perCliente = {}
+        var righe = resAllergeni.data || []
+        for (var i = 0; i < righe.length; i++) {
+          var a = righe[i]
+          if (!perCliente[a.customer_id]) perCliente[a.customer_id] = []
+          perCliente[a.customer_id].push(Object.assign({}, a.allergens, { severity: a.severity }))
+        }
+        var clienti = (resClienti.data || []).map(function(c) {
+          return Object.assign({}, c, { allergens: perCliente[c.id] || [] })
+        })
+        setCustomers(clienti)
+        setLoading(false)
+      })
+    }).catch(function(error) {
       console.error('Errore nel caricamento clienti:', error)
-      alert('Errore nel caricamento dei clienti. Riprova.')
-    } finally {
       setLoading(false)
-    }
+      alert('Errore nel caricamento dei clienti. Riprova.')
+    })
   }
 
-  // Filtra clienti in base alla ricerca e alla categoria
-  const filteredCustomers = customers.filter(customer => {
-    const matchesSearch =
-      searchTerm === '' ||
-      customer.first_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      customer.last_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (customer.phone && customer.phone.includes(searchTerm)) ||
-      (customer.email && customer.email.toLowerCase().includes(searchTerm.toLowerCase()))
-
-    const matchesCategory =
-      categoryFilter === 'all' || customer.category === categoryFilter
-
+  var cerca = searchTerm.toLowerCase()
+  var filteredCustomers = customers.filter(function(customer) {
+    var matchesSearch =
+      cerca === '' ||
+      (customer.first_name || '').toLowerCase().indexOf(cerca) !== -1 ||
+      (customer.last_name || '').toLowerCase().indexOf(cerca) !== -1 ||
+      (customer.phone && customer.phone.indexOf(searchTerm) !== -1) ||
+      (customer.email && customer.email.toLowerCase().indexOf(cerca) !== -1)
+    var matchesCategory = categoryFilter === 'all' || customer.category === categoryFilter
     return matchesSearch && matchesCategory
   })
 
-  const categoryLabels = {
-    standard: 'Standard',
-    vip: 'VIP',
-    press: 'Stampa',
-    business: 'Business',
-    hotel_guest: 'Ospite Hotel',
+  var nAttive = 0
+  for (var k = 0; k < customers.length; k++) {
+    if (customers[k].is_active !== false) nAttive++
   }
-
-  const categoryColors = {
-    standard: 'bg-gray-100 text-gray-700',
-    vip: 'bg-amber-100 text-amber-800',
-    press: 'bg-purple-100 text-purple-800',
-    business: 'bg-blue-100 text-blue-800',
-    hotel_guest: 'bg-green-100 text-green-800',
-  }
+  var nDisattivate = customers.length - nAttive
 
   if (loading) {
     return (
@@ -108,36 +130,39 @@ function CustomerList() {
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Clienti</h1>
-          <p className="text-gray-500 mt-1">{customers.length} clienti registrati</p>
+          <p className="text-gray-500 mt-1">
+            {nAttive} clienti registrati
+            {mostraDisattivate && (' · ' + nDisattivate + ' disattivati')}
+          </p>
         </div>
-        <Link
-          to="/clienti/nuovo"
-          className="inline-flex items-center gap-2 bg-wine-700 text-white px-5 py-3 rounded-xl hover:bg-wine-800 transition-colors font-medium shadow-sm"
-        >
-          <Plus size={20} />
-          <span>Nuovo Cliente</span>
-        </Link>
+        {puoScrivere && (
+          <Link
+            to="/clienti/nuovo"
+            className="inline-flex items-center gap-2 bg-wine-700 text-white px-5 py-3 rounded-xl hover:bg-wine-800 transition-colors font-medium shadow-sm"
+          >
+            <Plus size={20} />
+            <span>Nuovo Cliente</span>
+          </Link>
+        )}
       </div>
 
       {/* Barra ricerca e filtri */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 mb-6">
         <div className="flex flex-col sm:flex-row gap-3">
-          {/* Campo ricerca */}
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
             <input
               type="text"
               placeholder="Cerca per nome, telefono o email..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={function(e) { setSearchTerm(e.target.value) }}
               className="w-full pl-10 pr-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 focus:border-transparent text-base"
             />
           </div>
 
-          {/* Filtro categoria */}
           <select
             value={categoryFilter}
-            onChange={(e) => setCategoryFilter(e.target.value)}
+            onChange={function(e) { setCategoryFilter(e.target.value) }}
             className="px-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-wine-500 bg-white text-base"
           >
             <option value="all">Tutte le categorie</option>
@@ -148,6 +173,16 @@ function CustomerList() {
             <option value="hotel_guest">Ospite Hotel</option>
           </select>
         </div>
+
+        <label className="mt-3 inline-flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={mostraDisattivate}
+            onChange={function(e) { setMostraDisattivate(e.target.checked) }}
+            className="w-4 h-4"
+          />
+          Mostra anche le disattivate
+        </label>
       </div>
 
       {/* Lista clienti */}
@@ -162,66 +197,77 @@ function CustomerList() {
         </div>
       ) : (
         <div className="space-y-2">
-          {filteredCustomers.map((customer) => (
-            <div
-              key={customer.id}
-              onClick={() => navigate(`/clienti/${customer.id}`)}
-              className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:border-wine-300 hover:shadow-md transition-all cursor-pointer active:bg-gray-50"
-            >
-              <div className="flex items-center gap-4">
-                {/* Avatar con iniziali */}
-                <div className="w-12 h-12 rounded-full bg-wine-100 text-wine-700 flex items-center justify-center font-bold text-lg flex-shrink-0">
-                  {customer.first_name[0]}{customer.last_name[0]}
-                </div>
-
-                {/* Info cliente */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-semibold text-gray-900">
-                      {customer.last_name} {customer.first_name}
-                    </h3>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${categoryColors[customer.category]}`}>
-                      {categoryLabels[customer.category]}
-                    </span>
+          {filteredCustomers.map(function(customer) {
+            var disattivata = customer.is_active === false
+            return (
+              <div
+                key={customer.id}
+                onClick={function() { navigate('/clienti/' + customer.id) }}
+                className={disattivata
+                  ? 'bg-gray-50 rounded-xl border border-gray-200 p-4 hover:border-gray-300 transition-all cursor-pointer opacity-70'
+                  : 'bg-white rounded-xl shadow-sm border border-gray-200 p-4 hover:border-wine-300 hover:shadow-md transition-all cursor-pointer active:bg-gray-50'}
+              >
+                <div className="flex items-center gap-4">
+                  <div className={disattivata
+                    ? 'w-12 h-12 rounded-full bg-gray-200 text-gray-500 flex items-center justify-center font-bold text-lg flex-shrink-0'
+                    : 'w-12 h-12 rounded-full bg-wine-100 text-wine-700 flex items-center justify-center font-bold text-lg flex-shrink-0'}>
+                    {iniziali(customer)}
                   </div>
 
-                  <div className="flex items-center gap-4 mt-1 text-sm text-gray-500">
-                    {customer.phone && (
-                      <span className="flex items-center gap-1">
-                        <Phone size={14} />
-                        {customer.phone}
-                      </span>
-                    )}
-                    {customer.email && (
-                      <span className="hidden sm:flex items-center gap-1">
-                        <Mail size={14} />
-                        {customer.email}
-                      </span>
-                    )}
-                  </div>
-
-                  {/* Allergeni */}
-                  {customer.allergens.length > 0 && (
-                    <div className="flex items-center gap-1 mt-2 flex-wrap">
-                      <AlertTriangle size={14} className="text-red-500 flex-shrink-0" />
-                      {customer.allergens.map((allergen) => (
-                        <span
-                          key={allergen.id}
-                          className="text-xs bg-red-50 text-red-700 px-1.5 py-0.5 rounded"
-                          title={allergen.name}
-                        >
-                          {allergen.icon} {allergen.name}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className={disattivata ? 'font-semibold text-gray-500' : 'font-semibold text-gray-900'}>
+                        {customer.last_name} {customer.first_name}
+                      </h3>
+                      {disattivata ? (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-gray-200 text-gray-600">
+                          Disattivata
                         </span>
-                      ))}
+                      ) : (
+                        <span className={'px-2 py-0.5 rounded-full text-xs font-medium ' + (categoryColors[customer.category] || '')}>
+                          {categoryLabels[customer.category]}
+                        </span>
+                      )}
                     </div>
-                  )}
-                </div>
 
-                {/* Freccia */}
-                <ChevronRight size={20} className="text-gray-400 flex-shrink-0" />
+                    <div className="flex items-center gap-4 mt-1 text-sm text-gray-500">
+                      {customer.phone && (
+                        <span className="flex items-center gap-1">
+                          <Phone size={14} />
+                          {customer.phone}
+                        </span>
+                      )}
+                      {customer.email && (
+                        <span className="hidden sm:flex items-center gap-1">
+                          <Mail size={14} />
+                          {customer.email}
+                        </span>
+                      )}
+                    </div>
+
+                    {customer.allergens.length > 0 && (
+                      <div className="flex items-center gap-1 mt-2 flex-wrap">
+                        <AlertTriangle size={14} className="text-red-500 flex-shrink-0" />
+                        {customer.allergens.map(function(allergen) {
+                          return (
+                            <span
+                              key={allergen.id}
+                              className="text-xs bg-red-50 text-red-700 px-1.5 py-0.5 rounded"
+                              title={allergen.name}
+                            >
+                              {allergen.icon} {allergen.name}
+                            </span>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  <ChevronRight size={20} className="text-gray-400 flex-shrink-0" />
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>

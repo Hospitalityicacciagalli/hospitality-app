@@ -626,8 +626,11 @@ function PannelloServizi(props) {
         // 1) riuso un cliente esistente solo se ho nome E cognome pieni
         //    (evita accostamenti azzardati su un solo campo).
         if (benNome && benCognome) {
+          // Solo schede attive (migrazione 68): mai una scheda unita a
+          // un'altra (lapide) o disattivata.
           var cerca = await supabase.from('customers')
             .select('id')
+            .eq('is_active', true)
             .ilike('first_name', benNome)
             .ilike('last_name', benCognome)
             .limit(1)
@@ -664,6 +667,18 @@ function PannelloServizi(props) {
         }]).select('id, reservation_date, meal_type, guests_count, adults_count, children_count, notes')
         if (ins.error) throw new Error(ins.error.message)
         if (ins.data && ins.data.length > 0) {
+          // L'intestatario vive anche in prenotazione_clienti (riga
+          // ordine 0, migrazione 52), come in ogni prenotazione fatta dal
+          // calendario. Fino alla migrazione 68 qui mancava (0.4 v77).
+          // Se la riga non si scrive il pasto resta comunque salvato:
+          // l'errore va solo in console.
+          var rigaIntestatario = await supabase.from('prenotazione_clienti').insert([{
+            prenotazione_id: ins.data[0].id,
+            cliente_id: customerId,
+            ordine: 0,
+            creata_da_nome: 'Gift card'
+          }])
+          if (rigaIntestatario.error) console.error('Riga intestatario non scritta:', rigaIntestatario.error)
           setPastiCollegati(function(prev) { return prev.concat(ins.data) })
         }
         // Resetta il form ma tienilo aperto se ci sono ancora pasti da inserire

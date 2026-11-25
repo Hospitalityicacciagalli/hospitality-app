@@ -32,13 +32,15 @@ import { useAuth } from '../lib/AuthContext'
 // Alert -> alert_prenotazioni, ma SOLO se non ne esiste gia' uno su quel
 //          giorno+fascia (non calpesta gli alert manuali). Firma "Import Excel".
 //
-// REIMPORT PULITO (azzeramento):
-// Nella schermata di caricamento c'e' un'azione separata "Azzera dati importati"
-// che cancella TUTTE le prenotazioni con source='import_excel' e poi i clienti
-// import_excel rimasti ORFANI (non piu' referenziati da nessuna prenotazione).
-// Cosi' le prenotazioni/clienti inseriti a mano restano intatti e non si
-// rompono foreign key. L'inserimento vero e proprio NON cancella nulla, cosi'
-// caricando piu' mesi di fila non si cancellano a vicenda.
+// «AZZERA DATI IMPORTATI» TOLTO (25/11/2026, migrazione 68, decisione 8):
+// cancellava TUTTE le prenotazioni import_excel e poi le schede rimaste
+// senza prenotazioni, guardando solo reservations.customer_id (non eventi,
+// collegamenti, legami con Hotel in Cloud) e leggendo le prenotazioni senza
+// limite (oltre 1.000 righe Supabase taglia in silenzio). Dalla 68 il
+// database non permette piu' di cancellare una scheda cliente direttamente:
+// si elimina una scheda alla volta dalla scheda cliente, firmando col PIN.
+// L'import Excel non si usa piu' (Florestano, 24/11); l'inserimento resta
+// com'era e NON cancella nulla.
 // ============================================================
 
 function pad(n) {
@@ -105,10 +107,6 @@ export default function ImportPrenotazioniPage() {
   var [inserimento, setInserimento] = useState(false)
   var [progresso, setProgresso] = useState(null)
   var [risultato, setRisultato] = useState(null)
-
-  var [confermaAzzera, setConfermaAzzera] = useState(false)
-  var [azzeramento, setAzzeramento] = useState(false)
-  var [esitoAzzera, setEsitoAzzera] = useState(null)
 
   var puoScrivere = canEdit('prenotazioni')
 
@@ -215,73 +213,6 @@ export default function ImportPrenotazioniPage() {
   }
   function vociDelGiorno(data, pasto) {
     return voci.filter(function(v) { return v.data === data && (pasto ? v.pasto === pasto : true) })
-  }
-
-  // ----------------------------------------------------------
-  // AZZERAMENTO (reimport pulito)
-  // 1) cancella tutte le reservations con source='import_excel'
-  // 2) cancella i customers import_excel rimasti ORFANI
-  //    (non referenziati da nessuna reservation). Cosi' un cliente
-  //    importato ma agganciato a una prenotazione MANUALE non viene
-  //    toccato -> nessuna FK rotta.
-  // ----------------------------------------------------------
-  function cancellaClientiABatch(ids) {
-    var chunks = []
-    var i = 0
-    for (i = 0; i < ids.length; i += 200) {
-      chunks.push(ids.slice(i, i + 200))
-    }
-    var totale = 0
-    var chain = Promise.resolve()
-    chunks.forEach(function(slice) {
-      chain = chain.then(function() {
-        return supabase.from('customers').delete().in('id', slice).select('id').then(function(r) {
-          if (r.error) throw r.error
-          totale += r.data ? r.data.length : 0
-        })
-      })
-    })
-    return chain.then(function() { return totale })
-  }
-
-  function azzeraImportati() {
-    if (!puoScrivere) { setErrore('Non hai i permessi per cancellare le prenotazioni.'); return }
-    setConfermaAzzera(false)
-    setAzzeramento(true)
-    setErrore(null)
-    setEsitoAzzera(null)
-
-    var esito = { prenotazioni: 0, clienti: 0 }
-
-    supabase.from('reservations').delete().eq('source', 'import_excel').select('id')
-      .then(function(rDel) {
-        if (rDel.error) throw rDel.error
-        esito.prenotazioni = rDel.data ? rDel.data.length : 0
-        return supabase.from('customers').select('id').eq('source', 'import_excel')
-      })
-      .then(function(rCust) {
-        if (rCust.error) throw rCust.error
-        var idsImport = (rCust.data || []).map(function(c) { return c.id })
-        if (idsImport.length === 0) { esito.clienti = 0; return null }
-        return supabase.from('reservations').select('customer_id').not('customer_id', 'is', null)
-          .then(function(rRef) {
-            if (rRef.error) throw rRef.error
-            var referenced = {}
-            ;(rRef.data || []).forEach(function(row) { if (row.customer_id) referenced[row.customer_id] = true })
-            var orfani = idsImport.filter(function(id) { return !referenced[id] })
-            if (orfani.length === 0) { esito.clienti = 0; return null }
-            return cancellaClientiABatch(orfani).then(function(n) { esito.clienti = n })
-          })
-      })
-      .then(function() {
-        setAzzeramento(false)
-        setEsitoAzzera(esito)
-      })
-      .catch(function(err) {
-        setAzzeramento(false)
-        setEsitoAzzera(null)
-        setErrore('Azzeramento non riuscito: ' + (err.message || 'errore'))
-      })
   }
 
   function trovaOCreaCliente(p, cacheTelefoni) {
@@ -468,49 +399,10 @@ export default function ImportPrenotazioniPage() {
           </div>
         )}
 
-        <div className="mt-8 border-t border-gray-200 pt-6">
-          <div className="text-sm font-semibold text-gray-800 mb-1">Reimport pulito</div>
-          <p className="text-xs text-gray-500 mb-3">
-            Cancella tutte le prenotazioni e le schede cliente importate da Excel. Le prenotazioni e i clienti
-            inseriti a mano NON vengono toccati. Utile prima di ricaricare i mesi corretti.
-          </p>
-
-          {esitoAzzera && (
-            <div className="mb-3 p-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-800">
-              Azzeramento completato: rimosse <span className="font-semibold">{esitoAzzera.prenotazioni}</span> prenotazioni
-              e <span className="font-semibold">{esitoAzzera.clienti}</span> schede cliente importate.
-            </div>
-          )}
-
-          {azzeramento ? (
-            <div className="inline-flex items-center gap-2 text-sm text-gray-600">
-              <Trash2 size={16} /> Azzeramento in corso...
-            </div>
-          ) : confermaAzzera ? (
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm text-red-700 font-medium">Sei sicuro? Cancello tutti i dati importati da Excel.</span>
-              <button
-                onClick={azzeraImportati}
-                className="inline-flex items-center gap-2 bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 text-sm font-medium"
-              >
-                <Trash2 size={16} /> Sì, azzera
-              </button>
-              <button
-                onClick={function() { setConfermaAzzera(false) }}
-                className="border border-gray-300 px-4 py-2 rounded-lg hover:bg-gray-50 text-sm font-medium text-gray-700"
-              >
-                Annulla
-              </button>
-            </div>
-          ) : (
-            <button
-              onClick={function() { setEsitoAzzera(null); setConfermaAzzera(true) }}
-              disabled={!puoScrivere}
-              className="inline-flex items-center gap-2 border border-red-300 text-red-700 px-4 py-2 rounded-lg hover:bg-red-50 text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <Trash2 size={16} /> Azzera dati importati
-            </button>
-          )}
+        <div className="mt-8 border-t border-gray-200 pt-6 text-xs text-gray-500">
+          «Azzera dati importati» è stato tolto (migrazione 68): cancellava tutte le prenotazioni importate
+          e le schede rimaste senza prenotazioni, senza guardare eventi, collegamenti e legami con Hotel in Cloud.
+          Le schede si eliminano una alla volta dalla scheda cliente.
         </div>
       </div>
     )

@@ -8,6 +8,7 @@ import { useAuth } from '../lib/AuthContext'
 import { caricaCopertiEventi, copertiDelTurno } from '../lib/eventiLettura'
 import ConfermaPin from '../components/ConfermaPin'
 import ComparazioneClienti, { cercaCandidatiForti } from '../components/ComparazioneClienti'
+import { caricaABlocchi } from '../lib/caricaABlocchi'
 
 // Etichette dei tre gruppi del pulsante "Camere". L'ordine lo decide gia'
 // hic_ospiti_giorno in SQL (ordine_gruppo 1/2/3): qui si traduce e basta.
@@ -329,9 +330,12 @@ function ReservationForm() {
     })
 
     // Cliente: prima lo cerco in anagrafica; se c'e', lo propongo selezionato.
+    // Solo schede attive (migrazione 68): una scheda unita a un'altra
+    // (lapide) o disattivata non va mai proposta.
     if (ben.nome && ben.cognome) {
       supabase.from('customers')
         .select('*')
+        .eq('is_active', true)
         .ilike('first_name', ben.nome)
         .ilike('last_name', ben.cognome)
         .limit(1)
@@ -517,14 +521,18 @@ function ReservationForm() {
     setFiltroLista('')
     if (listaClienti.length > 0) return
     setLoadingLista(true)
-    supabase.from('customers')
-      .select('id, first_name, last_name, phone, email, category')
-      .eq('is_active', true)
-      .order('last_name', { ascending: true })
-      .then(function(result) {
-        setLoadingLista(false)
-        if (!result.error) setListaClienti(result.data || [])
-      })
+    // A blocchi di 1.000 (migrazione 68): oltre le 1.000 schede attive
+    // Supabase taglierebbe in silenzio i cognomi in fondo all'alfabeto.
+    caricaABlocchi(function() {
+      return supabase.from('customers')
+        .select('id, first_name, last_name, phone, email, category')
+        .eq('is_active', true)
+        .order('last_name', { ascending: true })
+        .order('id', { ascending: true })
+    }).then(function(result) {
+      setLoadingLista(false)
+      if (!result.error) setListaClienti(result.data || [])
+    })
   }
 
   function selectCustomer(customer) {
